@@ -1,4 +1,4 @@
-import Parser
+import Parser hiding (expr)
 import RustEmitter
 
 main :: IO ()

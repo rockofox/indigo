@@ -1,9 +1,6 @@
 module Parser where
 
-import Data.List (intercalate)
-import Debug.Trace
 import Text.Parsec
-import Text.Parsec.Expr (Assoc (AssocLeft, AssocNone, AssocRight), Operator (Infix), buildExpressionParser)
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
 import Text.Parsec.Token qualified as Token
@@ -11,15 +8,15 @@ import Text.Parsec.Token qualified as Token
 languageDef :: Token.LanguageDef ()
 languageDef =
   emptyDef
-    { Token.commentStart = "{-",
-      Token.commentEnd = "-}",
-      Token.commentLine = "--",
-      Token.identStart = letter <|> char '_',
-      Token.identLetter = alphaNum <|> char '_',
-      Token.opStart = Token.opLetter languageDef,
-      Token.opLetter = oneOf "+-*/=",
-      Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do"],
-      Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||"]
+    { Token.commentStart = "{-"
+    , Token.commentEnd = "-}"
+    , Token.commentLine = "--"
+    , Token.identStart = letter <|> char '_'
+    , Token.identLetter = alphaNum <|> char '_'
+    , Token.opStart = Token.opLetter languageDef
+    , Token.opLetter = oneOf "+-*/="
+    , Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do", "end"]
+    , Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||"]
     }
 
 data Expr
@@ -95,7 +92,7 @@ ifExpr = do
 doBlock :: Parser Expr
 doBlock = do
   reserved "do"
-  DoBlock <$> sepEndBy1 expr (reservedOp ";")
+  DoBlock <$> sepEndBy1 expr (reservedOp ";") <* reserved "end"
 
 parseExpr :: String -> Either ParseError Expr
 parseExpr = parse expr ""
@@ -129,6 +126,7 @@ var = do
   notFollowedBy (reservedOp "(")
   return $ Var name
 
+term :: Parser Expr
 term =
   parens expr
     -- <|> fmap Var identifier
