@@ -1,5 +1,5 @@
+import Analyzer
 import Parser hiding (expr)
-import RustEmitter
 
 main :: IO ()
 main = do
@@ -7,6 +7,6 @@ main = do
   case parseProgram input of
     Left err -> putStrLn $ "Parse error: " ++ show err
     Right expr -> putStrLn $ "Parsed expression: " ++ show expr
-  putStrLn $ compileProgramToRust $ case parseProgram input of
+  putStrLn $ analyseProgram $ case parseProgram input of
     Left err -> error $ "Parse error: " ++ show err
     Right expr -> expr

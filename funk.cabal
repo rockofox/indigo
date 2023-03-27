@@ -62,7 +62,8 @@ executable funk
 
     -- Modules included in this executable, other than Main.
     other-modules: Parser,
-                   RustEmitter
+                   Analyzer,
+                   JSEmitter
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

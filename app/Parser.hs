@@ -8,15 +8,15 @@ import Text.Parsec.Token qualified as Token
 languageDef :: Token.LanguageDef ()
 languageDef =
   emptyDef
-    { Token.commentStart = "{-"
-    , Token.commentEnd = "-}"
-    , Token.commentLine = "--"
-    , Token.identStart = letter <|> char '_'
-    , Token.identLetter = alphaNum <|> char '_'
-    , Token.opStart = Token.opLetter languageDef
-    , Token.opLetter = oneOf "+-*/="
-    , Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do", "end"]
-    , Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||"]
+    { Token.commentStart = "{-",
+      Token.commentEnd = "-}",
+      Token.commentLine = "--",
+      Token.identStart = letter <|> char '_',
+      Token.identLetter = alphaNum <|> char '_',
+      Token.opStart = Token.opLetter languageDef,
+      Token.opLetter = oneOf "+-*/=",
+      Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do", "end", "is"],
+      Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::"]
     }
 
 data Expr
@@ -28,6 +28,7 @@ data Expr
   | Let String Expr Expr
   | FuncDef String [String] Expr
   | FuncCall String [Expr]
+  | FuncDec String [String]
   | DoBlock [Expr]
   deriving
     ( Show
@@ -54,6 +55,29 @@ parens = Token.parens lexer
 expr :: Parser Expr
 -- expr = buildExpressionParser table term <?> "expression"
 expr = term
+
+validType :: Parser String
+validType =
+  do
+    reserved "Int"
+    return "Int"
+    <|> do
+      reserved "Bool"
+      return "Bool"
+    <|> do
+      reserved "String"
+      return "String"
+    <|> do
+      reserved "Nothing"
+      return "Nothing"
+
+funcDec :: Parser Expr
+funcDec = do
+  reserved "func"
+  name <- identifier
+  reservedOp "::"
+  types <- many validType
+  return $ FuncDec name types
 
 funcDef :: Parser Expr
 funcDef = do
@@ -131,6 +155,7 @@ term =
   parens expr
     -- <|> fmap Var identifier
     -- <|> try var
+    <|> try funcDec
     <|> funcDef
     <|> doBlock
     <|> funcCall
