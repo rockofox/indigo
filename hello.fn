@@ -2,6 +2,6 @@ func x :: Int;
 func x y = 1;
 func main :: Nothing;
 func main = do
-  x 1 2;
+  x 1;
   y 1 2;
 end
