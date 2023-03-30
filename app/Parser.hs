@@ -16,7 +16,7 @@ languageDef =
       Token.opStart = Token.opLetter languageDef,
       Token.opLetter = oneOf "+-*/=",
       Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do", "end", "is"],
-      Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::"]
+      Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::", "->"]
     }
 
 data Expr
@@ -76,7 +76,7 @@ funcDec = do
   reserved "func"
   name <- identifier
   reservedOp "::"
-  types <- many validType
+  types <- sepBy validType (reservedOp "->")
   return $ FuncDec name types
 
 funcDef :: Parser Expr
