@@ -1,6 +1,8 @@
-func x :: Bool;
-func x y = True;
-func main :: Nothing;
-func main = do
-  x 1;
+extern javascript console.log :: String -> Nothing;
+x :: Bool -> Bool;
+x y = True;
+main :: Nothing;
+main = do
+  x True;
+  console.log "Hello, World!";
 end

@@ -1,5 +1,6 @@
 module Parser where
 
+import Debug.Trace (trace, traceShow)
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
@@ -15,7 +16,7 @@ languageDef =
       Token.identLetter = alphaNum <|> char '_',
       Token.opStart = Token.opLetter languageDef,
       Token.opLetter = oneOf "+-*/=",
-      Token.reservedNames = ["func", "let", "in", "if", "then", "else", "True", "False", "do", "end", "is"],
+      Token.reservedNames = ["func", "let", "in", "if", "then", "else", "do", "end", "is", "extern"],
       Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::", "->"]
     }
 
@@ -23,13 +24,15 @@ data Expr
   = Var String
   | BoolLit Bool
   | IntLit Integer
+  | StringLit String
   | BinOp String Expr Expr
   | If Expr Expr Expr
   | Let String Expr Expr
   | FuncDef String [String] Expr
   | FuncCall String [Expr]
-  | FuncDec String [String]
+  | FuncDec {fname :: String, types :: [String]}
   | DoBlock [Expr]
+  | ExternDec String String [String] -- extern javascript console.log s;
   deriving
     ( Show
     )
@@ -39,6 +42,9 @@ lexer = Token.makeTokenParser languageDef
 
 identifier :: Parser String
 identifier = Token.identifier lexer
+
+lexeme :: Parser a -> Parser a
+lexeme = Token.lexeme lexer
 
 integer :: Parser Integer
 integer = Token.integer lexer
@@ -70,30 +76,51 @@ validType =
     <|> do
       reserved "Nothing"
       return "Nothing"
+    <|> do
+      reserved "Any"
+      return "Any"
+    <?> "type"
+
+stringLit :: Parser Expr
+stringLit = do
+  _ <- char '"'
+  str <- many (noneOf "\"")
+  _ <- char '"'
+  return $ StringLit str
+
+externDec :: Parser Expr
+externDec = do
+  reserved "extern"
+  lang <- identifier
+  name <- many1 (noneOf " \t") <* reservedOp " "
+  reservedOp "::"
+  args <- sepBy validType (reservedOp "->")
+  return $ ExternDec lang name args
 
 funcDec :: Parser Expr
 funcDec = do
-  reserved "func"
   name <- identifier
   reservedOp "::"
-  types <- sepBy validType (reservedOp "->")
+  types <- sepBy1 validType (reservedOp "->")
   return $ FuncDec name types
 
 funcDef :: Parser Expr
 funcDef = do
-  reserved "func"
-  name <- identifier
-  args <- many identifier
+  name <- identifier <?> "function name"
+  args <- many identifier <?> "function formal parameters"
   reservedOp "="
   FuncDef name args <$> expr
 
 funcCall :: Parser Expr
-funcCall = do
-  name <- identifier
-  -- reservedOp "("
-  args <- many expr
-  -- reservedOp ")"
-  return $ FuncCall name args
+funcCall =
+  trace "Parsing function call" $ do
+    name <- lexeme $ try $ do
+      name <- many1 (alphaNum <|> char '.' <|> char '_')
+      reservedOp " "
+      notFollowedBy (oneOf "=") -- TODO: Refactor out, consider all reserved words
+      return name
+    args <- many expr <?> "function arguments"
+    return $ FuncCall name args
 
 letExpr :: Parser Expr
 letExpr = do
@@ -126,24 +153,6 @@ newtype Program = Program [Expr] deriving (Show)
 parseProgram :: String -> Either ParseError Program
 parseProgram = parse (Program <$> sepEndBy1 expr (reservedOp ";")) ""
 
--- table =
---   [ [ Infix (reservedOp "*" >> return (BinOp "*")) AssocLeft,
---       Infix (reservedOp "/" >> return (BinOp "/")) AssocLeft
---     ],
---     [ Infix (reservedOp "+" >> return (BinOp "+")) AssocLeft,
---       Infix (reservedOp "-" >> return (BinOp "-")) AssocLeft
---     ],
---     [ Infix (reservedOp "==" >> return (BinOp "==")) AssocNone,
---       Infix (reservedOp "<" >> return (BinOp "<")) AssocNone,
---       Infix (reservedOp ">" >> return (BinOp ">")) AssocNone,
---       Infix (reservedOp "<=" >> return (BinOp "<=")) AssocNone,
---       Infix (reservedOp ">=" >> return (BinOp ">=")) AssocNone
---     ],
---     [ Infix (reservedOp "&&" >> return (BinOp "&&")) AssocRight,
---       Infix (reservedOp "||" >> return (BinOp "||")) AssocRight
---     ]
---   ]
-
 var :: Parser Expr
 var = do
   name <- identifier
@@ -155,12 +164,14 @@ term =
   parens expr
     -- <|> fmap Var identifier
     -- <|> try var
-    <|> try funcDec
-    <|> funcDef
-    <|> doBlock
-    <|> funcCall
+    <|> stringLit
     <|> (reserved "True" >> return (BoolLit True))
     <|> (reserved "False" >> return (BoolLit False))
+    <|> externDec
+    <|> try funcDec
+    <|> try funcDef
+    <|> doBlock
+    <|> funcCall
     <|> fmap IntLit integer
     <|> letExpr
     <|> ifExpr

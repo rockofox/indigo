@@ -81,4 +81,6 @@ executable funk
 
     -- Language Extensions
     default-extensions: OverloadedStrings,
-                        ImportQualifiedPost
+                        ImportQualifiedPost,
+                        DisambiguateRecordFields,
+                        DuplicateRecordFields
