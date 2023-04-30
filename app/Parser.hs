@@ -1,6 +1,5 @@
 module Parser where
 
-import Debug.Trace (trace, traceShow)
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
@@ -9,15 +8,15 @@ import Text.Parsec.Token qualified as Token
 languageDef :: Token.LanguageDef ()
 languageDef =
   emptyDef
-    { Token.commentStart = "{-",
-      Token.commentEnd = "-}",
-      Token.commentLine = "--",
-      Token.identStart = letter <|> char '_',
-      Token.identLetter = alphaNum <|> char '_',
-      Token.opStart = Token.opLetter languageDef,
-      Token.opLetter = oneOf "+-*/=",
-      Token.reservedNames = ["func", "let", "in", "if", "then", "else", "do", "end", "is", "extern"],
-      Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::", "->"]
+    { Token.commentStart = "{-"
+    , Token.commentEnd = "-}"
+    , Token.commentLine = "--"
+    , Token.identStart = letter <|> char '_'
+    , Token.identLetter = alphaNum <|> char '_'
+    , Token.opStart = Token.opLetter languageDef
+    , Token.opLetter = oneOf "+-*/="
+    , Token.reservedNames = ["func", "let", "in", "if", "then", "else", "do", "end", "is", "extern"]
+    , Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::", "->"]
     }
 
 data Expr
@@ -112,15 +111,14 @@ funcDef = do
   FuncDef name args <$> expr
 
 funcCall :: Parser Expr
-funcCall =
-  trace "Parsing function call" $ do
-    name <- lexeme $ try $ do
-      name <- many1 (alphaNum <|> char '.' <|> char '_')
-      reservedOp " "
-      notFollowedBy (oneOf "=") -- TODO: Refactor out, consider all reserved words
-      return name
-    args <- many expr <?> "function arguments"
-    return $ FuncCall name args
+funcCall = do
+  name <- lexeme $ try $ do
+    name <- many1 (alphaNum <|> char '.' <|> char '_')
+    reservedOp " "
+    notFollowedBy (oneOf "=") -- TODO: Refactor out, consider all reserved words
+    return name
+  args <- many expr <?> "function arguments"
+  return $ FuncCall name args
 
 letExpr :: Parser Expr
 letExpr = do
