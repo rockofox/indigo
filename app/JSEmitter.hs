@@ -1,4 +1,4 @@
-module JSEmitter where
+module JSEmitter (compileProgramToJS) where
 
 import Data.List (intercalate)
 import Parser hiding (expr, exprs, types)
@@ -7,9 +7,13 @@ compileProgramToJS :: Program -> String
 compileProgramToJS (Program exprs) = do
   intercalate ";\n" (map compileExprToJS exprs) ++ "\nmain();"
  where
-  callInReverse = map (\(ExternDec _ name _) -> name) functions
+  externFunctions = [ x | x@(ExternDec language _ _) <- exprs ]
+  externNormal = map (\(ExternDec _ name _) -> name) functions
     where
-      functions = [ x | x@(ExternDec language _ _) <- exprs, language == "jsrev" ]
+      functions = filter (\(ExternDec language _ _) -> language == "js") externFunctions
+  externReverse = map (\(ExternDec _ name _) -> name) functions
+    where
+      functions = filter (\(ExternDec language _ _) -> language == "jsrev") externFunctions
   compileExprToJS :: Expr -> String
   compileExprToJS (Var name) = name
   compileExprToJS (BoolLit True) = "true"
@@ -29,14 +33,18 @@ compileProgramToJS (Program exprs) = do
     "let " ++ name ++ " = " ++ compileExprToJS expr ++ ";\n" ++ compileExprToJS body
   compileExprToJS (DoBlock body) = do
     "{\n" ++ intercalate ";\n" (map compileExprToJS body) ++ ";\n}"
-  compileExprToJS (FuncDef name args body) =
-    "const " ++ name ++ " = (" ++ intercalate ", " args ++ ") => " ++ compileExprToJS body
+  compileExprToJS (FuncDef name args body)
+    | not (null args) = "const " ++ name ++ " = " ++ concatMap (\x -> '(' : x ++ ")=>") args ++ compileExprToJS body
+    | otherwise = "const " ++ name ++ " = ()=>" ++ compileExprToJS body
   compileExprToJS (FuncDec name types) =
     "// function " ++ name ++ "(" ++ intercalate ", " types ++ ")"
-  compileExprToJS (FuncCall name args) =
-    if name `elem` callInReverse then
-       intercalate ","  (map compileExprToJS args) ++ "." ++ name ++ "()"
-    else name ++ "(" ++ intercalate ", " (map compileExprToJS args) ++ ")"
+  compileExprToJS (FuncCall name args)
+    | name `elem` externReverse =
+      intercalate ","  (map compileExprToJS args) ++ "." ++ name ++ "()"
+    | name `elem` externNormal =
+      name ++ "(" ++ intercalate ", " (map compileExprToJS args) ++ ")"
+    | otherwise =
+      "(" ++ name ++ concatMap (\x -> '(' : compileExprToJS x ++ ")") args ++ ")"
   compileExprToJS (ExternDec language name types) =
     "// extern " ++ language ++ " function " ++ name ++ "(" ++ intercalate ", " types ++ ")"
   compileExprToJS (Add a b) = compileExprToJS a ++ " + " ++ compileExprToJS b
