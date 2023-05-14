@@ -1,8 +1,13 @@
-extern javascript console.log :: String -> Nothing;
+extern js console.log :: String -> Nothing;
+extern jsrev toString :: Any -> Any;
 x :: Bool -> Bool;
 x y = True;
+add :: Int -> Int -> Int;
+add a b = a+b;
 main :: Nothing;
 main = do
   x True;
   console.log "Hello, World!";
+  console.log "4 + 6 equals to:";
+  console.log toString add 4 6;
 end

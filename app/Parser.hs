@@ -1,6 +1,9 @@
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 module Parser where
 
+import Data.Functor.Identity qualified
 import Text.Parsec
+import Text.Parsec.Expr (Assoc (AssocLeft), Operator (Infix, Prefix, Postfix), buildExpressionParser)
 import Text.Parsec.Language (emptyDef)
 import Text.Parsec.String (Parser)
 import Text.Parsec.Token qualified as Token
@@ -32,6 +35,19 @@ data Expr
   | FuncDec {fname :: String, types :: [String]}
   | DoBlock [Expr]
   | ExternDec String String [String] -- extern javascript console.log s;
+  | Add Expr Expr
+  | Sub Expr Expr
+  | Mul Expr Expr
+  | Div Expr Expr
+  | Eq Expr Expr
+  | Neq Expr Expr
+  | Lt Expr Expr
+  | Gt Expr Expr
+  | Le Expr Expr
+  | Ge Expr Expr
+  | And Expr Expr
+  | Or Expr Expr
+  | Not Expr
   deriving
     ( Show
     )
@@ -57,9 +73,21 @@ reservedOp = Token.reservedOp lexer
 parens :: Parser a -> Parser a
 parens = Token.parens lexer
 
+binOpTable :: [[Operator String () Data.Functor.Identity.Identity Expr]]
+binOpTable =
+  [ [binary "+" Add AssocLeft, binary "-" Sub AssocLeft]
+  , [binary "*" Mul AssocLeft, binary "/" Div AssocLeft]
+  , [binary "==" Eq AssocLeft, binary "<" Lt AssocLeft, binary ">" Gt AssocLeft, binary "<=" Le AssocLeft, binary ">=" Ge AssocLeft]
+  , [binary "&&" And AssocLeft, binary "||" Or AssocLeft]
+  , [prefix "!" Not]
+  ]
+
+binary name fun = Infix (do reservedOp name; return fun)
+prefix  name fun       = Prefix (do{ reservedOp name; return fun })
+postfix name fun       = Postfix (do{ reservedOp name; return fun })
+
 expr :: Parser Expr
--- expr = buildExpressionParser table term <?> "expression"
-expr = term
+expr = buildExpressionParser binOpTable term <?> "expression"
 
 validType :: Parser String
 validType =
@@ -154,14 +182,13 @@ parseProgram = parse (Program <$> sepEndBy1 expr (reservedOp ";")) ""
 var :: Parser Expr
 var = do
   name <- identifier
-  notFollowedBy (reservedOp "(")
+  notFollowedBy (oneOf "=() ") -- TODO: Refactor out, consider all reserved words
   return $ Var name
 
 term :: Parser Expr
 term =
   parens expr
     -- <|> fmap Var identifier
-    -- <|> try var
     <|> stringLit
     <|> (reserved "True" >> return (BoolLit True))
     <|> (reserved "False" >> return (BoolLit False))
@@ -169,7 +196,8 @@ term =
     <|> try funcDec
     <|> try funcDef
     <|> doBlock
-    <|> funcCall
     <|> fmap IntLit integer
+    <|> funcCall
     <|> letExpr
     <|> ifExpr
+    <|> var

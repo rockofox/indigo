@@ -1,11 +1,13 @@
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-unused-matches #-}
 
 module Analyzer (analyseProgram) where
 
 import Control.Monad (unless, when)
-import Data.List (intercalate, partition)
+import Data.List (intercalate, partition, elemIndex)
 import Parser (Expr (..), Program (..))
+import Debug.Trace (trace)
 
 isFuncDef :: Expr -> Bool
 isFuncDef (FuncDef{}) = True
@@ -34,8 +36,21 @@ getType (If _ thenExpr _) = getType thenExpr
 getType (Let _ _ body) = getType body
 getType (FuncDef _ _ body) = getType body
 getType (FuncDec _ types) = last types
-getType (FuncCall _ _) = "Int"
+getType (FuncCall name _) = name
 getType (ExternDec _ _ types) = last types
+getType (Add a b) = getType a
+getType (Sub a b) = getType a
+getType (Mul a b) = getType a
+getType (Div a b) = getType a
+getType (Eq a b) = "Bool"
+getType (Neq a b) = "Bool"
+getType (Lt a b) = "Bool"
+getType (Gt a b) = "Bool"
+getType (Le a b) = "Bool"
+getType (Ge a b) = "Bool"
+getType (And a b) = "Bool"
+getType (Or a b) = "Bool"
+getType (Not a) = "Bool"
 
 warning :: String -> String
 warning msg = "warn: " ++ msg
@@ -73,21 +88,27 @@ analyseProgram (Program exprs) targetLanguage = do
     --   else ""
     analyseExpression body
   analyseExpression (FuncCall name args) = do
-    -- Make sure all the types are correct
-    let funcDec = head' $ filter (\(FuncDec name' _) -> name == name') funcDecs
-    let externDec = head' $ filter (\(ExternDec _ name' _) -> name == name') externDecs
-    let funcTypes = case funcDec of
-          Just (FuncDec _ types) -> types
-          _ -> case externDec of
-            Just (ExternDec _ _ types) -> types
-            _ -> error "Impossible"
-    let argTypes = map getType args
+    let argTypes = map (\arg -> case arg of
+          FuncCall name _ -> getFunctionType arg
+          _ -> getType arg) args
+    let funcTypes = getFuncType name
     when (length argTypes /= length funcTypes - 1) (error ("Function call to function with wrong number of arguments: " ++ name))
-    unless (all (\(argType, funcType) -> argType == funcType || funcType == "Nothing") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name))
+    unless (all (\(argType, funcType) -> argType == funcType || funcType == "Nothing" || argType == "Any") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
     ""
+    where
+      getFuncType name = do
+        let funcDec = head' $ filter (\(FuncDec name' _) -> name == name') funcDecs
+        let externDec = head' $ filter (\(ExternDec _ name' _) -> name == name') externDecs
+        case funcDec of
+              Just (FuncDec _ types) -> types
+              _ -> case externDec of
+                Just (ExternDec _ _ types) -> types
+                _ -> error "Impossible"
+      getFunctionType (FuncCall name _) = last $ getFuncType name
+      getFunctionType _ = error "Can't get type of non-function call"
   analyseExpression (DoBlock exprs) = intercalate "" (map analyseExpression exprs)
   analyseExpression (ExternDec lang name types) = do
-    unless (lang == targetLanguage) (error ("Extern for wrong language: " ++ lang))
+    -- FIXME: jsrev unless (lang == targetLanguage) (error ("Extern for wrong language: " ++ lang))
     -- "// extern " ++ lang ++ " " ++ name ++ " :: " ++ intercalate " -> " types
     ""
   analyseExpression _ = ""
