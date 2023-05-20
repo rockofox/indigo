@@ -60,3 +60,6 @@ compileProgramToJS (Program exprs) = do
     compileExprToJS (And a b) = compileExprToJS a ++ " && " ++ compileExprToJS b
     compileExprToJS (Or a b) = compileExprToJS a ++ " || " ++ compileExprToJS b
     compileExprToJS (Not a) = "!" ++ compileExprToJS a
+    compileExprToJS (ModernFunc dec def) = do
+      compileExprToJS dec ++ "\n" ++ compileExprToJS def
+    compileExprToJS Placeholder = ""

@@ -1,15 +1,32 @@
-# Hello World
-extern js console.log :: String -> Nothing
 extern jsrev toString :: Any -> Any
+extern js process.stdout.write :: String -> Nothing
+extern js process.stdout.clearLine :: Nothing
 
+print str : String => Nothing = do
+  process.stdout.write str
+end
+
+println str : String => Nothing = do
+  print str
+  print "\n"
+end
+
+# Haskell-style functions
 x :: Bool -> Bool
 x y = True
 
-add :: Int -> Int -> Int
-add x y = x + y
+add x : Int -> y : Int => Int = x + y
 
-main :: Nothing
-main = do
-  console.log "2 + 3 = "
-  console.log (toString (add 2 3))
+sayHello => Nothing = do
+  println "Hello World!"
+end
+
+greet name : String => Nothing = do
+  print "Hello "
+  print name
+end
+
+main => Nothing = do
+  sayHello ()
+  greet "John"
 end

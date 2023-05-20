@@ -22,6 +22,7 @@ import Text.Megaparsec
   ( MonadParsec (eof, takeWhile1P, try),
     ParseErrorBundle,
     Parsec,
+    optional,
     parse,
     (<?>),
   )
@@ -47,6 +48,7 @@ data Expr
   | FuncDef String [String] Expr
   | FuncCall String [Expr]
   | FuncDec {fname :: String, types :: [String]}
+  | ModernFunc Expr Expr
   | DoBlock [Expr]
   | ExternDec String String [String]
   | Add Expr Expr
@@ -62,6 +64,7 @@ data Expr
   | And Expr Expr
   | Or Expr Expr
   | Not Expr
+  | Placeholder
   deriving
     ( Show
     )
@@ -155,6 +158,7 @@ validType =
 stringLit :: Parser String
 stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 
+-- TODO: take a look at this in context of modern function syntax and consider making them consistent
 externDec :: Parser Expr
 externDec = do
   symbol "extern"
@@ -210,6 +214,26 @@ doBlock = do
   symbol "end"
   return $ DoBlock exprs
 
+modernFunction :: Parser Expr
+modernFunction = do
+  name <- identifier
+  (args, argTypes) <-
+    unzip <$> many do
+      arg <- identifier
+      symbol ":"
+      argType <- validType
+      optional $ symbol "->"
+      return (arg, argType)
+
+  symbol "=>"
+  returnType <- validType <?> "return type"
+  symbol "="
+  body <- expr
+  return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
+
+placeholder :: Parser Expr
+placeholder = symbol "()" >> return Placeholder
+
 newtype Program = Program [Expr] deriving (Show)
 
 parseProgram :: Text -> Either (ParseErrorBundle Text Void) Program
@@ -228,13 +252,15 @@ var = do
 term :: Parser Expr
 term =
   choice
-    [ parens expr,
+    [ placeholder,
+      parens expr,
       fmap IntLit integer,
       fmap StringLit stringLit,
       symbol "True" >> return (BoolLit True),
       symbol "False" >> return (BoolLit False),
       try externDec,
       doBlock,
+      try modernFunction,
       try funcDec,
       try funcDef,
       try funcCall,
