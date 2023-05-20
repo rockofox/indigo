@@ -1,26 +1,40 @@
-{-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# LANGUAGE BlockArguments #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
+
 module Parser where
 
-import Data.Functor.Identity qualified
-import Text.Parsec
-import Text.Parsec.Expr (Assoc (AssocLeft), Operator (Infix, Prefix, Postfix), buildExpressionParser)
-import Text.Parsec.Language (emptyDef)
-import Text.Parsec.String (Parser)
-import Text.Parsec.Token qualified as Token
+import Control.Monad (void)
+import Control.Monad.Combinators
+  ( between,
+    choice,
+    many,
+    manyTill,
+    sepBy,
+    sepBy1,
+    sepEndBy,
+    some,
+    (<|>),
+  )
+import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
+import Data.Text (Text)
+import Data.Void (Void)
+import Text.Megaparsec
+  ( MonadParsec (eof, takeWhile1P, try),
+    ParseErrorBundle,
+    Parsec,
+    parse,
+    (<?>),
+  )
+import Text.Megaparsec.Char
+  ( alphaNumChar,
+    char,
+    letterChar,
+    newline,
+    space1,
+  )
+import Text.Megaparsec.Char.Lexer qualified as L
 
-languageDef :: Token.LanguageDef ()
-languageDef =
-  emptyDef
-    { Token.commentStart = "{-"
-    , Token.commentEnd = "-}"
-    , Token.commentLine = "--"
-    , Token.identStart = letter <|> char '_'
-    , Token.identLetter = alphaNum <|> char '_'
-    , Token.opStart = Token.opLetter languageDef
-    , Token.opLetter = oneOf "+-*/="
-    , Token.reservedNames = ["func", "let", "in", "if", "then", "else", "do", "end", "is", "extern"]
-    , Token.reservedOpNames = ["+", "-", "*", "/", "=", "==", "<", ">", "<=", ">=", "&&", "||", "::", "->"]
-    }
+type Parser = Parsec Void Text
 
 data Expr
   = Var String
@@ -34,7 +48,7 @@ data Expr
   | FuncCall String [Expr]
   | FuncDec {fname :: String, types :: [String]}
   | DoBlock [Expr]
-  | ExternDec String String [String] -- extern javascript console.log s;
+  | ExternDec String String [String]
   | Add Expr Expr
   | Sub Expr Expr
   | Mul Expr Expr
@@ -52,152 +66,179 @@ data Expr
     ( Show
     )
 
-lexer :: Token.TokenParser ()
-lexer = Token.makeTokenParser languageDef
-
-identifier :: Parser String
-identifier = Token.identifier lexer
-
-lexeme :: Parser a -> Parser a
-lexeme = Token.lexeme lexer
-
-integer :: Parser Integer
-integer = Token.integer lexer
-
-reserved :: String -> Parser ()
-reserved = Token.reserved lexer
-
-reservedOp :: String -> Parser ()
-reservedOp = Token.reservedOp lexer
-
-parens :: Parser a -> Parser a
-parens = Token.parens lexer
-
-binOpTable :: [[Operator String () Data.Functor.Identity.Identity Expr]]
+binOpTable :: [[Operator Parser Expr]]
 binOpTable =
-  [ [binary "+" Add AssocLeft, binary "-" Sub AssocLeft]
-  , [binary "*" Mul AssocLeft, binary "/" Div AssocLeft]
-  , [binary "==" Eq AssocLeft, binary "<" Lt AssocLeft, binary ">" Gt AssocLeft, binary "<=" Le AssocLeft, binary ">=" Ge AssocLeft]
-  , [binary "&&" And AssocLeft, binary "||" Or AssocLeft]
-  , [prefix "!" Not]
+  [ [prefix "!" Not],
+    [binary "+" Add, binary "-" Sub],
+    [binary "*" Mul, binary "/" Div],
+    [binary "==" Eq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge],
+    [binary "&&" And, binary "||" Or]
   ]
 
-binary name fun = Infix (do reservedOp name; return fun)
-prefix  name fun       = Prefix (do{ reservedOp name; return fun })
-postfix name fun       = Postfix (do{ reservedOp name; return fun })
+binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
+binary name f = InfixL (f <$ symbol name)
+
+prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
+prefix name f = Prefix (f <$ symbol name)
+postfix name f = Postfix (f <$ symbol name)
+
+parens :: Parser a -> Parser a
+parens = between (symbol "(") (symbol ")")
+
+lineComment, blockComment :: Parser ()
+lineComment = L.skipLineComment "#"
+blockComment = L.skipBlockComment "/*" "*/"
+
+sc :: Parser ()
+sc = L.space (void $ takeWhile1P Nothing f) lineComment blockComment
+  where
+    f x = x == ' ' || x == '\t'
+
+scn :: Parser ()
+scn = L.space space1 lineComment blockComment
+
+newline' :: Parser ()
+newline' = newline >> scn
+
+lexeme :: Parser a -> Parser a
+lexeme = L.lexeme sc
+
+symbol :: Text -> Parser Text
+symbol = L.symbol sc
+
+rws :: [String] -- list of reserved words
+rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or"]
+
+identifier :: Parser String
+identifier = (lexeme . try) (p >>= check)
+  where
+    p = (:) <$> letterChar <*> many alphaNumChar
+    check x =
+      if x `elem` rws
+        then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+        else return x
+
+integer :: Parser Integer
+integer = lexeme L.decimal
+
+foreignIdentifier :: Parser String
+foreignIdentifier = (lexeme . try) (p >>= check)
+  where
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '.')
+    check x =
+      if x `elem` rws
+        then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+        else return x
 
 expr :: Parser Expr
-expr = buildExpressionParser binOpTable term <?> "expression"
+expr = makeExprParser term binOpTable
 
 validType :: Parser String
 validType =
   do
-    reserved "Int"
+    symbol "Int"
     return "Int"
     <|> do
-      reserved "Bool"
+      symbol "Bool"
       return "Bool"
     <|> do
-      reserved "String"
+      symbol "String"
       return "String"
     <|> do
-      reserved "Nothing"
+      symbol "Nothing"
       return "Nothing"
     <|> do
-      reserved "Any"
+      symbol "Any"
       return "Any"
     <?> "type"
 
-stringLit :: Parser Expr
-stringLit = do
-  _ <- char '"'
-  str <- many (noneOf "\"")
-  _ <- char '"'
-  return $ StringLit str
+stringLit :: Parser String
+stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 
 externDec :: Parser Expr
 externDec = do
-  reserved "extern"
+  symbol "extern"
   lang <- identifier
-  name <- many1 (noneOf " \t") <* reservedOp " "
-  reservedOp "::"
-  args <- sepBy validType (reservedOp "->")
+  name <- foreignIdentifier
+  symbol "::"
+  args <- sepBy validType (symbol "->")
   return $ ExternDec lang name args
 
 funcDec :: Parser Expr
 funcDec = do
   name <- identifier
-  reservedOp "::"
-  types <- sepBy1 validType (reservedOp "->")
-  return $ FuncDec name types
+  symbol "::"
+  argTypes <- sepBy1 validType (symbol "->")
+  return $ FuncDec name argTypes
 
 funcDef :: Parser Expr
 funcDef = do
   name <- identifier <?> "function name"
-  args <- many identifier <?> "function formal parameters"
-  reservedOp "="
-  FuncDef name args <$> expr
+  args <- many identifier <?> "function arguments"
+  symbol "="
+  FuncDef name args <$> expr <?> "function body"
 
 funcCall :: Parser Expr
 funcCall = do
-  name <- lexeme $ try $ do
-    name <- many1 (alphaNum <|> char '.' <|> char '_')
-    reservedOp " "
-    notFollowedBy (oneOf "=") -- TODO: Refactor out, consider all reserved words
-    return name
-  args <- many expr <?> "function arguments"
+  name <- foreignIdentifier
+  args <- some expr
   return $ FuncCall name args
 
 letExpr :: Parser Expr
 letExpr = do
-  reserved "let"
+  symbol "let"
   name <- identifier
-  reservedOp "="
+  symbol "="
   val <- expr
-  reserved "in"
+  symbol "in"
   Let name val <$> expr
 
 ifExpr :: Parser Expr
 ifExpr = do
-  reserved "if"
+  symbol "if"
   cond <- expr
-  reserved "then"
+  symbol "then"
   thenExpr <- expr
-  reserved "else"
+  symbol "else"
   If cond thenExpr <$> expr
 
 doBlock :: Parser Expr
 doBlock = do
-  reserved "do"
-  DoBlock <$> sepEndBy1 expr (reservedOp ";") <* reserved "end"
-
-parseExpr :: String -> Either ParseError Expr
-parseExpr = parse expr ""
+  symbol "do"
+  newline'
+  exprs <- lines'
+  symbol "end"
+  return $ DoBlock exprs
 
 newtype Program = Program [Expr] deriving (Show)
 
-parseProgram :: String -> Either ParseError Program
-parseProgram = parse (Program <$> sepEndBy1 expr (reservedOp ";")) ""
+parseProgram :: Text -> Either (ParseErrorBundle Text Void) Program
+parseProgram = parse program ""
+
+lines' :: Parser [Expr]
+lines' = expr `sepEndBy` newline'
+
+program :: Parser Program
+program = Program <$> between scn eof lines'
 
 var :: Parser Expr
 var = do
-  name <- identifier
-  notFollowedBy (oneOf "=() ") -- TODO: Refactor out, consider all reserved words
-  return $ Var name
+  Var <$> identifier
 
 term :: Parser Expr
 term =
-  parens expr
-    -- <|> fmap Var identifier
-    <|> stringLit
-    <|> (reserved "True" >> return (BoolLit True))
-    <|> (reserved "False" >> return (BoolLit False))
-    <|> externDec
-    <|> try funcDec
-    <|> try funcDef
-    <|> doBlock
-    <|> fmap IntLit integer
-    <|> funcCall
-    <|> letExpr
-    <|> ifExpr
-    <|> var
+  choice
+    [ parens expr,
+      fmap IntLit integer,
+      fmap StringLit stringLit,
+      symbol "True" >> return (BoolLit True),
+      symbol "False" >> return (BoolLit False),
+      try externDec,
+      doBlock,
+      try funcDec,
+      try funcDef,
+      try funcCall,
+      letExpr,
+      ifExpr,
+      var
+    ]

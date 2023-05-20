@@ -71,7 +71,9 @@ executable funk
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.16.4.0,
         containers,
-        parsec,
+        text,
+        megaparsec  >= 7.0   && < 10.0,
+        parser-combinators,
         unix
 
     -- Directories containing source files.
