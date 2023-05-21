@@ -5,8 +5,7 @@
 module Analyzer (analyseProgram) where
 
 import Control.Monad (unless, when)
-import Data.List (elemIndex, intercalate, partition)
-import Debug.Trace (trace)
+import Data.List (intercalate, partition)
 import Parser (Expr (..), Program (..))
 
 isFuncDef :: Expr -> Bool
@@ -55,7 +54,7 @@ getType (Ge a b) = "Bool"
 getType (And a b) = "Bool"
 getType (Or a b) = "Bool"
 getType (Not a) = "Bool"
-getType Placeholder = "Nothing"
+getType Placeholder = "IO"
 
 warning :: String -> String
 warning msg = "warn: " ++ msg
@@ -86,7 +85,7 @@ analyseProgram (Program exprs) targetLanguage = do
       let funcTypes = case funcDec of
             FuncDec _ types -> types
             _ -> error "Impossible"
-      unless (last funcTypes == getType body || last funcTypes == "Nothing") (error ("Function definition for function with wrong return type: " ++ name))
+      unless (last funcTypes == getType body || last funcTypes == "IO") (error ("Function definition for function with wrong return type: " ++ name))
       analyseExpression body
     analyseExpression (FuncCall name args) = do
       let argTypes =
@@ -98,7 +97,7 @@ analyseProgram (Program exprs) targetLanguage = do
               args
       let funcTypes = getFuncType name
       when (length argTypes /= length funcTypes - 1 && (length argTypes, length funcTypes) /= (1, 1)) (error ("Function call to function with wrong number of arguments: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
-      unless (all (\(argType, funcType) -> argType == funcType || funcType == "Nothing" || argType == "Any") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
+      unless (all (\(argType, funcType) -> argType == funcType || funcType == "IO" || argType == "Any") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
       ""
       where
         getFuncType name = do

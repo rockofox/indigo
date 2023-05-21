@@ -45,9 +45,9 @@ data Expr
   | BinOp String Expr Expr
   | If Expr Expr Expr
   | Let String Expr Expr
-  | FuncDef String [String] Expr
+  | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
   | FuncCall String [Expr]
-  | FuncDec {fname :: String, types :: [String]}
+  | FuncDec {fname :: String, ftypes :: [String]}
   | ModernFunc Expr Expr
   | DoBlock [Expr]
   | ExternDec String String [String]
@@ -113,7 +113,12 @@ rws :: [String] -- list of reserved words
 rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or"]
 
 identifier :: Parser String
-identifier = (lexeme . try) (p >>= check)
+identifier = do
+  -- alphanumeric identifier, but not a reserved word. Also must start with a letter
+  name <- (lexeme . try) (p >>= check)
+  if name `elem` rws
+    then fail $ "keyword " ++ show name ++ " cannot be an identifier"
+    else return name
   where
     p = (:) <$> letterChar <*> many alphaNumChar
     check x =
@@ -125,9 +130,14 @@ integer :: Parser Integer
 integer = lexeme L.decimal
 
 foreignIdentifier :: Parser String
-foreignIdentifier = (lexeme . try) (p >>= check)
+foreignIdentifier = do
+  -- identifier, plus _ and .
+  name <- (lexeme . try) (p >>= check)
+  if name `elem` rws
+    then fail $ "keyword " ++ show name ++ " cannot be an identifier"
+    else return name
   where
-    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '.')
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '.')
     check x =
       if x `elem` rws
         then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -148,12 +158,25 @@ validType =
       symbol "String"
       return "String"
     <|> do
-      symbol "Nothing"
-      return "Nothing"
+      symbol "IO"
+      return "IO"
     <|> do
       symbol "Any"
       return "Any"
     <?> "type"
+
+externLanguage :: Parser String
+externLanguage =
+  do
+    symbol "wasm_unstable"
+    return "wasm_unstable"
+    <|> do
+      symbol "js"
+      return "js"
+    <|> do
+      symbol "jsrev"
+      return "jsrev"
+    <?> "language"
 
 stringLit :: Parser String
 stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
@@ -162,7 +185,7 @@ stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 externDec :: Parser Expr
 externDec = do
   symbol "extern"
-  lang <- identifier
+  lang <- externLanguage
   name <- foreignIdentifier
   symbol "::"
   args <- sepBy validType (symbol "->")
@@ -184,7 +207,7 @@ funcDef = do
 
 funcCall :: Parser Expr
 funcCall = do
-  name <- foreignIdentifier
+  name <- foreignIdentifier <?> "function name"
   args <- some expr
   return $ FuncCall name args
 
@@ -254,8 +277,8 @@ term =
   choice
     [ placeholder,
       parens expr,
-      fmap IntLit integer,
-      fmap StringLit stringLit,
+      IntLit <$> try integer,
+      StringLit <$> try stringLit,
       symbol "True" >> return (BoolLit True),
       symbol "False" >> return (BoolLit False),
       try externDec,
@@ -263,7 +286,7 @@ term =
       try modernFunction,
       try funcDec,
       try funcDef,
-      try funcCall,
+      funcCall,
       letExpr,
       ifExpr,
       var

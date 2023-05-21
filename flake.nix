@@ -21,6 +21,10 @@
             packages = {
               funk.root = ./.;
             };
+            buildTools = hp: {
+              inherit (pkgs)
+              wasmtime
+            };
           };
           packages.default = self'.packages.funk;
         };

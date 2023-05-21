@@ -7,6 +7,7 @@ import Parser hiding (expr)
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
+import WASMEmitter
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -35,5 +36,6 @@ main = do
         putStrLn $ "\ESC[32mAST\ESC[0m\n" ++ prettyPrintProgram expr
         putStrLn "\n\ESC[32mAnalysis\ESC[0m"
         putStrLn $ analyseProgram expr "javascript"
-        putStrLn "\n\ESC[32mJS\ESC[0m"
-      putStrLn $ compileProgramToJS expr
+      -- putStrLn "\n\ESC[32mJS\ESC[0m"
+      -- putStrLn $ compileProgramToJS expr
+      putStrLn $ compileProgramToWAST expr
