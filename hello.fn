@@ -31,6 +31,11 @@
 #   greet "John"
 # end
 extern wasm_unstable fd_write :: Int -> Int -> Int -> Int -> Int
+
 main => IO = do
-  fd_write 1 ("Hello World!\n") 13 0
+  # let x = "Hello World!\n"
+  let y = 1
+  # __wasm_i32_store 2 4
+  # __wasm_i32_store 6 8
+  # fd_write 1 ("Hello World!\n") 2 13
 end

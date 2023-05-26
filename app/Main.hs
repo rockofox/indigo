@@ -1,5 +1,6 @@
 import Analyzer
 import Control.Monad
+import Control.Monad.Cont (MonadIO (liftIO))
 import Data.List (intercalate)
 import Data.Text qualified as T
 import JSEmitter (compileProgramToJS)
@@ -38,4 +39,5 @@ main = do
         putStrLn $ analyseProgram expr "javascript"
       -- putStrLn "\n\ESC[32mJS\ESC[0m"
       -- putStrLn $ compileProgramToJS expr
-      putStrLn $ compileProgramToWAST expr
+      wast <- compileProgramToWAST expr
+      putStrLn wast

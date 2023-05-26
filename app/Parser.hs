@@ -5,78 +5,79 @@ module Parser where
 
 import Control.Monad (void)
 import Control.Monad.Combinators
-  ( between,
-    choice,
-    many,
-    manyTill,
-    sepBy,
-    sepBy1,
-    sepEndBy,
-    some,
-    (<|>),
-  )
+    ( between
+    , choice
+    , many
+    , manyTill
+    , sepBy
+    , sepBy1
+    , sepEndBy
+    , some
+    , (<|>)
+    )
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
 import Data.Text (Text)
 import Data.Void (Void)
 import Text.Megaparsec
-  ( MonadParsec (eof, takeWhile1P, try),
-    ParseErrorBundle,
-    Parsec,
-    optional,
-    parse,
-    (<?>),
-  )
+    ( MonadParsec (eof, takeWhile1P, try)
+    , ParseErrorBundle
+    , Parsec
+    , optional
+    , parse
+    , (<?>)
+    )
 import Text.Megaparsec.Char
-  ( alphaNumChar,
-    char,
-    letterChar,
-    newline,
-    space1,
-  )
+    ( alphaNumChar
+    , char
+    , letterChar
+    , newline
+    , space1
+    )
 import Text.Megaparsec.Char.Lexer qualified as L
 
 type Parser = Parsec Void Text
 
 data Expr
-  = Var String
-  | BoolLit Bool
-  | IntLit Integer
-  | StringLit String
-  | BinOp String Expr Expr
-  | If Expr Expr Expr
-  | Let String Expr Expr
-  | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
-  | FuncCall String [Expr]
-  | FuncDec {fname :: String, ftypes :: [String]}
-  | ModernFunc Expr Expr
-  | DoBlock [Expr]
-  | ExternDec String String [String]
-  | Add Expr Expr
-  | Sub Expr Expr
-  | Mul Expr Expr
-  | Div Expr Expr
-  | Eq Expr Expr
-  | Neq Expr Expr
-  | Lt Expr Expr
-  | Gt Expr Expr
-  | Le Expr Expr
-  | Ge Expr Expr
-  | And Expr Expr
-  | Or Expr Expr
-  | Not Expr
-  | Placeholder
-  deriving
-    ( Show
-    )
+    = Var String
+    | BoolLit Bool
+    | IntLit Integer
+    | StringLit String
+    | BinOp String Expr Expr
+    | If Expr Expr Expr
+    | Let String Expr
+    | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
+    | FuncCall String [Expr]
+    | FuncDec {fname :: String, ftypes :: [String]}
+    | ModernFunc Expr Expr
+    | DoBlock [Expr]
+    | ExternDec String String [String]
+    | Add Expr Expr
+    | Sub Expr Expr
+    | Mul Expr Expr
+    | Div Expr Expr
+    | Eq Expr Expr
+    | Neq Expr Expr
+    | Lt Expr Expr
+    | Gt Expr Expr
+    | Le Expr Expr
+    | Ge Expr Expr
+    | And Expr Expr
+    | Or Expr Expr
+    | Not Expr
+    | Placeholder
+    | InternalFunction {fname :: String, ifargs :: [Expr]}
+    deriving
+        ( Show
+        )
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
-  [ [prefix "!" Not],
-    [binary "+" Add, binary "-" Sub],
-    [binary "*" Mul, binary "/" Div],
-    [binary "==" Eq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge],
-    [binary "&&" And, binary "||" Or]
-  ]
+    [ [prefix "!" Not]
+    , [binary "+" Add, binary "-" Sub]
+    , [binary "*" Mul, binary "/" Div]
+    , [binary "==" Eq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
+    , [binary "&&" And, binary "||" Or]
+    ]
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
@@ -114,69 +115,82 @@ rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and"
 
 identifier :: Parser String
 identifier = do
-  -- alphanumeric identifier, but not a reserved word. Also must start with a letter
-  name <- (lexeme . try) (p >>= check)
-  if name `elem` rws
-    then fail $ "keyword " ++ show name ++ " cannot be an identifier"
-    else return name
+    -- alphanumeric identifier, but not a reserved word. Also must start with a letter
+    name <- (lexeme . try) (p >>= check)
+    if name `elem` rws
+        then fail $ "keyword " ++ show name ++ " cannot be an identifier"
+        else return name
   where
     p = (:) <$> letterChar <*> many alphaNumChar
     check x =
-      if x `elem` rws
-        then fail $ "keyword " ++ show x ++ " cannot be an identifier"
-        else return x
+        if x `elem` rws
+            then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+            else return x
 
 integer :: Parser Integer
 integer = lexeme L.decimal
 
 foreignIdentifier :: Parser String
 foreignIdentifier = do
-  -- identifier, plus _ and .
-  name <- (lexeme . try) (p >>= check)
-  if name `elem` rws
-    then fail $ "keyword " ++ show name ++ " cannot be an identifier"
-    else return name
+    -- identifier, plus _ and .
+    name <- (lexeme . try) (p >>= check)
+    if name `elem` rws
+        then fail $ "keyword " ++ show name ++ " cannot be an identifier"
+        else return name
   where
     p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '.')
     check x =
-      if x `elem` rws
-        then fail $ "keyword " ++ show x ++ " cannot be an identifier"
-        else return x
+        if x `elem` rws
+            then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+            else return x
 
 expr :: Parser Expr
 expr = makeExprParser term binOpTable
 
 validType :: Parser String
 validType =
-  do
-    symbol "Int"
-    return "Int"
-    <|> do
-      symbol "Bool"
-      return "Bool"
-    <|> do
-      symbol "String"
-      return "String"
-    <|> do
-      symbol "IO"
-      return "IO"
-    <|> do
-      symbol "Any"
-      return "Any"
-    <?> "type"
+    do
+        symbol "Int"
+        return "Int"
+        <|> do
+            symbol "Bool"
+            return "Bool"
+        <|> do
+            symbol "String"
+            return "String"
+        <|> do
+            symbol "IO"
+            return "IO"
+        <|> do
+            symbol "Any"
+            return "Any"
+        <?> "type"
 
 externLanguage :: Parser String
 externLanguage =
-  do
-    symbol "wasm_unstable"
-    return "wasm_unstable"
-    <|> do
-      symbol "js"
-      return "js"
-    <|> do
-      symbol "jsrev"
-      return "jsrev"
-    <?> "language"
+    do
+        symbol "wasm_unstable"
+        return "wasm_unstable"
+        <|> do
+            symbol "js"
+            return "js"
+        <|> do
+            symbol "jsrev"
+            return "jsrev"
+        <?> "language"
+
+internalFunctionName :: Parser String
+internalFunctionName =
+    do
+        symbol "__wasm_i32_store"
+        return "__wasm_i32_store"
+        <?> "internal function name"
+
+internalFunction :: Parser Expr
+internalFunction = do
+    name <- internalFunctionName
+    args <- some expr
+    return $ InternalFunction name args
 
 stringLit :: Parser String
 stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
@@ -184,75 +198,73 @@ stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 -- TODO: take a look at this in context of modern function syntax and consider making them consistent
 externDec :: Parser Expr
 externDec = do
-  symbol "extern"
-  lang <- externLanguage
-  name <- foreignIdentifier
-  symbol "::"
-  args <- sepBy validType (symbol "->")
-  return $ ExternDec lang name args
+    symbol "extern"
+    lang <- externLanguage
+    name <- foreignIdentifier
+    symbol "::"
+    args <- sepBy validType (symbol "->")
+    return $ ExternDec lang name args
 
 funcDec :: Parser Expr
 funcDec = do
-  name <- identifier
-  symbol "::"
-  argTypes <- sepBy1 validType (symbol "->")
-  return $ FuncDec name argTypes
+    name <- identifier
+    symbol "::"
+    argTypes <- sepBy1 validType (symbol "->")
+    return $ FuncDec name argTypes
 
 funcDef :: Parser Expr
 funcDef = do
-  name <- identifier <?> "function name"
-  args <- many identifier <?> "function arguments"
-  symbol "="
-  FuncDef name args <$> expr <?> "function body"
+    name <- identifier <?> "function name"
+    args <- many identifier <?> "function arguments"
+    symbol "="
+    FuncDef name args <$> expr <?> "function body"
 
 funcCall :: Parser Expr
 funcCall = do
-  name <- foreignIdentifier <?> "function name"
-  args <- some expr
-  return $ FuncCall name args
+    name <- foreignIdentifier <?> "function name"
+    args <- some expr
+    return $ FuncCall name args
 
 letExpr :: Parser Expr
 letExpr = do
-  symbol "let"
-  name <- identifier
-  symbol "="
-  val <- expr
-  symbol "in"
-  Let name val <$> expr
+    symbol "let"
+    name <- identifier
+    symbol "="
+    Let name <$> expr
 
 ifExpr :: Parser Expr
 ifExpr = do
-  symbol "if"
-  cond <- expr
-  symbol "then"
-  thenExpr <- expr
-  symbol "else"
-  If cond thenExpr <$> expr
+    symbol "if"
+    cond <- expr
+    symbol "then"
+    thenExpr <- expr
+    symbol "else"
+    If cond thenExpr <$> expr
 
 doBlock :: Parser Expr
 doBlock = do
-  symbol "do"
-  newline'
-  exprs <- lines'
-  symbol "end"
-  return $ DoBlock exprs
+    symbol "do"
+    newline'
+    exprs <- lines'
+    symbol "end"
+    return $ DoBlock exprs
 
 modernFunction :: Parser Expr
 modernFunction = do
-  name <- identifier
-  (args, argTypes) <-
-    unzip <$> many do
-      arg <- identifier
-      symbol ":"
-      argType <- validType
-      optional $ symbol "->"
-      return (arg, argType)
+    name <- identifier
+    (args, argTypes) <-
+        unzip <$> many do
+            arg <- identifier
+            symbol ":"
+            argType <- validType
+            optional $ symbol "->"
+            return (arg, argType)
 
-  symbol "=>"
-  returnType <- validType <?> "return type"
-  symbol "="
-  body <- expr
-  return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
+    symbol "=>"
+    returnType <- validType <?> "return type"
+    symbol "="
+    body <- expr
+    return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
 
 placeholder :: Parser Expr
 placeholder = symbol "()" >> return Placeholder
@@ -270,24 +282,25 @@ program = Program <$> between scn eof lines'
 
 var :: Parser Expr
 var = do
-  Var <$> identifier
+    Var <$> identifier
 
 term :: Parser Expr
 term =
-  choice
-    [ placeholder,
-      parens expr,
-      IntLit <$> try integer,
-      StringLit <$> try stringLit,
-      symbol "True" >> return (BoolLit True),
-      symbol "False" >> return (BoolLit False),
-      try externDec,
-      doBlock,
-      try modernFunction,
-      try funcDec,
-      try funcDef,
-      funcCall,
-      letExpr,
-      ifExpr,
-      var
-    ]
+    choice
+        [ placeholder
+        , parens expr
+        , IntLit <$> try integer
+        , StringLit <$> try stringLit
+        , symbol "True" >> return (BoolLit True)
+        , symbol "False" >> return (BoolLit False)
+        , try externDec
+        , doBlock
+        , try letExpr
+        , try modernFunction
+        , try funcDec
+        , try funcDef
+        , try internalFunction
+        , try funcCall
+        , ifExpr
+        , var
+        ]

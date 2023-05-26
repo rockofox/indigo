@@ -76,7 +76,8 @@ executable funk
         megaparsec  >= 7.0   && < 10.0,
         parser-combinators,
         unix,
-        mtl
+        mtl,
+        binaryen
 
     -- Directories containing source files.
     hs-source-dirs:   app

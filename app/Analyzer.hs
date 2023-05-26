@@ -9,7 +9,7 @@ import Data.List (intercalate, partition)
 import Parser (Expr (..), Program (..))
 
 isFuncDef :: Expr -> Bool
-isFuncDef (FuncDef {}) = True
+isFuncDef (FuncDef{}) = True
 isFuncDef _ = False
 
 isFuncDec :: Expr -> Bool
@@ -17,7 +17,7 @@ isFuncDec (FuncDec _ _) = True
 isFuncDec _ = False
 
 isExternDec :: Expr -> Bool
-isExternDec (ExternDec {}) = True
+isExternDec (ExternDec{}) = True
 isExternDec _ = False
 
 isModernFunc :: Expr -> Bool
@@ -34,9 +34,9 @@ getType (BoolLit _) = "Bool"
 getType (IntLit _) = "Int"
 getType (StringLit _) = "String"
 getType (DoBlock exprs) = getType $ last exprs
-getType (BinOp {}) = "Int"
+getType (BinOp{}) = "Int"
 getType (If _ thenExpr _) = getType thenExpr
-getType (Let _ _ body) = getType body
+getType (Let _ body) = getType body
 getType (FuncDef _ _ body) = getType body
 getType (FuncDec _ types) = last types
 getType (FuncCall name _) = name
@@ -65,7 +65,7 @@ head' (x : xs) = Just x
 
 analyseProgram :: Program -> String -> String
 analyseProgram (Program exprs) targetLanguage = do
-  intercalate "" (map analyseExpression exprs)
+    intercalate "" (map analyseExpression exprs)
   where
     (funcDecs, rest) = partition isFuncDec exprs
     (externDecs, rest') = partition isExternDec rest
@@ -78,45 +78,45 @@ analyseProgram (Program exprs) targetLanguage = do
     analyseExpression (IntLit n) = show n
     analyseExpression (StringLit s) = show s
     analyseExpression (If cond thenExpr elseExpr) = analyseExpression cond ++ analyseExpression thenExpr ++ analyseExpression elseExpr
-    analyseExpression (Let name val body) = analyseExpression val ++ analyseExpression body
+    analyseExpression (Let name body) = analyseExpression body
     analyseExpression (FuncDef name args body) = do
-      unless (any (\(FuncDec name' _) -> name == name') funcDecs) (error ("Function definition for nonexistant function: " ++ name))
-      let funcDec = head $ filter (\(FuncDec name' _) -> name == name') funcDecs
-      let funcTypes = case funcDec of
-            FuncDec _ types -> types
-            _ -> error "Impossible"
-      unless (last funcTypes == getType body || last funcTypes == "IO") (error ("Function definition for function with wrong return type: " ++ name))
-      analyseExpression body
+        unless (any (\(FuncDec name' _) -> name == name') funcDecs) (error ("Function definition for nonexistant function: " ++ name))
+        let funcDec = head $ filter (\(FuncDec name' _) -> name == name') funcDecs
+        let funcTypes = case funcDec of
+                FuncDec _ types -> types
+                _ -> error "Impossible"
+        unless (last funcTypes == getType body || last funcTypes == "IO") (error ("Function definition for function with wrong return type: " ++ name))
+        analyseExpression body
     analyseExpression (FuncCall name args) = do
-      let argTypes =
-            map
-              ( \arg -> case arg of
-                  FuncCall name _ -> getFunctionType arg
-                  _ -> getType arg
-              )
-              args
-      let funcTypes = getFuncType name
-      when (length argTypes /= length funcTypes - 1 && (length argTypes, length funcTypes) /= (1, 1)) (error ("Function call to function with wrong number of arguments: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
-      unless (all (\(argType, funcType) -> argType == funcType || funcType == "IO" || argType == "Any") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
-      ""
+        let argTypes =
+                map
+                    ( \arg -> case arg of
+                        FuncCall name _ -> getFunctionType arg
+                        _ -> getType arg
+                    )
+                    args
+        let funcTypes = getFuncType name
+        when (length argTypes /= length funcTypes - 1 && (length argTypes, length funcTypes) /= (1, 1)) (error ("Function call to function with wrong number of arguments: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
+        unless (all (\(argType, funcType) -> argType == funcType || funcType == "IO" || argType == "Any") (zip argTypes funcTypes)) (error ("Function call to function with wrong argument types: " ++ name ++ "\nFormal types: " ++ intercalate ", " funcTypes ++ "\nActual types: " ++ intercalate ", " argTypes))
+        ""
       where
         getFuncType name = do
-          let funcDec = head' $ filter (\(FuncDec name' _) -> name == name') funcDecs
-          let externDec = head' $ filter (\(ExternDec _ name' _) -> name == name') externDecs
-          let modernDec = fmap (\(ModernFunc _ dec) -> dec) $ head' $ filter (\(ModernFunc _ (FuncDec name' _)) -> name == name') modernFunctions
-          case funcDec of
-            Just (FuncDec _ types) -> types
-            _ -> case externDec of
-              Just (ExternDec _ _ types) -> types
-              _ -> case modernDec of
+            let funcDec = head' $ filter (\(FuncDec name' _) -> name == name') funcDecs
+            let externDec = head' $ filter (\(ExternDec _ name' _) -> name == name') externDecs
+            let modernDec = fmap (\(ModernFunc _ dec) -> dec) $ head' $ filter (\(ModernFunc _ (FuncDec name' _)) -> name == name') modernFunctions
+            case funcDec of
                 Just (FuncDec _ types) -> types
-                _ -> error "We should never get here"
+                _ -> case externDec of
+                    Just (ExternDec _ _ types) -> types
+                    _ -> case modernDec of
+                        Just (FuncDec _ types) -> types
+                        _ -> error "We should never get here"
         getFunctionType (FuncCall name _) = last $ getFuncType name
         getFunctionType _ = error "Can't get type of non-function call"
     analyseExpression (DoBlock exprs) = intercalate "" (map analyseExpression exprs)
     analyseExpression (ExternDec lang name types) = do
-      -- FIXME: jsrev unless (lang == targetLanguage) (error ("Extern for wrong language: " ++ lang))
-      -- "// extern " ++ lang ++ " " ++ name ++ " :: " ++ intercalate " -> " types
-      ""
+        -- FIXME: jsrev unless (lang == targetLanguage) (error ("Extern for wrong language: " ++ lang))
+        -- "// extern " ++ lang ++ " " ++ name ++ " :: " ++ intercalate " -> " types
+        ""
     analyseExpression (ModernFunc dec def) = ""
     analyseExpression _ = "Unhandled expression, "
