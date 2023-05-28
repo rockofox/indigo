@@ -66,6 +66,7 @@ data Expr
     | Not Expr
     | Placeholder
     | InternalFunction {fname :: String, ifargs :: [Expr]}
+    | Discard Expr
     deriving
         ( Show
         )
@@ -111,7 +112,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
 rws :: [String] -- list of reserved words
-rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or"]
+rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard"]
 
 identifier :: Parser String
 identifier = do
@@ -169,8 +170,8 @@ validType =
 externLanguage :: Parser String
 externLanguage =
     do
-        symbol "wasm_unstable"
-        return "wasm_unstable"
+        symbol "wasi_unstable"
+        return "wasi_unstable"
         <|> do
             symbol "js"
             return "js"
@@ -266,6 +267,11 @@ modernFunction = do
     body <- expr
     return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
 
+discard :: Parser Expr
+discard = do
+    symbol "discard"
+    Discard <$> expr
+
 placeholder :: Parser Expr
 placeholder = symbol "()" >> return Placeholder
 
@@ -300,6 +306,7 @@ term =
         , try funcDec
         , try funcDef
         , try internalFunction
+        , try discard
         , try funcCall
         , ifExpr
         , var

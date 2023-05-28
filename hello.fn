@@ -1,41 +1,12 @@
-# extern jsrev toString :: Any -> Any
-# extern js process.stdout.write :: String -> Nothing
-# extern js process.stdout.clearLine :: Nothing
+extern wasi_unstable fd_write :: Int -> Int -> Int -> Int -> Int
 
-# print str : String => Nothing = do
-#   process.stdout.write str
-# end
-
-# println str : String => Nothing = do
-#   print str
-#   print "\n"
-# end
-
-# # Haskell-style functions
-# x :: Bool -> Bool
-# x y = True
-
-# add x : Int -> y : Int => Int = x + y
-
-# sayHello => Nothing = do
-#   println "Hello World!"
-# end
-
-# greet name : String => Nothing = do
-#   print "Hello "
-#   print name
-# end
-
-# main => IO = do
-#   sayHello ()
-#   greet "John"
-# end
-extern wasm_unstable fd_write :: Int -> Int -> Int -> Int -> Int
+puts str : String -> len : Int => IO = do
+  __wasm_i32_store 0 str
+  __wasm_i32_store 4 len
+  discard (fd_write 1 0 1 20)
+end
 
 main => IO = do
-  # let x = "Hello World!\n"
-  let y = 1
-  # __wasm_i32_store 2 4
-  # __wasm_i32_store 6 8
-  # fd_write 1 ("Hello World!\n") 2 13
+  let x = "hello world\n"
+  puts (x) 12
 end
