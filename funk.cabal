@@ -53,15 +53,13 @@ extra-doc-files:    CHANGELOG.md
 common warnings
     ghc-options: -Wall
 
-executable funk
+
+
+library funk-lib
     -- Import common warning flags.
     import:           warnings
 
-    -- .hs or .lhs file containing the Main module.
-    main-is:          Main.hs
-
-    -- Modules included in this executable, other than Main.
-    other-modules: Parser,
+    exposed-modules: Parser,
                    Analyzer,
                    JSEmitter,
                    WASMEmitter
@@ -80,7 +78,7 @@ executable funk
         binaryen
 
     -- Directories containing source files.
-    hs-source-dirs:   app
+    hs-source-dirs:   lib
 
     -- Base language which the package is written in.
     default-language: Haskell2010
@@ -90,3 +88,30 @@ executable funk
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
                         DuplicateRecordFields
+
+executable funk
+    -- .hs or .lhs file containing the Main module.
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    base ^>=4.16.4.0,
+                      optparse-applicative,
+                      unix,
+                      megaparsec,
+                      mtl,
+                      text,
+                      funk-lib
+    -- Language Extensions
+    default-extensions: OverloadedStrings,
+                        ImportQualifiedPost,
+                        DisambiguateRecordFields,
+                        DuplicateRecordFields
+
+
+
+test-suite tests
+    type: exitcode-stdio-1.0
+    main-is: Test.hs
+    build-depends: base, hspec, typed-process, raw-strings-qq, text, bytestring, megaparsec, funk-lib
+    default-extensions: QuasiQuotes, BlockArguments, OverloadedStrings
+    hs-source-dirs: tests
+    default-language: Haskell2010

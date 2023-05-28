@@ -2,3 +2,7 @@ cradle:
   cabal:
     - path: "./app"
       component: "exe:funk"
+    - path: "./lib"
+      component: "lib:funk-lib"
+    - path: "./test"
+      component: "test:tests"

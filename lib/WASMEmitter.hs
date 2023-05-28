@@ -10,16 +10,14 @@ import Binaryen.ExpressionId (localSetId)
 import Binaryen.Module qualified
 import Binaryen.Module qualified as Binaryen
 import Binaryen.Type (auto, create, int32, none)
-import Binaryen.Type qualified as Binaryen
-import Control.Monad (filterM, void, zipWithM)
-import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), MonadTrans (lift), StateT (runStateT))
+import Control.Monad (filterM, when)
+import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT))
 import Data.List (find)
-import Data.Maybe (isNothing)
-import Debug.Trace (trace)
-import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, newArray0, nullPtr, pokeArray)
+import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, nullPtr, pokeArray)
 import Foreign.C (CChar, newCString, peekCString)
-import GHC.IOArray (newIOArray)
-import Parser (Expr (..), Program (Program), integer)
+import Parser (Expr (..), Program (Program))
+import System.IO (hIsTerminalDevice)
+import System.IO qualified as IO
 import Prelude hiding (mod)
 
 pop :: [a] -> [a]
@@ -34,6 +32,7 @@ typeToWASTType _ = int32
 sizeOf :: Expr -> Int
 sizeOf (IntLit _) = 4
 sizeOf (StringLit s) = length s + 1
+sizeOf _ = 1
 
 data VarTableEntry = VarTableEntry
     { index :: Int
@@ -86,7 +85,11 @@ compileProgramToWAST (Program exprs) = do
     _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
 
     -- status <- Binaryen.validate mod_        FIXME: Validator is broken ;(
-    let status = 1
+    let status = (1 :: Integer)
+
+    isTTY <- hIsTerminalDevice IO.stdin
+    when isTTY $ do
+        Binaryen.setColorsEnabled 0
     if status == 1
         then do
             -- _ <- Binaryen.autoDrop mod_
