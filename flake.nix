@@ -22,8 +22,8 @@
               funk.root = ./.;
             };
           };
-          packages.default = self'.packages.funk;
-          devShells.default = with pkgs; [ wasmtime ];
+          packages.${system}.default = self'.packages.funk;
+          devShells.${system}.default = with pkgs; [ wasmtime ];
         };
     };
 }
