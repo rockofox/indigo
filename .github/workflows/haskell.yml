@@ -20,7 +20,12 @@ jobs:
       with:
         ghc-version: '8.10.3'
         cabal-version: '3.2'
-
+        
+    - name: Install Wasmtime
+      run: |
+        curl https://wasmtime.dev/install.sh -sSf | bash
+        echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+        
     - name: Cache
       uses: actions/cache@v3
       env:
