@@ -68,7 +68,7 @@ library funk-lib
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.16.4.0,
+    build-depends:    base,
         containers,
         text,
         megaparsec  >= 7.0   && < 10.0,
@@ -93,7 +93,7 @@ executable funk
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
     hs-source-dirs:   app
-    build-depends:    base ^>=4.16.4.0,
+    build-depends:    base,
                       optparse-applicative,
                       unix,
                       megaparsec,
