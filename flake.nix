@@ -19,10 +19,10 @@
             # hlsCheck = false;
             # hlintCheck = true;
             packages = {
-              funk.root = ./.;
+              prisma.root = ./.;
             };
           };
-          packages.${system}.default = self'.packages.funk;
+          packages.${system}.default = self'.packages.prisma;
           devShells.${system}.default = with pkgs; [ wasmtime ];
         };
     };

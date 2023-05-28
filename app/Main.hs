@@ -52,8 +52,8 @@ main = do
             info
                 (optionsParser <**> helper)
                 ( fullDesc
-                    <> progDesc "Compile a Funk program to JavaScript or WebAssembly"
-                    <> header "funk - a functional programming language"
+                    <> progDesc "Compile a Prisma program to JavaScript or WebAssembly"
+                    <> header "prisma - a functional programming language"
                 )
     inputContents <- case input of
         Just "-" -> getContents

@@ -1,8 +1,8 @@
 cradle:
   cabal:
     - path: "./app"
-      component: "exe:funk"
+      component: "exe:prisma"
     - path: "./lib"
-      component: "lib:funk-lib"
+      component: "lib:prisma-lib"
     - path: "./test"
       component: "test:tests"
