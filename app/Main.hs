@@ -17,6 +17,7 @@ data Options = Options
     { input :: Maybe FilePath
     , output :: Maybe FilePath
     , target :: String
+    , debug :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -44,10 +45,30 @@ optionsParser =
                 <> metavar "TARGET"
                 <> help "Compilation target (javascript or wasm)"
             )
+        <*> switch
+            ( long "debug"
+                <> short 'd'
+                <> help "Enable debug mode"
+            )
+
+prettyPrintExpr :: Expr -> Int -> String
+prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
+prettyPrintExpr (FuncDef _ _ expr) i =
+    case expr of
+        DoBlock _ -> "FuncDef[\n" ++ prettyPrintExpr expr (i + 1) ++ "\n" ++ indent i ++ "]"
+        _ -> "FuncDef[" ++ prettyPrintExpr expr 0 ++ "]"
+prettyPrintExpr x i = indent i ++ show x
+
+indent :: Int -> [Char]
+indent i = replicate (i * 2) ' '
+
+prettyPrintProgram :: Program -> String
+prettyPrintProgram (Program exprs) = do
+    intercalate "\n" (map (`prettyPrintExpr` 0) exprs)
 
 main :: IO ()
 main = do
-    Options input output target <-
+    Options input output target debug <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -60,6 +81,9 @@ main = do
         Just file -> readFile file
         Nothing -> error "No input file specified"
     let parseResult = parseProgram (T.pack inputContents)
+    when debug $ case parseResult of
+        Left err -> putStrLn $ "Parse error: " ++ errorBundlePretty err
+        Right expr -> putStrLn $ prettyPrintProgram expr
     case parseResult of
         Left err -> putStrLn $ "Parse error: " ++ errorBundlePretty err
         Right expr -> do

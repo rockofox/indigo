@@ -9,10 +9,12 @@ import Binaryen.Expression qualified as Binaryen
 import Binaryen.ExpressionId (localSetId)
 import Binaryen.Module qualified
 import Binaryen.Module qualified as Binaryen
+import Binaryen.Op qualified as Binaryen
 import Binaryen.Type (auto, create, int32, none)
 import Control.Monad (filterM, when)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT))
-import Data.List (find)
+import Data.List (elemIndex)
+import Data.Maybe (fromMaybe)
 import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, nullPtr, pokeArray)
 import Foreign.C (CChar, newCString, peekCString)
 import Parser (Expr (..), Program (Program))
@@ -35,8 +37,7 @@ sizeOf (StringLit s) = length s + 1
 sizeOf _ = 1
 
 data VarTableEntry = VarTableEntry
-    { index :: Int
-    , name :: String
+    { name :: String
     , context :: Maybe String
     }
     deriving (Show)
@@ -62,10 +63,19 @@ getCellOffset index = do
     let offset = sum $ map size (take index memory_)
     return (offset + 8)
 
-varTableLastIndex :: StateT CompilerState IO Int
-varTableLastIndex = do
+findVarIndex :: String -> StateT CompilerState IO (Maybe Int)
+findVarIndex name_ = do
     state <- get
-    return $ maybe 0 index (find (\x -> context x == currentFunction state) $ varTable state)
+    let varTable_ = varTable state
+    let context_ = fromMaybe "" $ currentFunction state
+    let varsInContext =
+            filter
+                ( \x -> case context x of
+                    Just c -> context_ == c
+                    Nothing -> False
+                )
+                varTable_
+    return $ elemIndex name_ (map name varsInContext)
 
 compileProgramToWAST :: Program -> IO String
 compileProgramToWAST (Program exprs) = do
@@ -83,7 +93,6 @@ compileProgramToWAST (Program exprs) = do
     poke segmentsPassive 0
 
     _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
-
     -- status <- Binaryen.validate mod_        FIXME: Validator is broken ;(
     let status = (1 :: Integer)
 
@@ -117,6 +126,9 @@ compileExprToWAST (InternalFunction name args) = do
         "__wasm_i32_store" -> do
             compiledArgs <- mapM compileExprToWAST args
             liftIO $ Binaryen.Expression.store mod_ 4 0 0 (head compiledArgs) (compiledArgs !! 1) int32
+        "__wasm_i32_load" -> do
+            compiledArgs <- mapM compileExprToWAST args
+            liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 (head compiledArgs)
         _ -> error $ "Unknown internal function: " ++ name
 compileExprToWAST (ExternDec lang name types) = do
     state <- get
@@ -132,6 +144,49 @@ compileExprToWAST (ExternDec lang name types) = do
     type_ <- liftIO $ Binaryen.Type.create x (fromIntegral $ length types_)
     liftIO $ Binaryen.addFunctionImport mod_ funcName moduleName externalName type_ ret
     liftIO $ Binaryen.Expression.nop mod_
+compileExprToWAST (If cond true false) = do
+    state <- get
+    let mod_ = mod state
+    compiledCond <- compileExprToWAST cond
+    compiledTrue <- compileExprToWAST true
+    compiledFalse <- compileExprToWAST false
+    liftIO $ Binaryen.Expression.if_ mod_ compiledCond compiledTrue compiledFalse
+compileExprToWAST (Eq a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.eqInt32 compiledA compiledB
+compileExprToWAST (Neq a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.neInt32 compiledA compiledB
+compileExprToWAST (Add a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledA compiledB
+compileExprToWAST (Sub a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.subInt32 compiledA compiledB
+compileExprToWAST (Mul a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.mulInt32 compiledA compiledB
+compileExprToWAST (Div a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.divSInt32 compiledA compiledB
 compileExprToWAST (FuncCall name args) = do
     state <- get
     let mod_ = mod state
@@ -156,19 +211,18 @@ compileExprToWAST (StringLit str) = do
 compileExprToWAST (Let name expr) = do
     state <- get
     let mod_ = mod state
-    lastIndex <- varTableLastIndex
-    let desiredIndex = if lastIndex == 0 then 0 else lastIndex + 1
-    put $ state{varTable = VarTableEntry{name = name, index = desiredIndex, context = currentFunction state} : varTable state}
+    put $ state{varTable = varTable state ++ [VarTableEntry{name = name, context = currentFunction state}]}
+    state <- get
+    let desiredIndex = length (filter (\x -> context x == currentFunction state) $ varTable state) - 1
     compiledExpr <- compileExprToWAST expr
-
     liftIO $ Binaryen.Expression.localSet mod_ (fromIntegral desiredIndex) compiledExpr
 compileExprToWAST (Var vname) = do
     state <- get
     let mod_ = mod state
-    let var = find (\x -> name x == vname && context x == currentFunction state) $ varTable state
-    case var of
+    varIndex <- findVarIndex vname
+    case varIndex of
         Nothing -> error $ "Unknown variable: " ++ vname
-        Just var -> liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral (index var)) int32
+        Just varIndex -> liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
 compileExprToWAST (DoBlock exprs) = do
     state <- get
     let mod_ = mod state
@@ -187,16 +241,16 @@ compileExprToWAST (ModernFunc def dec) = do
     state <- get
     put $ state{currentFunction = Just $ fname dec}
     state <- get
-    lastVarTableIndex <- varTableLastIndex
-    state <- get
     varTableEntriesForFArgs <-
         liftIO
             $ mapM
-                ( \(x, y) -> do
-                    return $ VarTableEntry{name = x, index = y, context = Just $ fname dec}
+                ( \x -> do
+                    return $ VarTableEntry{name = x, context = Just $ fname dec}
                 )
-            $ zip (fargs def) (map (lastVarTableIndex +) [0 ..])
-    put $ state{varTable = varTableEntriesForFArgs ++ varTable state}
+            $ fargs def
+
+    put $ state{varTable = varTable state ++ varTableEntriesForFArgs}
+    state <- get
 
     body <- compileExprToWAST $ fbody def
     state <- get

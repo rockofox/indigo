@@ -76,7 +76,7 @@ binOpTable =
     [ [prefix "!" Not]
     , [binary "+" Add, binary "-" Sub]
     , [binary "*" Mul, binary "/" Div]
-    , [binary "==" Eq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
+    , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
     ]
 
@@ -185,6 +185,9 @@ internalFunctionName =
     do
         symbol "__wasm_i32_store"
         return "__wasm_i32_store"
+        <|> do
+            symbol "__wasm_i32_load"
+            return "__wasm_i32_load"
         <?> "internal function name"
 
 internalFunction :: Parser Expr
@@ -204,7 +207,9 @@ externDec = do
     name <- foreignIdentifier
     symbol "::"
     args <- sepBy validType (symbol "->")
-    return $ ExternDec lang name args
+    symbol "=>"
+    ret <- validType
+    return $ ExternDec lang name (args ++ [ret])
 
 funcDec :: Parser Expr
 funcDec = do
@@ -240,7 +245,9 @@ ifExpr = do
     symbol "then"
     thenExpr <- expr
     symbol "else"
-    If cond thenExpr <$> expr
+    elseExpr <- expr
+    -- symbol "end"
+    return $ If cond thenExpr elseExpr
 
 doBlock :: Parser Expr
 doBlock = do
