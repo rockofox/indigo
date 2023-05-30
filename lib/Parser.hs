@@ -67,6 +67,7 @@ data Expr
     | Placeholder
     | InternalFunction {fname :: String, ifargs :: [Expr]}
     | Discard Expr
+    | Import [String] String
     deriving
         ( Show
         )
@@ -279,6 +280,13 @@ discard = do
     symbol "discard"
     Discard <$> expr
 
+import_ :: Parser Expr
+import_ = do
+    symbol "import"
+    objects <- sepBy identifier (symbol ",")
+    symbol "from"
+    Import objects <$> stringLit
+
 placeholder :: Parser Expr
 placeholder = symbol "()" >> return Placeholder
 
@@ -306,6 +314,7 @@ term =
         , StringLit <$> try stringLit
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
+        , try import_
         , try externDec
         , doBlock
         , try letExpr
