@@ -3,7 +3,7 @@ module WASMEmitter (compileProgramToWAST) where
 import Binaryen qualified
 import Binaryen.Export (getKind, getValue)
 import Binaryen.Export qualified as Export
-import Binaryen.Expression (constInt32, refFunc)
+import Binaryen.Expression (constInt32)
 import Binaryen.Expression qualified
 import Binaryen.Expression qualified as Binaryen
 import Binaryen.ExpressionId (localSetId)
@@ -13,23 +13,22 @@ import Binaryen.Module (getExportByIndex, getFunction, getNumExports)
 import Binaryen.Module qualified
 import Binaryen.Module qualified as Binaryen
 import Binaryen.Op qualified as Binaryen
-import Binaryen.Type (auto, create, int32, none, funcref, Type)
+import Binaryen.Type (auto, create, int32, none)
 import Control.Monad (filterM, unless, when)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT))
 import Data.ByteString qualified as BS
-import Data.List (elemIndex, find, findIndex)
+import Data.Functor ((<&>))
+import Data.List (elemIndex, find)
 import Data.Maybe (fromMaybe, isJust)
 import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, nullPtr, pokeArray)
 import Foreign.C (CChar, newCString, peekCString)
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Marshal.Utils (copyBytes)
-import Parser ( Expr(..), Program(Program), Type, Type(..) )
-import System.Directory ( doesFileExist )
+import Parser (Expr (..), Program (Program), Type (..))
+import System.Directory (doesFileExist)
 import System.IO (hIsTerminalDevice)
 import System.IO qualified as IO
 import Prelude hiding (mod)
-import Data.Functor ((<&>))
-import Debug.Trace (trace, traceShow)
 
 pop :: [a] -> [a]
 pop [] = []
@@ -54,7 +53,7 @@ data VarTableEntry = VarTableEntry
 
 data FunctionTableEntry = FunctionTableEntry
     { ftname :: String
-    ,  ftargnames :: [String]
+    , ftargnames :: [String]
     , ftparams :: [Parser.Type]
     , ftresult :: Parser.Type
     }
@@ -160,8 +159,6 @@ moduleFromFile path = do
             Binaryen.read contents (fromIntegral len)
         else error $ "File not found: " ++ path
 
--- Binaryen.Module.create -- FIXME: obviously
-
 unreachable :: a
 unreachable = error "Unreachable code reached"
 
@@ -197,7 +194,8 @@ compileExprToWAST (Import objects source) = do
                 return (find (name ==) objects, x)
             )
             exports
-            >>= liftIO . filterM (pure . isJust . fst) >>= mapM (\(Just x, y) -> return (x, y))
+            >>= liftIO . filterM (pure . isJust . fst)
+            >>= mapM (\(Just x, y) -> return (x, y))
 
     functions <- liftIO $ filterM (\x -> (==) <$> getKind (snd x) <*> pure externalFunction) matchedObjects >>= mapM (\(_, y) -> (,) <$> Export.getName y <*> (getValue y >>= getFunction module_))
     importedFunctions <- liftIO $ filterM (\(name, _) -> peekCString name <&> flip elem objects) functions
@@ -279,25 +277,34 @@ compileExprToWAST (FuncCall fname args) = do
     wasmArgs <- liftIO $ allocaArray (length args) $ \ta -> do
         liftIO $ pokeArray ta compiledArgs
         return ta
-    if fname `notElem` map name parentVarTable then
-        liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
-    else do
-        varIndex <- findVarIndex fname
-        case varIndex of
-            Nothing -> error $ "Variable " ++ fname ++ " not found"
-            Just varIndex -> do
-                let argIndex = fromMaybe unreachable $ elemIndex fname (ftargnames fn)
-                let fnType = ftparams fn !! argIndex
-                case fnType of
-                    (Fn args ret) -> do
-                        tableIndexConst <- liftIO $ Binaryen.localGet mod_ (fromIntegral varIndex) int32
-                        let types_ = map typeToWASTType args
-                        typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
-                            liftIO $ pokeArray ta types_
-                            return ta
-                        type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
-                        liftIO $ Binaryen.Expression.callIndirect mod_ tableIndexConst wasmArgs (fromIntegral $ length args) type_ (typeToWASTType ret)
-                    _ -> unreachable
+    if fname `notElem` map name parentVarTable
+        then liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
+        else do
+            varIndex <- findVarIndex fname
+            case varIndex of
+                Nothing -> error $ "Variable " ++ fname ++ " not found"
+                Just varIndex -> do
+                    let argIndex = fromMaybe unreachable $ elemIndex fname (ftargnames fn)
+                        fnType = ftparams fn !! argIndex
+                        types_ = map typeToWASTType $ case fnType of
+                            Fn args ret -> args
+                            _ -> []
+                    tableIndexConst <- liftIO $ Binaryen.localGet mod_ (fromIntegral varIndex) int32
+                    typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
+                        liftIO $ pokeArray ta types_
+                        return ta
+                    type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
+                    liftIO $
+                        Binaryen.Expression.callIndirect
+                            mod_
+                            tableIndexConst
+                            wasmArgs
+                            (fromIntegral $ length args)
+                            type_
+                            ( typeToWASTType $ case fnType of
+                                Fn _ ret -> ret
+                                _ -> Parser.IO
+                            )
 compileExprToWAST (IntLit int) = do
     state <- get
     let mod_ = mod state
@@ -308,7 +315,6 @@ compileExprToWAST (StringLit str) = do
     put $ state{memory = MemoryCell{size = length str, data_ = cStr} : memory state}
     m <- getCellOffset $ length $ memory state
     let mod_ = mod state
-
     liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
 compileExprToWAST (Let name expr) = do
     state <- get
@@ -339,60 +345,40 @@ compileExprToWAST (Discard expr) = do
     compiledExpr <- compileExprToWAST expr
     type_ <- liftIO $ Binaryen.getType compiledExpr
     liftIO $ Binaryen.drop mod_ compiledExpr
-compileExprToWAST (Ref expr) = do
+compileExprToWAST (Ref (FuncCall name args)) = do
     state <- get
     let mod_ = mod state
-    case expr of
-        FuncCall name args -> do
-            namePtr <- liftIO $ newCString name
-            let functionIndex = elemIndex name $ map ftname $ functionTable state
-            liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
-        _ -> error "Can only take reference of function call"
+    namePtr <- liftIO $ newCString name
+    let functionIndex = elemIndex name $ map ftname $ functionTable state
+    liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
 compileExprToWAST (ModernFunc def dec) = do
     state <- get
     put $ state{currentFunction = Just $ fname dec}
     state <- get
-    varTableEntriesForFArgs <-
-        liftIO
-            $ mapM
-                ( \x -> return $ VarTableEntry{name = x, context = Just $ fname dec}
-                )
-            $ fargs def
-
+    varTableEntriesForFArgs <- liftIO $ mapM (\x -> return $ VarTableEntry{name = x, context = Just $ fname dec}) $ fargs def
     put $ state{varTable = varTable state ++ varTableEntriesForFArgs}
     state <- get
-
-    state <- get
-    -- put $ state{ currentFunction = Nothing}
-    state <- get
     let mod_ = mod state
-
     funcName <- liftIO $ newCString $ fname dec
-    let types = map typeToWASTType $ ftypes dec -- TODO: Look at this
-    let types_ = tail types
-    let ret = if null types then Binaryen.Type.none else head types
-    -- ret <- liftIO $ Binaryen.getType body
+    let types = map typeToWASTType $ ftypes dec
+        types_ = tail types
+        ret = if null types then Binaryen.Type.none else head types
     typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
         liftIO $ pokeArray ta types_
         return ta
     type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
     state <- get
-    put $ state{functionTable = functionTable state ++ [FunctionTableEntry { ftname = fname dec, ftparams = tail (ftypes dec), ftresult = if null types then head (ftypes dec) else Parser.IO, ftargnames = fargs def }]}
+    put $ state{functionTable = functionTable state ++ [FunctionTableEntry{ftname = fname dec, ftparams = tail (ftypes dec), ftresult = if null types then head (ftypes dec) else Parser.IO, ftargnames = fargs def}]}
     body <- compileExprToWAST $ fbody def
-
     bodyLocals <- liftIO $ getLocals body
     localsValues <- liftIO $ mapM Binaryen.localSetGetValue bodyLocals
     localsTypes <- liftIO $ mapM Binaryen.getType localsValues
-
     localsTypesArr <- liftIO $ allocaArray (length localsTypes) $ \ta -> do
         liftIO $ pokeArray ta localsTypes
         return ta
-
     fun <- liftIO $ Binaryen.addFunction mod_ funcName type_ ret localsTypesArr (fromIntegral (length bodyLocals)) body
     if fname dec == "main"
-        then do
-            _ <- liftIO $ Binaryen.setStart mod_ fun
-            liftIO $ Binaryen.Expression.nop mod_
+        then liftIO $ Binaryen.setStart mod_ fun >> liftIO (Binaryen.Expression.nop mod_)
         else liftIO $ Binaryen.Expression.nop mod_
 compileExprToWAST _ = do
     state <- get

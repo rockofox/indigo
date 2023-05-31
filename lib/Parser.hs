@@ -3,7 +3,6 @@
 
 module Parser (Expr (..), Program (..), Type (..), parseProgram) where
 
-import Control.Monad (void)
 import Control.Monad.Combinators
     ( between
     , choice
@@ -12,19 +11,19 @@ import Control.Monad.Combinators
     , sepBy
     , sepBy1
     , sepEndBy
-    , some
     , (<|>)
     )
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
+import Control.Monad.State hiding (state)
 import Data.Text (Text)
 import Data.Void (Void)
 import Text.Megaparsec
     ( MonadParsec (eof, takeWhile1P, try)
     , ParseErrorBundle
-    , Parsec
+    , ParsecT
     , optional
-    , parse
-    , (<?>), sepEndBy1
+    , runParserT
+    , (<?>)
     )
 import Text.Megaparsec.Char
     ( alphaNumChar
@@ -35,7 +34,15 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 
-type Parser = Parsec Void Text
+data ParserState = ParserState
+    { validFunctions :: [String]
+    , validLets :: [String]
+    }
+    deriving
+        ( Show
+        )
+
+type Parser = ParsecT Void Text (State ParserState)
 
 data Expr
     = Var String
@@ -73,13 +80,14 @@ data Expr
         ( Show
         )
 
+data Type = Int | Bool | String | IO | Any | Fn {args :: [Type], ret :: Type} deriving (Show)
+
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "!" Not]
     , [binary "+" Add, binary "-" Sub]
     , [binary "*" Mul, binary "/" Div]
     , [binary "~>" And]
-    , [prefix "*" Ref]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
     ]
@@ -90,6 +98,11 @@ binary name f = InfixL (f <$ symbol name)
 prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
 prefix name f = Prefix (f <$ symbol name)
 postfix name f = Postfix (f <$ symbol name)
+
+ref :: Parser Expr
+ref = do
+    symbol "*"
+    Ref <$> funcCall
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
@@ -155,8 +168,6 @@ foreignIdentifier = do
 expr :: Parser Expr
 expr = makeExprParser term binOpTable
 
-data Type = Int | Bool | String | IO | Any | Fn {args :: [Type], ret :: Type} deriving (Show)
-
 validType :: Parser Type
 validType =
     do
@@ -180,7 +191,7 @@ validType =
                 args <- sepBy validType (symbol "->")
                 symbol "=>"
                 ret <- validType
-                return Fn {args = args, ret = ret}
+                return Fn{args = args, ret = ret}
         <?> "type"
 
 externLanguage :: Parser String
@@ -196,22 +207,6 @@ externLanguage =
             return "jsrev"
         <?> "language"
 
-internalFunctionName :: Parser String
-internalFunctionName =
-    do
-        symbol "__wasm_i32_store"
-        return "__wasm_i32_store"
-        <|> do
-            symbol "__wasm_i32_load"
-            return "__wasm_i32_load"
-        <?> "internal function name"
-
-internalFunction :: Parser Expr
-internalFunction = do
-    name <- internalFunctionName
-    args <- some expr
-    return $ InternalFunction name args
-
 stringLit :: Parser String
 stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 
@@ -225,6 +220,9 @@ externDec = do
     args <- sepBy validType (symbol "->")
     symbol "=>"
     ret <- validType
+    state <- get
+    put state{validFunctions = name : validFunctions state}
+
     return $ ExternDec lang name (args ++ [ret])
 
 funcDec :: Parser Expr
@@ -243,16 +241,37 @@ funcDef = do
 
 funcCall :: Parser Expr
 funcCall = do
+    state <- get
     name <- foreignIdentifier <?> "function name"
-    args <- some expr
+    unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
+    args <- sepBy1 expr (symbol ",") <?> "function arguments"
     return $ FuncCall name args
+
+internalFunctionName :: Parser String
+internalFunctionName =
+    do
+        symbol "__wasm_i32_store"
+        return "__wasm_i32_store"
+        <|> do
+            symbol "__wasm_i32_load"
+            return "__wasm_i32_load"
+        <?> "internal function name"
+
+internalFunction :: Parser Expr
+internalFunction = do
+    name <- internalFunctionName
+    args <- sepBy1 expr (symbol ",") <?> "function arguments"
+    return $ InternalFunction name args
 
 letExpr :: Parser Expr
 letExpr = do
     symbol "let"
     name <- identifier
     symbol "="
-    Let name <$> expr
+    value <- expr
+    state <- get
+    put state{validLets = name : validLets state}
+    return $ Let name value
 
 ifExpr :: Parser Expr
 ifExpr = do
@@ -261,9 +280,7 @@ ifExpr = do
     symbol "then"
     thenExpr <- expr
     symbol "else"
-    elseExpr <- expr
-    -- symbol "end"
-    return $ If cond thenExpr elseExpr
+    If cond thenExpr <$> expr
 
 doBlock :: Parser Expr
 doBlock = do
@@ -287,6 +304,10 @@ modernFunction = do
     symbol "=>"
     returnType <- validType <?> "return type"
     symbol "="
+
+    state <- get
+    put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
+
     body <- expr
     return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
 
@@ -307,8 +328,15 @@ placeholder = symbol "()" >> return Placeholder
 
 newtype Program = Program [Expr] deriving (Show)
 
+parseProgram' :: Text -> State ParserState (Either (ParseErrorBundle Text Void) Program)
+parseProgram' = runParserT program ""
+
 parseProgram :: Text -> Either (ParseErrorBundle Text Void) Program
-parseProgram = parse program ""
+parseProgram t = do
+    let result = evalState (parseProgram' t) (ParserState [] [])
+    case result of
+        Left err -> Left err
+        Right program -> Right program
 
 lines' :: Parser [Expr]
 lines' = expr `sepEndBy` newline'
@@ -318,7 +346,10 @@ program = Program <$> between scn eof lines'
 
 var :: Parser Expr
 var = do
-    Var <$> identifier
+    state <- get
+    name <- identifier
+    unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
+    return $ Var name
 
 term :: Parser Expr
 term =
@@ -341,4 +372,5 @@ term =
         , try funcCall
         , ifExpr
         , var
+        , ref
         ]
