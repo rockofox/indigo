@@ -12,7 +12,12 @@ puts str : String => IO = do
   discard (fd_write 1 0 1 20)
 end
 
+call arg : String -> fn : Fn {String => IO} => IO = do
+  fn arg
+end
+
 main => IO = do
   let x = "hello world\n"
-  puts (x)
+  # puts x
+  call (x) (*puts())
 end

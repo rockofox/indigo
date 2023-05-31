@@ -1,11 +1,9 @@
 module Main where
 
-import Analyzer
 import Control.Monad
 import Control.Monad.Cont (MonadIO (liftIO))
 import Data.List (intercalate)
 import Data.Text qualified as T
-import JSEmitter (compileProgramToJS)
 import Options.Applicative
 import Parser hiding (expr)
 import System.Posix.IO (stdOutput)
@@ -16,7 +14,6 @@ import WASMEmitter
 data Options = Options
     { input :: Maybe FilePath
     , output :: Maybe FilePath
-    , target :: String
     , debug :: Bool
     }
 
@@ -38,12 +35,6 @@ optionsParser =
                     <> metavar "FILE"
                     <> help "Output file. Use - for stdout."
                 )
-            )
-        <*> strOption
-            ( long "target"
-                <> short 't'
-                <> metavar "TARGET"
-                <> help "Compilation target (javascript or wasm)"
             )
         <*> switch
             ( long "debug"
@@ -68,12 +59,12 @@ prettyPrintProgram (Program exprs) = do
 
 main :: IO ()
 main = do
-    Options input output target debug <-
+    Options input output debug <-
         execParser $
             info
                 (optionsParser <**> helper)
                 ( fullDesc
-                    <> progDesc "Compile a Prisma program to JavaScript or WebAssembly"
+                    <> progDesc "Compile a Prisma program to WebAssembly"
                     <> header "prisma - a functional programming language"
                 )
     inputContents <- case input of
@@ -87,17 +78,8 @@ main = do
     case parseResult of
         Left err -> putStrLn $ "Parse error: " ++ errorBundlePretty err
         Right expr -> do
-            case target of
-                "javascript" -> do
-                    let js = compileProgramToJS expr
-                    case output of
-                        Just "-" -> putStrLn js
-                        Just file -> writeFile file js
-                        Nothing -> putStrLn js
-                "wasm" -> do
-                    wat <- compileProgramToWAST expr
-                    case output of
-                        Just "-" -> putStrLn wat
-                        Just file -> writeFile file wat
-                        Nothing -> putStrLn wat
-                _ -> putStrLn "Invalid target"
+            wat <- compileProgramToWAST expr
+            case output of
+                Just "-" -> putStrLn wat
+                Just file -> writeFile file wat
+                Nothing -> putStrLn wat

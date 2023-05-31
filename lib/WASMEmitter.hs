@@ -3,7 +3,7 @@ module WASMEmitter (compileProgramToWAST) where
 import Binaryen qualified
 import Binaryen.Export (getKind, getValue)
 import Binaryen.Export qualified as Export
-import Binaryen.Expression (constInt32)
+import Binaryen.Expression (constInt32, refFunc)
 import Binaryen.Expression qualified
 import Binaryen.Expression qualified as Binaryen
 import Binaryen.ExpressionId (localSetId)
@@ -13,30 +13,32 @@ import Binaryen.Module (getExportByIndex, getFunction, getNumExports)
 import Binaryen.Module qualified
 import Binaryen.Module qualified as Binaryen
 import Binaryen.Op qualified as Binaryen
-import Binaryen.Type (auto, create, int32, none)
+import Binaryen.Type (auto, create, int32, none, funcref, Type)
 import Control.Monad (filterM, unless, when)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT))
 import Data.ByteString qualified as BS
-import Data.List (elemIndex, find)
+import Data.List (elemIndex, find, findIndex)
 import Data.Maybe (fromMaybe, isJust)
 import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, nullPtr, pokeArray)
 import Foreign.C (CChar, newCString, peekCString)
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Marshal.Utils (copyBytes)
-import Parser (Expr (..), Program (Program))
+import Parser ( Expr(..), Program(Program), Type, Type(..) )
 import System.Directory ( doesFileExist )
 import System.IO (hIsTerminalDevice)
 import System.IO qualified as IO
 import Prelude hiding (mod)
 import Data.Functor ((<&>))
+import Debug.Trace (trace, traceShow)
 
 pop :: [a] -> [a]
 pop [] = []
 pop xs = init xs
 
-typeToWASTType :: String -> Binaryen.Type
-typeToWASTType "Int" = int32
-typeToWASTType "IO" = none
+typeToWASTType :: Parser.Type -> Binaryen.Type
+typeToWASTType Parser.Int = int32
+typeToWASTType Parser.IO = none
+typeToWASTType Parser.String = int32
 typeToWASTType _ = int32
 
 sizeOf :: Expr -> Int
@@ -47,6 +49,14 @@ sizeOf _ = 1
 data VarTableEntry = VarTableEntry
     { name :: String
     , context :: Maybe String
+    }
+    deriving (Show)
+
+data FunctionTableEntry = FunctionTableEntry
+    { ftname :: String
+    ,  ftargnames :: [String]
+    , ftparams :: [Parser.Type]
+    , ftresult :: Parser.Type
     }
     deriving (Show)
 
@@ -62,6 +72,7 @@ data CompilerState = CompilerState
     , memory :: [MemoryCell]
     , currentFunction :: Maybe String
     , importedModules :: [(String, Binaryen.Module)]
+    , functionTable :: [FunctionTableEntry]
     }
     deriving (Show)
 
@@ -89,7 +100,7 @@ findVarIndex name_ = do
 compileProgramToWAST :: Program -> IO String
 compileProgramToWAST (Program exprs) = do
     newModule <- Binaryen.Module.create
-    let initialState = CompilerState{mod = newModule, varTable = [], memory = [], currentFunction = Nothing, importedModules = []}
+    let initialState = CompilerState{mod = newModule, varTable = [], memory = [], currentFunction = Nothing, importedModules = [], functionTable = []}
     (_, state) <- runStateT (mapM_ compileExprToWAST exprs) initialState
     let mod_ = mod state
     let memory_ = memory state
@@ -102,6 +113,10 @@ compileProgramToWAST (Program exprs) = do
     poke segmentsPassive 0
 
     _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
+
+    functionTablePtr <- newArray =<< mapM ((newCString . (++ "\0")) . ftname) (functionTable state)
+    offsetExpr <- Binaryen.constInt32 mod_ 0
+    _ <- Binaryen.setFunctionTable mod_ (fromIntegral $ length $ functionTable state) (fromIntegral $ length $ functionTable state) functionTablePtr (fromIntegral $ length (functionTable state)) offsetExpr
     -- status <- Binaryen.validate mod_        FIXME: Validator is broken ;(
     let status = (1 :: Integer)
 
@@ -147,6 +162,9 @@ moduleFromFile path = do
 
 -- Binaryen.Module.create -- FIXME: obviously
 
+unreachable :: a
+unreachable = error "Unreachable code reached"
+
 compileExprToWAST :: Expr -> StateT CompilerState IO Binaryen.Expression
 compileExprToWAST (InternalFunction name args) = do
     state <- get
@@ -191,7 +209,7 @@ compileExprToWAST (Import objects source) = do
             sourcePtr <- liftIO $ newCString source
             liftIO $ Binaryen.addFunctionImport mod_ name sourcePtr name params results
         )
-        importedFunctions 
+        importedFunctions
 
     liftIO $ Binaryen.nop mod_
 compileExprToWAST (ExternDec lang name types) = do
@@ -251,15 +269,35 @@ compileExprToWAST (Div a b) = do
     compiledA <- compileExprToWAST a
     compiledB <- compileExprToWAST b
     liftIO $ Binaryen.binary mod_ Binaryen.divSInt32 compiledA compiledB
-compileExprToWAST (FuncCall name args) = do
+compileExprToWAST (FuncCall fname args) = do
     state <- get
+    let parentVarTable = filter (\x -> context x == currentFunction state) (varTable state)
+    let fn = fromMaybe unreachable $ find (\x -> ftname x == fromMaybe unreachable (currentFunction state)) (functionTable state)
     let mod_ = mod state
-    funcName <- liftIO $ newCString name
+    funcName <- liftIO $ newCString fname
     compiledArgs <- mapM compileExprToWAST args
     wasmArgs <- liftIO $ allocaArray (length args) $ \ta -> do
         liftIO $ pokeArray ta compiledArgs
         return ta
-    liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
+    if fname `notElem` map name parentVarTable then
+        liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
+    else do
+        varIndex <- findVarIndex fname
+        case varIndex of
+            Nothing -> error $ "Variable " ++ fname ++ " not found"
+            Just varIndex -> do
+                let argIndex = fromMaybe unreachable $ elemIndex fname (ftargnames fn)
+                let fnType = ftparams fn !! argIndex
+                case fnType of
+                    (Fn args ret) -> do
+                        tableIndexConst <- liftIO $ Binaryen.localGet mod_ (fromIntegral varIndex) int32
+                        let types_ = map typeToWASTType args
+                        typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
+                            liftIO $ pokeArray ta types_
+                            return ta
+                        type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
+                        liftIO $ Binaryen.Expression.callIndirect mod_ tableIndexConst wasmArgs (fromIntegral $ length args) type_ (typeToWASTType ret)
+                    _ -> unreachable
 compileExprToWAST (IntLit int) = do
     state <- get
     let mod_ = mod state
@@ -301,6 +339,15 @@ compileExprToWAST (Discard expr) = do
     compiledExpr <- compileExprToWAST expr
     type_ <- liftIO $ Binaryen.getType compiledExpr
     liftIO $ Binaryen.drop mod_ compiledExpr
+compileExprToWAST (Ref expr) = do
+    state <- get
+    let mod_ = mod state
+    case expr of
+        FuncCall name args -> do
+            namePtr <- liftIO $ newCString name
+            let functionIndex = elemIndex name $ map ftname $ functionTable state
+            liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
+        _ -> error "Can only take reference of function call"
 compileExprToWAST (ModernFunc def dec) = do
     state <- get
     put $ state{currentFunction = Just $ fname dec}
@@ -315,12 +362,11 @@ compileExprToWAST (ModernFunc def dec) = do
     put $ state{varTable = varTable state ++ varTableEntriesForFArgs}
     state <- get
 
-    body <- compileExprToWAST $ fbody def
     state <- get
-
-    put $ state{currentFunction = Nothing}
+    -- put $ state{ currentFunction = Nothing}
     state <- get
     let mod_ = mod state
+
     funcName <- liftIO $ newCString $ fname dec
     let types = map typeToWASTType $ ftypes dec -- TODO: Look at this
     let types_ = tail types
@@ -330,6 +376,9 @@ compileExprToWAST (ModernFunc def dec) = do
         liftIO $ pokeArray ta types_
         return ta
     type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
+    state <- get
+    put $ state{functionTable = functionTable state ++ [FunctionTableEntry { ftname = fname dec, ftparams = tail (ftypes dec), ftresult = if null types then head (ftypes dec) else Parser.IO, ftargnames = fargs def }]}
+    body <- compileExprToWAST $ fbody def
 
     bodyLocals <- liftIO $ getLocals body
     localsValues <- liftIO $ mapM Binaryen.localSetGetValue bodyLocals

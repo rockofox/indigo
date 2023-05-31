@@ -60,8 +60,8 @@ library prisma-lib
     import:           warnings
 
     exposed-modules: Parser,
-                   Analyzer,
-                   JSEmitter,
+                --    Analyzer,
+                --    JSEmitter,
                    WASMEmitter
 
     -- LANGUAGE extensions used by modules in this package.

@@ -1,7 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-module Parser where
+module Parser (Expr (..), Program (..), Type (..), parseProgram) where
 
 import Control.Monad (void)
 import Control.Monad.Combinators
@@ -24,7 +24,7 @@ import Text.Megaparsec
     , Parsec
     , optional
     , parse
-    , (<?>)
+    , (<?>), sepEndBy1
     )
 import Text.Megaparsec.Char
     ( alphaNumChar
@@ -47,10 +47,10 @@ data Expr
     | Let String Expr
     | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
     | FuncCall String [Expr]
-    | FuncDec {fname :: String, ftypes :: [String]}
+    | FuncDec {fname :: String, ftypes :: [Type]}
     | ModernFunc Expr Expr
     | DoBlock [Expr]
-    | ExternDec String String [String]
+    | ExternDec String String [Type]
     | Add Expr Expr
     | Sub Expr Expr
     | Mul Expr Expr
@@ -68,6 +68,7 @@ data Expr
     | InternalFunction {fname :: String, ifargs :: [Expr]}
     | Discard Expr
     | Import [String] String
+    | Ref Expr
     deriving
         ( Show
         )
@@ -77,6 +78,8 @@ binOpTable =
     [ [prefix "!" Not]
     , [binary "+" Add, binary "-" Sub]
     , [binary "*" Mul, binary "/" Div]
+    , [binary "~>" And]
+    , [prefix "*" Ref]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
     ]
@@ -90,6 +93,9 @@ postfix name f = Postfix (f <$ symbol name)
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
+
+curlyBrackets :: Parser a -> Parser a
+curlyBrackets = between (symbol "{") (symbol "}")
 
 lineComment, blockComment :: Parser ()
 lineComment = L.skipLineComment "#"
@@ -149,23 +155,32 @@ foreignIdentifier = do
 expr :: Parser Expr
 expr = makeExprParser term binOpTable
 
-validType :: Parser String
+data Type = Int | Bool | String | IO | Any | Fn {args :: [Type], ret :: Type} deriving (Show)
+
+validType :: Parser Type
 validType =
     do
         symbol "Int"
-        return "Int"
+        return Int
         <|> do
             symbol "Bool"
-            return "Bool"
+            return Bool
         <|> do
             symbol "String"
-            return "String"
+            return String
         <|> do
             symbol "IO"
-            return "IO"
+            return IO
         <|> do
             symbol "Any"
-            return "Any"
+            return Any
+        <|> do
+            symbol "Fn"
+            curlyBrackets $ do
+                args <- sepBy validType (symbol "->")
+                symbol "=>"
+                ret <- validType
+                return Fn {args = args, ret = ret}
         <?> "type"
 
 externLanguage :: Parser String
