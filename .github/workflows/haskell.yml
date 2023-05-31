@@ -21,22 +21,28 @@ jobs:
         ghc-version: '8.10.3'
         cabal-version: '3.2'
         
+    - name: Cache Wasmtime and Cabal
+      id: cache
+      uses: actions/cache@v2
+      with:
+        path: |
+          ~/.wasmtime
+          ~/.cabal
+        key: ${{ runner.os }}-wasmtime-cabal-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-wasmtime-cabal-
+          ${{ runner.os }}-wasmtime-
+          ${{ runner.os }}-cabal-
+          ${{ runner.os }}-
+
     - name: Install Wasmtime
       run: |
-        curl https://wasmtime.dev/install.sh -sSf | bash
-        echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
-        
-    - name: Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-cabal
-      with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
-        restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+        if [ ! -d "$HOME/.wasmtime" ]; then
+          wget https://github.com/bytecodealliance/wasmtime/releases/download/v9.0.2/wasmtime-v9.0.2-x86_64-linux.tar.xz
+          tar -xvf wasmtime-v9.0.2-x86_64-linux.tar.xz
+          mv wasmtime-v9.0.2-x86_64-linux $HOME/.wasmtime
+          echo "$HOME/.wasmtime/" >> $GITHUB_PATH
+        fi
 
     - name: Install dependencies
       run: |
