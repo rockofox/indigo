@@ -41,7 +41,7 @@ jobs:
           wget https://github.com/bytecodealliance/wasmtime/releases/download/v9.0.2/wasmtime-v9.0.2-x86_64-linux.tar.xz
           tar -xvf wasmtime-v9.0.2-x86_64-linux.tar.xz
           mv wasmtime-v9.0.2-x86_64-linux $HOME/.wasmtime
-          echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
+          echo "$HOME/.wasmtime/" >> $GITHUB_PATH
         fi
 
     - name: Install dependencies
