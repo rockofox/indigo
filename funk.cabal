@@ -62,7 +62,9 @@ library prisma-lib
     exposed-modules: Parser,
                 --    Analyzer,
                 --    JSEmitter,
-                   WASMEmitter
+                   WASMEmitter,
+                   CEmitter,
+                   Interpreter
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -77,7 +79,8 @@ library prisma-lib
         mtl,
         binaryen,
         directory,
-        bytestring
+        bytestring,
+        binary
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -89,7 +92,8 @@ library prisma-lib
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
-                        DuplicateRecordFields
+                        DuplicateRecordFields,
+                        DeriveGeneric
 
 executable prisma
     -- .hs or .lhs file containing the Main module.
@@ -101,6 +105,7 @@ executable prisma
                       megaparsec,
                       mtl,
                       text,
+                      bytestring,
                       prisma-lib
     -- Language Extensions
     default-extensions: OverloadedStrings,

@@ -1,7 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-module Parser (Expr (..), Program (..), Type (..), parseProgram) where
+module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf) where
 
 import Control.Monad.Combinators
     ( between
@@ -15,13 +15,18 @@ import Control.Monad.Combinators
     )
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
 import Control.Monad.State hiding (state)
-import Data.Text (Text)
+import Data.Binary qualified
+import Data.Text (Text, unpack)
 import Data.Void (Void)
+import GHC.Arr (indices)
+import GHC.Generics (Generic)
 import Text.Megaparsec
-    ( MonadParsec (eof, takeWhile1P, try)
+    ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
+    , ParseError
     , ParseErrorBundle
     , ParsecT
     , optional
+    , registerParseError
     , runParserT
     , (<?>)
     )
@@ -33,10 +38,19 @@ import Text.Megaparsec.Char
     , space1
     )
 import Text.Megaparsec.Char.Lexer qualified as L
+import Text.Megaparsec.Debug
+
+data CompilerFlags = CompilerFlags
+    { verboseMode :: Bool
+    }
+    deriving
+        ( Show
+        )
 
 data ParserState = ParserState
     { validFunctions :: [String]
     , validLets :: [String]
+    , compilerFlags :: CompilerFlags
     }
     deriving
         ( Show
@@ -55,7 +69,7 @@ data Expr
     | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
     | FuncCall String [Expr]
     | FuncDec {fname :: String, ftypes :: [Type]}
-    | ModernFunc Expr Expr
+    | ModernFunc {fdef :: Expr, fdec :: Expr}
     | DoBlock [Expr]
     | ExternDec String String [Type]
     | Add Expr Expr
@@ -76,17 +90,53 @@ data Expr
     | Discard Expr
     | Import [String] String
     | Ref Expr
+    | Struct String [(String, Type)]
+    | StructLit String [(String, Expr)]
+    | Array [Expr]
+    | ArrayAccess Expr Expr
+    | Modulo Expr Expr
+    | Target String Expr
     deriving
         ( Show
+        , Generic
         )
 
-data Type = Int | Bool | String | IO | Any | Fn {args :: [Type], ret :: Type} deriving (Show)
+data Type = Int | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Eq, Generic)
+
+newtype Program = Program [Expr] deriving (Show, Generic)
+
+instance Data.Binary.Binary Type
+
+instance Data.Binary.Binary Expr
+
+instance Data.Binary.Binary Program
+
+typeOf :: Expr -> Parser.Type
+typeOf (IntLit _) = Int
+typeOf (BoolLit _) = Bool
+typeOf (StringLit _) = String
+typeOf (Add x y) = typeOf x
+typeOf (Sub x y) = typeOf x
+typeOf (Mul x y) = typeOf x
+typeOf (Div x y) = typeOf x
+typeOf (Eq x y) = Bool
+typeOf (Neq x y) = Bool
+typeOf (Lt x y) = Bool
+typeOf (Gt x y) = Bool
+typeOf (Le x y) = Bool
+typeOf (Ge x y) = Bool
+typeOf (And x y) = Bool
+typeOf (Or x y) = Bool
+typeOf (Not x) = Bool
+typeOf Placeholder = None
+typeOf _ = Any
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "!" Not]
     , [binary "+" Add, binary "-" Sub]
     , [binary "*" Mul, binary "/" Div]
+    , [binary "%" Modulo]
     , [binary "~>" And]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
@@ -132,7 +182,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
 rws :: [String] -- list of reserved words
-rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard"]
+rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard", "let"]
 
 identifier :: Parser String
 identifier = do
@@ -205,12 +255,17 @@ externLanguage =
         <|> do
             symbol "jsrev"
             return "jsrev"
+        <|> do
+            symbol "c"
+            return "c"
+        <|> do
+            symbol "runtime"
+            return "runtime"
         <?> "language"
 
 stringLit :: Parser String
 stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
 
--- TODO: take a look at this in context of modern function syntax and consider making them consistent
 externDec :: Parser Expr
 externDec = do
     symbol "extern"
@@ -278,29 +333,33 @@ ifExpr = do
     symbol "if"
     cond <- expr
     symbol "then"
+    optional newline'
     thenExpr <- expr
+    optional newline'
     symbol "else"
-    If cond thenExpr <$> expr
+    optional newline'
+    elseExpr <- expr
+    optional newline'
+    return $ If cond thenExpr elseExpr
 
 doBlock :: Parser Expr
 doBlock = do
     symbol "do"
     newline'
     exprs <- lines'
-    symbol "end"
+    symbol "end" <|> lookAhead (symbol "else")
     return $ DoBlock exprs
 
 modernFunction :: Parser Expr
 modernFunction = do
-    name <- identifier
+    name <- identifier <?> "function name"
     (args, argTypes) <-
         unzip <$> many do
-            arg <- identifier
+            arg <- identifier <?> "function argument"
             symbol ":"
-            argType <- validType
+            argType <- validType <?> "function argument type"
             optional $ symbol "->"
-            return (arg, argType)
-
+            return (arg, argType) <?> "function arguments"
     symbol "=>"
     returnType <- validType <?> "return type"
     symbol "="
@@ -308,7 +367,7 @@ modernFunction = do
     state <- get
     put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
 
-    body <- expr
+    body <- recover expr <?> "function body"
     return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
 
 discard :: Parser Expr
@@ -323,17 +382,65 @@ import_ = do
     symbol "from"
     Import objects <$> stringLit
 
+array :: Parser Expr
+array = do
+    symbol "["
+    elements <- sepBy expr (symbol ",")
+    symbol "]"
+    return $ Array elements
+
+struct :: Parser Expr
+struct = do
+    symbol "struct"
+    name <- identifier
+    symbol "{"
+    optional newline'
+    fields <-
+        sepBy1
+            ( do
+                fieldName <- identifier
+                symbol ":"
+                fieldType <- validType
+                return (fieldName, fieldType)
+            )
+            (symbol "," <* optional newline')
+    optional newline'
+    symbol "}"
+    return $ Struct name fields
+
+structLit :: Parser Expr
+structLit = do
+    name <- identifier
+    symbol "{"
+    fields <-
+        sepBy1
+            ( do
+                fieldName <- identifier
+                symbol ":"
+                fieldValue <- expr
+                return (fieldName, fieldValue)
+            )
+            (symbol ",")
+    symbol "}"
+    return $ StructLit name fields
+
+arrayAccess :: Parser Expr
+arrayAccess = do
+    a <- choice [var, array]
+    symbol "["
+    index <- expr
+    symbol "]"
+    return $ ArrayAccess a index
+
 placeholder :: Parser Expr
 placeholder = symbol "()" >> return Placeholder
-
-newtype Program = Program [Expr] deriving (Show)
 
 parseProgram' :: Text -> State ParserState (Either (ParseErrorBundle Text Void) Program)
 parseProgram' = runParserT program ""
 
-parseProgram :: Text -> Either (ParseErrorBundle Text Void) Program
-parseProgram t = do
-    let result = evalState (parseProgram' t) (ParserState [] [])
+parseProgram :: Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
+parseProgram t cf = do
+    let result = evalState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
     case result of
         Left err -> Left err
         Right program -> Right program
@@ -351,26 +458,55 @@ var = do
     unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
     return $ Var name
 
+target :: Parser Expr
+target = do
+    symbol "__target"
+    target <- (symbol "wasm" <|> symbol "c") <?> "target"
+    Target (unpack target) <$> expr
+
+verbose :: Show a => String -> Parser a -> Parser a
+verbose str parser = do
+    state <- get
+    let shouldBeVerbose = verboseMode $ compilerFlags state
+    if shouldBeVerbose then dbg str parser else parser
+
+recover :: Parser Expr -> Parser Expr
+recover = withRecovery recover'
+  where
+    recover' :: ParseError Text Void -> Parser Expr
+    recover' err = do
+        registerParseError err
+        return $ Placeholder
+
 term :: Parser Expr
 term =
-    choice
-        [ placeholder
-        , parens expr
-        , IntLit <$> try integer
-        , StringLit <$> try stringLit
-        , symbol "True" >> return (BoolLit True)
-        , symbol "False" >> return (BoolLit False)
-        , try import_
-        , try externDec
-        , doBlock
-        , try letExpr
-        , try modernFunction
-        , try funcDec
-        , try funcDef
-        , try internalFunction
-        , try discard
-        , try funcCall
-        , ifExpr
-        , var
-        , ref
-        ]
+    choice $
+        ( (\(index, parser) -> verbose ("term " ++ show index) parser)
+            <$> zip
+                [0 ..]
+                [ placeholder -- 0
+                , parens expr -- 1
+                , IntLit <$> try integer -- 2
+                , StringLit <$> try stringLit -- 3
+                , symbol "True" >> return (BoolLit True) -- 4
+                , symbol "False" >> return (BoolLit False) -- 5
+                , letExpr -- 6
+                , import_ -- 7
+                , externDec -- 8
+                , doBlock -- 9
+                , try modernFunction -- 10
+                , target -- aw hell nah, screw it
+                , struct -- 11
+                , try structLit -- 12
+                , array -- 13
+                , -- , try funcDec
+                  -- , try funcDef
+                  try internalFunction -- 14
+                , try discard -- 15
+                , try funcCall -- 16
+                , try arrayAccess -- 17
+                , ifExpr -- 18
+                , var -- 19
+                , ref -- 20
+                ]
+        )

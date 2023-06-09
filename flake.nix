@@ -40,6 +40,10 @@
             pkgs.wasmtime
             pkgs.wabt
           ];
+          # shellHook = ''
+          #   alias wasi-cc=$HOME/Downloads/wasi-sdk-20.0/bin/clang
+          #   alias wasi-ld=$HOME/Downloads/wasi-sdk-20.0/bin/wasm-ld
+          # '';
           withHoogle = false;
         };
       }

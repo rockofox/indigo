@@ -3,25 +3,31 @@ module WASMEmitter (compileProgramToWAST) where
 import Binaryen qualified
 import Binaryen.Export (getKind, getValue)
 import Binaryen.Export qualified as Export
-import Binaryen.Expression (constInt32)
+import Binaryen.Expression (constInt32, getId, getType, ifGetCondition, ifGetIfFalse, ifGetIfTrue, nop)
 import Binaryen.Expression qualified
 import Binaryen.Expression qualified as Binaryen
-import Binaryen.ExpressionId (localSetId)
+import Binaryen.ExpressionId (blockId, ifId, localSetId)
+import Binaryen.ExpressionId qualified as Binaryen
 import Binaryen.ExternalKind (externalFunction)
 import Binaryen.Function (getParams, getResults)
 import Binaryen.Module (getExportByIndex, getFunction, getNumExports)
 import Binaryen.Module qualified
 import Binaryen.Module qualified as Binaryen
+import Binaryen.Op (addInt32)
 import Binaryen.Op qualified as Binaryen
 import Binaryen.Type (auto, create, int32, none)
-import Control.Monad (filterM, unless, when)
+import Control.Monad (filterM, unless, void, when)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT))
 import Data.ByteString qualified as BS
+import Data.Char (chr, ord)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find)
 import Data.Maybe (fromMaybe, isJust)
-import Foreign (Ptr, Storable (poke), allocaArray, malloc, newArray, nullPtr, pokeArray)
-import Foreign.C (CChar, newCString, peekCString)
+import Data.Text.Internal.Fusion.Types (CC)
+import Data.Tree (flatten)
+import Debug.Trace (trace)
+import Foreign (Int8, Ptr, Storable (poke), allocaArray, castPtr, malloc, newArray, nullPtr, pokeArray)
+import Foreign.C (CChar, castCharToCChar, newCString, peekCString, withCString)
 import Foreign.Marshal.Alloc (mallocBytes)
 import Foreign.Marshal.Utils (copyBytes)
 import Parser (Expr (..), Program (Program), Type (..))
@@ -61,7 +67,7 @@ data FunctionTableEntry = FunctionTableEntry
 
 data MemoryCell = MemoryCell
     { size :: Int
-    , data_ :: Ptr CChar
+    , data_ :: Ptr Int8
     }
     deriving (Show)
 
@@ -111,6 +117,7 @@ compileProgramToWAST (Program exprs) = do
     segmentsPassive <- malloc
     poke segmentsPassive 0
 
+    dataPtr <- newArray (fmap (castPtr . data_) memory_)
     _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
 
     functionTablePtr <- newArray =<< mapM ((newCString . (++ "\0")) . ftname) (functionTable state)
@@ -130,14 +137,70 @@ compileProgramToWAST (Program exprs) = do
 
 getLocals :: Binaryen.Expression -> IO [Binaryen.Expression]
 getLocals expr = do
-    numChildren <- Binaryen.Expression.blockGetNumChildren expr
-    exprs <- liftIO $ mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
+    type_ <- getId expr
+    exprs <- getLocals' type_ expr
     filterM
         ( \x -> do
-            xid <- Binaryen.getId x
+            xid <- getId x
             return $ xid == localSetId
         )
         exprs
+  where
+    getLocals' :: Binaryen.ExpressionId -> Binaryen.Expression -> IO [Binaryen.Expression]
+    getLocals' type_ expr
+        | type_ == blockId = do
+            numChildren <- Binaryen.Expression.blockGetNumChildren expr
+            exprs <- mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
+            exprsFlattened <- mapM getLocals exprs
+            return $ concat exprsFlattened
+        | type_ == ifId = do
+            trueBranch <- ifGetIfTrue expr
+            falseBranch <- ifGetIfFalse expr
+            condition <- ifGetCondition expr
+            trueBranchLocals <- getLocals trueBranch
+            falseBranchLocals <- getLocals falseBranch
+            conditionLocals <- getLocals condition
+            return $ concat [trueBranchLocals, falseBranchLocals, conditionLocals]
+        | otherwise = return [expr]
+
+-- type_ <- liftIO $ getType expr
+-- return $ case type_ of
+--     blockId -> do
+--         numChildren <- Binaryen.Expression.blockGetNumChildren expr
+--         return $ concat $ mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
+--     ifId -> do
+--         trueBranch <- ifGetIfTrue expr
+--         falseBranch <- ifGetIfFalse expr
+--         condition <- ifGetCondition expr
+--         return $ concat $ mapM [trueBranch, falseBranch, condition] getLocals
+
+-- return $ concat $ mapM [trueBranch, falseBranch, condition] getLocals
+
+-- getLocals expr = do
+--     numChildren <- Binaryen.Expression.blockGetNumChildren expr
+--     exprs <- mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
+--     exprsFlattened <-
+--         mapM
+--             ( \x -> do
+--                 xid <- Binaryen.getId x
+--                 case xid of
+--                     blockId -> do
+--                         trace "BLOCK" $ return ()
+--                         liftIO $ getLocals x
+--                     ifId -> do
+--                         trace "IF" $ return ()
+--                         liftIO $ getLocals x
+--                     otherwise -> return [x]
+--                     -- if xid == blockId then trace "BLOCK" liftIO $ getLocals x else trace "not block" return [x]
+--             )
+--             exprs
+--             <&> concat
+--     filterM
+--         ( \x -> do
+--             xid <- Binaryen.getId x
+--             return $ xid == localSetId
+--         )
+--         exprsFlattened
 
 readBinaryFileToPtr :: FilePath -> IO (Ptr CChar, Int)
 readBinaryFileToPtr filePath = do
@@ -309,10 +372,13 @@ compileExprToWAST (IntLit int) = do
     state <- get
     let mod_ = mod state
     liftIO $ Binaryen.Expression.constInt32 mod_ (fromIntegral int)
-compileExprToWAST (StringLit str) = do
+compileExprToWAST s@(StringLit str) = do
     state <- get
-    cStr <- liftIO $ newCString str
-    put $ state{memory = MemoryCell{size = length str, data_ = cStr} : memory state}
+    let bytes = compileLiteralToData s
+    bytesPtr <- liftIO $ allocaArray (length bytes) $ \ta -> do
+        liftIO $ pokeArray ta bytes
+        return ta
+    put $ state{memory = MemoryCell{size = length str, data_ = bytesPtr} : memory state}
     m <- getCellOffset $ length $ memory state
     let mod_ = mod state
     liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
@@ -380,7 +446,47 @@ compileExprToWAST (ModernFunc def dec) = do
     if fname dec == "main"
         then liftIO $ Binaryen.setStart mod_ fun >> liftIO (Binaryen.Expression.nop mod_)
         else liftIO $ Binaryen.Expression.nop mod_
+compileExprToWAST (Array exprs) = do
+    state <- get
+    let mod_ = mod state
+    let compiledExprs = map compileLiteralToData exprs
+    let c = concat compiledExprs
+    cPtr <- liftIO $ allocaArray (length c) $ \ta -> do
+        liftIO $ pokeArray ta c
+        return ta
+    put $ state{memory = MemoryCell{size = length compiledExprs, data_ = cPtr} : memory state}
+    m <- getCellOffset $ length $ memory state
+    let mod_ = mod state
+    liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
+compileExprToWAST (ArrayAccess a index) = do
+    state <- get
+    let mod_ = mod state
+    case a of
+        Var vname -> do
+            varIndex <- findVarIndex vname
+            case varIndex of
+                Nothing -> error $ "Unknown variable: " ++ vname
+                Just varIndex -> do
+                    compiledIndex <- compileExprToWAST index
+                    compiledVar <- liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
+                    computedIndex <- liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledVar compiledIndex
+                    liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 computedIndex
+        _ -> error "Array access must be a variable"
+compileExprToWAST (Modulo a b) = do
+    state <- get
+    let mod_ = mod state
+    compiledA <- compileExprToWAST a
+    compiledB <- compileExprToWAST b
+    liftIO $ Binaryen.binary mod_ Binaryen.remSInt32 compiledA compiledB
+compileExprToWAST (Target t expr)
+    | t == "wasm" = compileExprToWAST expr
 compileExprToWAST _ = do
     state <- get
     let mod_ = mod state
     liftIO $ Binaryen.Expression.nop mod_
+
+compileLiteralToData :: Expr -> [Int8]
+compileLiteralToData (IntLit int) = [fromIntegral int :: Int8]
+compileLiteralToData (StringLit str) = map (fromIntegral . ord) str
+compileLiteralToData _ = do
+    error "Literals must be constant"
