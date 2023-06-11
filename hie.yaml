@@ -1,8 +1,10 @@
+# cradle:
+#   cabal:
+#     - path: "./app"
+#       component: "exe:prisma"
+#     - path: "./lib"
+#       component: "lib:prisma-lib"
+#     - path: "./test"
+#       component: "test:tests"
 cradle:
-  cabal:
-    - path: "./app"
-      component: "exe:prisma"
-    - path: "./lib"
-      component: "lib:prisma-lib"
-    - path: "./test"
-      component: "test:tests"
+    cabal:

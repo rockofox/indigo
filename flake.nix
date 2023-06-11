@@ -15,7 +15,7 @@
       overlay = se: su: {
         haskellPackages = su.haskellPackages.override {
           overrides = hse: _hsu: {
-            "prisma" = hse.callCabal2nix "prisma" self { };
+            "prisma" = hse.callCabal2nix "prisma" ./. { };
           };
         };
         prisma =
@@ -30,7 +30,7 @@
       {
         defaultPackage = pkgs.prisma;
         devShell = pkgs.haskellPackages.shellFor {
-          packages = p: [ p."prisma" ];
+          packages = p: [ p."prisma"  ];
           buildInputs = [
             pkgs.haskellPackages.haskell-language-server
             pkgs.haskellPackages.cabal-install

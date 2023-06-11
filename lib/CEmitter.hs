@@ -4,9 +4,10 @@ import Data.Data (typeOf)
 import Debug.Trace
 import Parser (Expr (..), Program (..), Type (..), typeOf)
 
+-- Remove first element from list
 pop :: [a] -> [a]
 pop [] = []
-pop xs = init xs
+pop (x : xs) = xs
 
 popcatMap :: (a -> String) -> [a] -> String
 popcatMap f xs = pop $ concatMap f xs

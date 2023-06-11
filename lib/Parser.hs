@@ -1,4 +1,3 @@
-{-# LANGUAGE BlockArguments #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
 module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf) where
@@ -63,7 +62,7 @@ data Expr
     | BoolLit Bool
     | IntLit Integer
     | StringLit String
-    | BinOp String Expr Expr
+    | FloatLit Float
     | If Expr Expr Expr
     | Let String Expr
     | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
@@ -85,6 +84,7 @@ data Expr
     | And Expr Expr
     | Or Expr Expr
     | Not Expr
+    | UnaryMinus Expr
     | Placeholder
     | InternalFunction {fname :: String, ifargs :: [Expr]}
     | Discard Expr
@@ -95,13 +95,14 @@ data Expr
     | Array [Expr]
     | ArrayAccess Expr Expr
     | Modulo Expr Expr
+    | Power Expr Expr
     | Target String Expr
     deriving
         ( Show
         , Generic
         )
 
-data Type = Int | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Eq, Generic)
+data Type = Int | Float | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Eq, Generic)
 
 newtype Program = Program [Expr] deriving (Show, Generic)
 
@@ -113,12 +114,15 @@ instance Data.Binary.Binary Program
 
 typeOf :: Expr -> Parser.Type
 typeOf (IntLit _) = Int
+typeOf (FloatLit _) = Float
 typeOf (BoolLit _) = Bool
 typeOf (StringLit _) = String
 typeOf (Add x y) = typeOf x
 typeOf (Sub x y) = typeOf x
 typeOf (Mul x y) = typeOf x
 typeOf (Div x y) = typeOf x
+typeOf (Power x y) = typeOf x
+typeOf (UnaryMinus x) = typeOf x
 typeOf (Eq x y) = Bool
 typeOf (Neq x y) = Bool
 typeOf (Lt x y) = Bool
@@ -128,18 +132,38 @@ typeOf (Ge x y) = Bool
 typeOf (And x y) = Bool
 typeOf (Or x y) = Bool
 typeOf (Not x) = Bool
+typeOf (FuncCall _ _) = error "Cannot infer type of function call"
 typeOf Placeholder = None
-typeOf _ = Any
+typeOf (Var x) = error "Cannot infer type of variable"
+typeOf (Let x y) = error "Cannot infer type of let"
+typeOf (If x y z) = error "Cannot infer type of if"
+typeOf (FuncDef x y z) = error "Cannot infer type of function definition"
+typeOf (FuncDec x y) = error "Cannot infer type of function declaration"
+typeOf (ModernFunc x y) = error "Cannot infer type of modern function"
+typeOf (DoBlock x) = error "Cannot infer type of do block"
+typeOf (ExternDec x y z) = error "Cannot infer type of extern declaration"
+typeOf (InternalFunction x y) = error "Cannot infer type of internal function"
+typeOf (Discard x) = error "Cannot infer type of discard"
+typeOf (Import x y) = error "Cannot infer type of import"
+typeOf (Ref x) = error "Cannot infer type of ref"
+typeOf (Struct x y) = error "Cannot infer type of struct"
+typeOf (StructLit x y) = error "Cannot infer type of struct literal"
+typeOf (Array x) = error "Cannot infer type of array"
+typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
+typeOf (Modulo x y) = error "Cannot infer type of modulo"
+typeOf (Target x y) = error "Cannot infer type of target"
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
-    [ [prefix "!" Not]
-    , [binary "+" Add, binary "-" Sub]
-    , [binary "*" Mul, binary "/" Div]
+    [ 
+      [binary "+" Add, binary "-" Sub]
+    , [binary "*" Mul, binary "/" Div, binary "^" Power]
     , [binary "%" Modulo]
     , [binary "~>" And]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
+    , [prefix "!" Not]
+    , [prefix "-" UnaryMinus]
     ]
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
@@ -181,12 +205,11 @@ lexeme = L.lexeme sc
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
-rws :: [String] -- list of reserved words
+rws :: [String]
 rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard", "let"]
 
 identifier :: Parser String
 identifier = do
-    -- alphanumeric identifier, but not a reserved word. Also must start with a letter
     name <- (lexeme . try) (p >>= check)
     if name `elem` rws
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
@@ -201,9 +224,11 @@ identifier = do
 integer :: Parser Integer
 integer = lexeme L.decimal
 
+float :: Parser Float
+float = lexeme L.float
+
 foreignIdentifier :: Parser String
 foreignIdentifier = do
-    -- identifier, plus _ and .
     name <- (lexeme . try) (p >>= check)
     if name `elem` rws
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
@@ -223,6 +248,9 @@ validType =
     do
         symbol "Int"
         return Int
+        <|> do
+            symbol "Float"
+            return Float
         <|> do
             symbol "Bool"
             return Bool
@@ -298,7 +326,7 @@ funcCall :: Parser Expr
 funcCall = do
     state <- get
     name <- foreignIdentifier <?> "function name"
-    unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
+    -- unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     return $ FuncCall name args
 
@@ -323,7 +351,7 @@ letExpr = do
     symbol "let"
     name <- identifier
     symbol "="
-    value <- expr
+    value <- recover expr
     state <- get
     put state{validLets = name : validLets state}
     return $ Let name value
@@ -368,7 +396,7 @@ modernFunction = do
     put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
 
     body <- recover expr <?> "function body"
-    return $ ModernFunc (FuncDef name args body) (FuncDec name (returnType : argTypes))
+    return $ ModernFunc (FuncDef name args body) (FuncDec name (argTypes ++ [returnType]))
 
 discard :: Parser Expr
 discard = do
@@ -455,7 +483,7 @@ var :: Parser Expr
 var = do
     state <- get
     name <- identifier
-    unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
+    -- unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
     return $ Var name
 
 target :: Parser Expr
@@ -484,29 +512,28 @@ term =
         ( (\(index, parser) -> verbose ("term " ++ show index) parser)
             <$> zip
                 [0 ..]
-                [ placeholder -- 0
-                , parens expr -- 1
-                , IntLit <$> try integer -- 2
-                , StringLit <$> try stringLit -- 3
-                , symbol "True" >> return (BoolLit True) -- 4
-                , symbol "False" >> return (BoolLit False) -- 5
-                , letExpr -- 6
-                , import_ -- 7
-                , externDec -- 8
-                , doBlock -- 9
-                , try modernFunction -- 10
-                , target -- aw hell nah, screw it
-                , struct -- 11
-                , try structLit -- 12
-                , array -- 13
-                , -- , try funcDec
-                  -- , try funcDef
-                  try internalFunction -- 14
-                , try discard -- 15
-                , try funcCall -- 16
-                , try arrayAccess -- 17
-                , ifExpr -- 18
-                , var -- 19
-                , ref -- 20
+                [ placeholder
+                , parens expr
+                , FloatLit <$> try float
+                , IntLit <$> try integer
+                , StringLit <$> try stringLit
+                , symbol "True" >> return (BoolLit True)
+                , symbol "False" >> return (BoolLit False)
+                , letExpr
+                , import_
+                , externDec
+                , doBlock
+                , try modernFunction
+                , target
+                , struct
+                , try structLit
+                , array
+                , try internalFunction
+                , try discard
+                , try funcCall
+                , try arrayAccess
+                , ifExpr
+                , var
+                -- , ref
                 ]
         )

@@ -6,13 +6,13 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Lazy (unpack)
 import GHC.IO.Exception (ExitCode (..))
-import Parser (Program, parseProgram)
+import Parser
 import System.IO
 import System.Process.Typed
 import Test.Hspec
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
 import Text.RawString.QQ (r)
-import WASMEmitter (compileProgramToWAST)
+import WASMEmitter
 
 executeWasmtime :: String -> IO String
 executeWasmtime input = do
