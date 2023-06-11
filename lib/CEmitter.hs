@@ -9,6 +9,10 @@ pop :: [a] -> [a]
 pop [] = []
 pop (x : xs) = xs
 
+popN :: Int -> [a] -> [a]
+popN 0 xs = xs
+popN n xs = popN (n - 1) (pop xs)
+
 popcatMap :: (a -> String) -> [a] -> String
 popcatMap f xs = pop $ concatMap f xs
 

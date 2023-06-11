@@ -97,9 +97,12 @@ data Expr
     | Modulo Expr Expr
     | Power Expr Expr
     | Target String Expr
+    | Then Expr Expr
+    | Bind Expr Expr
     deriving
         ( Show
         , Generic
+        , Eq
         )
 
 data Type = Int | Float | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Eq, Generic)
@@ -155,11 +158,11 @@ typeOf (Target x y) = error "Cannot infer type of target"
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
-    [ 
-      [binary "+" Add, binary "-" Sub]
+    [ [binary "+" Add, binary "-" Sub]
     , [binary "*" Mul, binary "/" Div, binary "^" Power]
     , [binary "%" Modulo]
-    , [binary "~>" And]
+    , [binary ">>" Then]
+    , [binary "~>" Bind]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
     , [prefix "!" Not]

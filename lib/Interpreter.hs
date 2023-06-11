@@ -1,6 +1,6 @@
 module Interpreter (run, fromBytecode, toBytecode) where
 
-import CEmitter (pop)
+import CEmitter (pop, popN)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT), gets)
 import Data.Binary (decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
@@ -33,6 +33,7 @@ data Value
     | FloatValue Float
     | StringValue String
     | BoolValue Bool
+    | PartialFunction {func :: Expr, args :: [Value]}
     | UnitValue
     deriving (Eq)
 
@@ -41,6 +42,7 @@ instance Show Value where
     show (FloatValue f) = show f
     show (StringValue s) = s
     show (BoolValue b) = show b
+    show (PartialFunction func args) = "<partial function: " ++ fname (fdef func) ++ " " ++ show args ++ ">"
     show UnitValue = "()"
 
 valueToExpr :: Value -> Expr
@@ -48,6 +50,7 @@ valueToExpr (IntValue i) = IntLit (toInteger i)
 valueToExpr (StringValue s) = StringLit s
 valueToExpr (FloatValue f) = FloatLit f
 valueToExpr (BoolValue b) = BoolLit b
+valueToExpr (PartialFunction func args) = FuncCall (fname (fdef func)) (map valueToExpr args)
 valueToExpr UnitValue = Placeholder
 
 typeOfV :: Value -> Type
@@ -55,6 +58,7 @@ typeOfV (IntValue _) = Type.Int
 typeOfV (FloatValue _) = Type.Float
 typeOfV (StringValue _) = Type.String
 typeOfV (BoolValue _) = Type.Bool
+typeOfV (PartialFunction func args) = Type.Fn{Type.args = popN (length args + 1) $ ftypes $ fdec func, Type.ret = last $ ftypes $ fdec func}
 typeOfV _ = Type.Any
 
 safeHead :: [a] -> Maybe a
@@ -167,6 +171,11 @@ interpret (FuncCall "println" [arg]) = do
     value <- stackPop
     liftIO $ print value
 interpret (FuncCall "println" _) = error "println takes exactly one argument"
+interpret (FuncCall "print" [arg]) = do
+    interpret arg
+    value <- stackPop
+    liftIO $ putStr $ show value
+interpret (FuncCall "print" _) = error "print takes exactly one argument"
 interpret (FuncCall "internal_eq" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
@@ -235,9 +244,28 @@ interpret (FuncCall name args) = do
     interpretedArgs <- stackPopN (length args)
     let argumentTypes = map typeOfV interpretedArgs
     let argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
-    let func = fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $ find (\(ModernFunc def dec) -> fname def == name && init (ftypes dec) == argumentTypes') [mf | mf@(ModernFunc _ _) <- functions state]
-    stackToVariables (fargs $ fdef func) interpretedArgs
-    interpret $ fbody $ fdef func
+    let ffunc = find (\(ModernFunc def dec) -> fname def == name) [mf | mf@(ModernFunc _ _) <- functions state]
+
+    -- fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $
+    case ffunc of
+        Just func -> do
+            if length (ftypes $ fdec func) - 1 == length argumentTypes'
+                then do
+                    if init (ftypes $ fdec func) == argumentTypes'
+                        then do
+                            stackToVariables (fargs $ fdef func) interpretedArgs
+                            interpret $ fbody $ fdef func
+                        else error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
+                else stackPush $ PartialFunction{func = func, args = interpretedArgs}
+        Nothing -> do
+            let vfunc = fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $ find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
+            case value vfunc of
+                PartialFunction{func = func, args = partialArgs} -> do
+                    let newArgs = partialArgs ++ interpretedArgs
+                    stackToVariables (fargs $ fdef func) newArgs
+                    interpret $ fbody $ fdef func
+                _ -> error $ "Value " ++ name ++ " is not a function"
+            return ()
   where
     stackToVariables argNames interpretedArgs = do
         mapM_
@@ -268,4 +296,14 @@ interpret (BoolLit b) = do
     stackPush $ BoolValue b
 interpret (ExternDec{}) = return ()
 interpret Placeholder = return ()
+interpret (Then x y) = do
+    interpret x
+    interpret y
+interpret (Bind a@(FuncCall _ _) (FuncCall bname bargs)) = do
+    interpret a
+    aResult <- stackPop
+    interpret $ FuncCall bname (bargs ++ [valueToExpr aResult])
+interpret (Bind a b) = do
+    interpret a
+    interpret b
 interpret ex = error $ "Unimplemented expression: " ++ show ex
