@@ -11,7 +11,6 @@ import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (.
 import Parser qualified as Type
 import Paths_prisma qualified
 import Text.Megaparsec
-import Debug.Trace (traceShowM, traceShow)
 
 data VarTableEntry = VarTableEntry
     { name :: String
@@ -172,67 +171,60 @@ interpret (FuncCall "internal_eq" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = BoolValue (i1 == i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = BoolValue (f1 == f2) : stack state}
-        (StringValue s1, StringValue s2) -> put $ state{stack = BoolValue (s1 == s2) : stack state}
-        (BoolValue b1, BoolValue b2) -> put $ state{stack = BoolValue (b1 == b2) : stack state}
-        (UnitValue, UnitValue) -> put $ state{stack = BoolValue True : stack state}
-        _ -> put $ state{stack = BoolValue False : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ BoolValue (i1 == i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ BoolValue (f1 == f2)
+        (StringValue s1, StringValue s2) -> stackPush $ BoolValue (s1 == s2)
+        (BoolValue b1, BoolValue b2) -> stackPush $ BoolValue (b1 == b2)
+        (UnitValue, UnitValue) -> stackPush $ BoolValue True
+        _ -> stackPush $ BoolValue False
 interpret (FuncCall "internal_neg" [arg]) = do
     interpret arg
     value <- stackPop
-    state <- get
     case value of
-        IntValue i -> put $ state{stack = IntValue (-i) : stack state}
-        FloatValue f -> put $ state{stack = FloatValue (-f) : stack state}
+        IntValue i -> stackPush $ IntValue (-i)
+        FloatValue f -> stackPush $ FloatValue (-f)
         _ -> error "Cannot negate value of non-numeric type"
 interpret (FuncCall "internal_pow" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = IntValue (i1 ^ i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = FloatValue (f1 ** f2) : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 ^ i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 ** f2)
         _ -> error "Cannot raise values of different types"
 interpret (FuncCall "internal_add" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = IntValue (i1 + i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = FloatValue (f1 + f2) : stack state}
-        (StringValue s1, StringValue s2) -> put $ state{stack = StringValue (s1 ++ s2) : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 + i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 + f2)
+        (StringValue s1, StringValue s2) -> stackPush $ StringValue (s1 ++ s2)
         _ -> error "Cannot add values of different types"
 interpret (FuncCall "internal_sub" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = IntValue (i1 - i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = FloatValue (f1 - f2) : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 - i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 - f2)
         _ -> error "Cannot subtract values of different types"
 interpret (FuncCall "internal_mul" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = IntValue (i1 * i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = FloatValue (f1 * f2) : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 * i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 * f2)
         _ -> error "Cannot multiply values of different types"
 interpret (FuncCall "internal_div" [arg1, arg2]) = do
     interpret arg1
     interpret arg2
     [value1, value2] <- stackPopN 2
-    state <- get
     case (value1, value2) of
-        (IntValue i1, IntValue i2) -> put $ state{stack = IntValue (i1 `div` i2) : stack state}
-        (FloatValue f1, FloatValue f2) -> put $ state{stack = FloatValue (f1 / f2) : stack state}
+        (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 `div` i2)
+        (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 / f2)
         _ -> error "Cannot divide values of different types"
 interpret f@(ModernFunc _ _) = do
     state <- get
@@ -248,28 +240,22 @@ interpret (FuncCall name args) = do
     interpret $ fbody $ fdef func
   where
     stackToVariables argNames interpretedArgs = do
-       mapM_
-            ( \(x,y) -> do
+        mapM_
+            ( \(x, y) -> do
                 interpret $ Let x $ valueToExpr y
             )
             (zip argNames interpretedArgs)
-interpret (IntLit i) = do
-    state <- get
-    put $ state{stack = IntValue (fromIntegral i) : stack state}
-interpret (FloatLit f) = do
-    state <- get
-    put $ state{stack = FloatValue f : stack state}
-interpret (StringLit s) = do
-    state <- get
-    put $ state{stack = StringValue s : stack state}
+interpret (IntLit i) = stackPush $ IntValue (fromIntegral i)
+interpret (FloatLit f) = stackPush $ FloatValue f
+interpret (StringLit s) = stackPush $ StringValue s
 interpret (Var vname) = do
     state <- get
     let vvalue = fromMaybe (error $ "Variable " ++ vname ++ " not found") $ find (\v -> name v == vname && function v == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
-    put $ state{stack = value vvalue : stack state}
+    stackPush $ value vvalue
 interpret (Let name expr) = do
     interpret expr
     state <- get
-    let value = head $ stack state
+    value <- stackPeek
     put $ state{stack = pop $ stack state, variables = (VarTableEntry{value = value, name = name, function = currentFunction state}) : variables state}
 interpret (If cond thenExpr elseExpr) = do
     interpret cond
@@ -279,8 +265,7 @@ interpret (If cond thenExpr elseExpr) = do
         BoolValue False -> interpret elseExpr
         _ -> error "Condition must be of type Bool"
 interpret (BoolLit b) = do
-    state <- get
-    put $ state{stack = BoolValue b : stack state}
+    stackPush $ BoolValue b
 interpret (ExternDec{}) = return ()
 interpret Placeholder = return ()
 interpret ex = error $ "Unimplemented expression: " ++ show ex
