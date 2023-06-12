@@ -25,3 +25,5 @@ mul x: Float -> y: Float => Float = internal_mul x, y
 div x: Float -> y: Float => Float = internal_div x, y
 pow x: Float -> y: Float => Float = internal_pow x, y
 eq  x: Float -> y: Float => Bool  = internal_eq  x, y
+
+flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x

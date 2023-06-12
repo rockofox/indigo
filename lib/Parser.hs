@@ -1,3 +1,4 @@
+{-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
 module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf) where
@@ -17,6 +18,7 @@ import Control.Monad.State hiding (state)
 import Data.Binary qualified
 import Data.Text (Text, unpack)
 import Data.Void (Void)
+import Debug.Trace
 import GHC.Arr (indices)
 import GHC.Generics (Generic)
 import Text.Megaparsec
@@ -105,7 +107,7 @@ data Expr
         , Eq
         )
 
-data Type = Int | Float | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Eq, Generic)
+data Type = Int | Float | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Generic)
 
 newtype Program = Program [Expr] deriving (Show, Generic)
 
@@ -114,6 +116,18 @@ instance Data.Binary.Binary Type
 instance Data.Binary.Binary Expr
 
 instance Data.Binary.Binary Program
+
+instance Eq Type where
+    Int == Int = True
+    Float == Float = True
+    Bool == Bool = True
+    String == String = True
+    IO == IO = True
+    Any == Any = True
+    None == None = True
+    Fn x y == Fn a b = x == a && y == b
+    Any == _ = True
+    _ == _ = False
 
 typeOf :: Expr -> Parser.Type
 typeOf (IntLit _) = Int
@@ -464,7 +478,7 @@ arrayAccess = do
     return $ ArrayAccess a index
 
 placeholder :: Parser Expr
-placeholder = symbol "()" >> return Placeholder
+placeholder = symbol "_" >> return Placeholder
 
 parseProgram' :: Text -> State ParserState (Either (ParseErrorBundle Text Void) Program)
 parseProgram' = runParserT program ""

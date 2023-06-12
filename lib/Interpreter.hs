@@ -7,6 +7,7 @@ import Data.ByteString.Lazy (LazyByteString)
 import Data.List (find, intercalate)
 import Data.Maybe
 import Data.Text qualified
+import Debug.Trace (traceShowM)
 import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
 import Parser qualified as Type
 import Paths_prisma qualified
@@ -97,6 +98,11 @@ stackPush value = do
     state <- get
     put $ state{stack = value : stack state}
 
+interpretAndPop :: [Expr] -> StateT InterpreterState IO [Value]
+interpretAndPop exprs = do
+    mapM_ interpret exprs
+    stackPopN (length exprs)
+
 showFunction :: String -> [Type] -> Bool -> String
 showFunction name types argsOnly = do
     if not argsOnly
@@ -132,38 +138,25 @@ interpret (DoBlock exprs) = do
     mapM_ interpret exprs
 -- Operators
 interpret (Eq x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "eq" [valueToExpr a, valueToExpr b]
 interpret (Add x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "add" [valueToExpr a, valueToExpr b]
 interpret (Sub x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "sub" [valueToExpr a, valueToExpr b]
 interpret (Mul x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "mul" [valueToExpr a, valueToExpr b]
 interpret (Div x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "div" [valueToExpr a, valueToExpr b]
 interpret (Power x y) = do
-    interpret x
-    interpret y
-    [b, a] <- stackPopN 2
+    [a, b] <- interpretAndPop [x, y]
     interpret $ FuncCall "pow" [valueToExpr a, valueToExpr b]
 interpret (UnaryMinus x) = do
-    interpret x
-    [a] <- stackPopN 1
+    [a] <- interpretAndPop [x]
     interpret $ FuncCall "neg" [valueToExpr a]
 -- Internal function
 interpret (FuncCall "println" [arg]) = do
@@ -177,9 +170,7 @@ interpret (FuncCall "print" [arg]) = do
     liftIO $ putStr $ show value
 interpret (FuncCall "print" _) = error "print takes exactly one argument"
 interpret (FuncCall "internal_eq" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ BoolValue (i1 == i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ BoolValue (f1 == f2)
@@ -188,49 +179,38 @@ interpret (FuncCall "internal_eq" [arg1, arg2]) = do
         (UnitValue, UnitValue) -> stackPush $ BoolValue True
         _ -> stackPush $ BoolValue False
 interpret (FuncCall "internal_neg" [arg]) = do
-    interpret arg
-    value <- stackPop
+    [value] <- interpretAndPop [arg]
     case value of
         IntValue i -> stackPush $ IntValue (-i)
         FloatValue f -> stackPush $ FloatValue (-f)
         _ -> error "Cannot negate value of non-numeric type"
 interpret (FuncCall "internal_pow" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 ^ i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 ** f2)
         _ -> error "Cannot raise values of different types"
 interpret (FuncCall "internal_add" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 + i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 + f2)
         (StringValue s1, StringValue s2) -> stackPush $ StringValue (s1 ++ s2)
         _ -> error "Cannot add values of different types"
 interpret (FuncCall "internal_sub" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 - i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 - f2)
         _ -> error "Cannot subtract values of different types"
 interpret (FuncCall "internal_mul" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 * i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 * f2)
         _ -> error "Cannot multiply values of different types"
 interpret (FuncCall "internal_div" [arg1, arg2]) = do
-    interpret arg1
-    interpret arg2
-    [value1, value2] <- stackPopN 2
+    [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 `div` i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 / f2)
@@ -238,9 +218,10 @@ interpret (FuncCall "internal_div" [arg1, arg2]) = do
 interpret f@(ModernFunc _ _) = do
     state <- get
     put $ state{functions = f : functions state}
-interpret (FuncCall name args) = do
+interpret (FuncCall name a) = do
     state <- get
-    mapM_ interpret args
+    let args = filter (/= Placeholder) a
+    mapM_ interpret $ reverse args
     interpretedArgs <- stackPopN (length args)
     let argumentTypes = map typeOfV interpretedArgs
     let argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
@@ -256,13 +237,14 @@ interpret (FuncCall name args) = do
                             stackToVariables (fargs $ fdef func) interpretedArgs
                             interpret $ fbody $ fdef func
                         else error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
-                else stackPush $ PartialFunction{func = func, args = interpretedArgs}
+                else do
+                    stackPush $ PartialFunction{func = func, args = interpretedArgs}
         Nothing -> do
             let vfunc = fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $ find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
             case value vfunc of
                 PartialFunction{func = func, args = partialArgs} -> do
-                    let newArgs = partialArgs ++ interpretedArgs
-                    stackToVariables (fargs $ fdef func) newArgs
+                    let newArgs = interpretedArgs ++ partialArgs
+                    stackToVariables (fargs $ fdef func) $ reverse newArgs
                     interpret $ fbody $ fdef func
                 _ -> error $ "Value " ++ name ++ " is not a function"
             return ()

@@ -1,9 +1,16 @@
 fact n : Float => Float = (if n == 0.0 then 1.0 else n * fact ((n) - 1.0))
 ffact a: Float -> b: Float => Float = (fact a) * b
 call fn : Fn {Float => Float} => Float = fn 3.0
-bla => IO = (println "Hello World") >> (print "The factorial of 6.0 is ") >> (fact 6.0) ~> (println ())
+bla => IO = (println "Hello World") >> (print "The factorial of 6.0 is ") >> (fact 6.0) ~> (println _)
+
+switchedDivide a: Float -> b: Float => Float = flip (div _), a, b
+
 main => IO = do
-  # println fact 5.0
-  # println call ffact 4.0
-  bla ()
+  println fact 5.0
+  println call ffact 4.0
+  bla _
+  print "2.0 / 4.0 is "
+  println (switchedDivide 4.0, 2.0)
+  print "4.0 / 2.0 is "
+  println 4.0/2.0
 end
