@@ -226,267 +226,268 @@ unreachable :: a
 unreachable = error "Unreachable code reached"
 
 compileExprToWAST :: Expr -> StateT CompilerState IO Binaryen.Expression
-compileExprToWAST (InternalFunction name args) = do
-    state <- get
-    let mod_ = mod state
-    case name of
-        "__wasm_i32_store" -> do
-            compiledArgs <- mapM compileExprToWAST args
-            liftIO $ Binaryen.Expression.store mod_ 4 0 0 (head compiledArgs) (compiledArgs !! 1) int32
-        "__wasm_i32_load" -> do
-            compiledArgs <- mapM compileExprToWAST args
-            liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 (head compiledArgs)
-        _ -> error $ "Unknown internal function: " ++ name
-compileExprToWAST (Import objects source) = do
-    state <- get
-    let mod_ = mod state
-    let isModuleImported = any (\(x, _) -> x == source) (importedModules state)
-    unless isModuleImported $ do
-        module_ <- liftIO $ moduleFromFile (findModule source)
-        put $ state{importedModules = (source, module_) : importedModules state}
-    state <- get
-    let module_ = fromMaybe (error "Module not imported") $ lookup source (importedModules state)
+compileExprToWAST = error "Not implemented"
+-- compileExprToWAST (InternalFunction name args) = do
+--     state <- get
+--     let mod_ = mod state
+--     case name of
+--         "__wasm_i32_store" -> do
+--             compiledArgs <- mapM compileExprToWAST args
+--             liftIO $ Binaryen.Expression.store mod_ 4 0 0 (head compiledArgs) (compiledArgs !! 1) int32
+--         "__wasm_i32_load" -> do
+--             compiledArgs <- mapM compileExprToWAST args
+--             liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 (head compiledArgs)
+--         _ -> error $ "Unknown internal function: " ++ name
+-- compileExprToWAST (Import objects source) = do
+--     state <- get
+--     let mod_ = mod state
+--     let isModuleImported = any (\(x, _) -> x == source) (importedModules state)
+--     unless isModuleImported $ do
+--         module_ <- liftIO $ moduleFromFile (findModule source)
+--         put $ state{importedModules = (source, module_) : importedModules state}
+--     state <- get
+--     let module_ = fromMaybe (error "Module not imported") $ lookup source (importedModules state)
 
-    moduleNumExports <- liftIO $ getNumExports module_
-    exports <- liftIO $ mapM (liftIO . getExportByIndex module_) [0 .. moduleNumExports - 1]
+--     moduleNumExports <- liftIO $ getNumExports module_
+--     exports <- liftIO $ mapM (liftIO . getExportByIndex module_) [0 .. moduleNumExports - 1]
 
-    matchedObjects <-
-        mapM
-            ( \x -> do
-                name <- liftIO $ peekCString =<< Export.getName x
-                return (find (name ==) objects, x)
-            )
-            exports
-            >>= liftIO . filterM (pure . isJust . fst)
-            >>= mapM (\(Just x, y) -> return (x, y))
+--     matchedObjects <-
+--         mapM
+--             ( \x -> do
+--                 name <- liftIO $ peekCString =<< Export.getName x
+--                 return (find (name ==) objects, x)
+--             )
+--             exports
+--             >>= liftIO . filterM (pure . isJust . fst)
+--             >>= mapM (\(Just x, y) -> return (x, y))
 
-    functions <- liftIO $ filterM (\x -> (==) <$> getKind (snd x) <*> pure externalFunction) matchedObjects >>= mapM (\(_, y) -> (,) <$> Export.getName y <*> (getValue y >>= getFunction module_))
-    importedFunctions <- liftIO $ filterM (\(name, _) -> peekCString name <&> flip elem objects) functions
+--     functions <- liftIO $ filterM (\x -> (==) <$> getKind (snd x) <*> pure externalFunction) matchedObjects >>= mapM (\(_, y) -> (,) <$> Export.getName y <*> (getValue y >>= getFunction module_))
+--     importedFunctions <- liftIO $ filterM (\(name, _) -> peekCString name <&> flip elem objects) functions
 
-    mapM_
-        ( \(name, function) -> do
-            params <- liftIO $ getParams function
-            results <- liftIO $ getResults function
-            sourcePtr <- liftIO $ newCString source
-            liftIO $ Binaryen.addFunctionImport mod_ name sourcePtr name params results
-        )
-        importedFunctions
+--     mapM_
+--         ( \(name, function) -> do
+--             params <- liftIO $ getParams function
+--             results <- liftIO $ getResults function
+--             sourcePtr <- liftIO $ newCString source
+--             liftIO $ Binaryen.addFunctionImport mod_ name sourcePtr name params results
+--         )
+--         importedFunctions
 
-    liftIO $ Binaryen.nop mod_
-compileExprToWAST (ExternDec lang name types) = do
-    state <- get
-    let mod_ = mod state
-    let types_ = pop $ map typeToWASTType types
-    let ret = last $ map typeToWASTType types
-    funcName <- liftIO $ newCString name
-    moduleName <- liftIO $ newCString lang
-    externalName <- liftIO $ newCString name
-    x <- liftIO $ allocaArray (length types_) $ \ta -> do
-        liftIO $ pokeArray ta types_
-        return ta
-    type_ <- liftIO $ Binaryen.Type.create x (fromIntegral $ length types_)
-    liftIO $ Binaryen.addFunctionImport mod_ funcName moduleName externalName type_ ret
-    liftIO $ Binaryen.Expression.nop mod_
-compileExprToWAST (If cond true false) = do
-    state <- get
-    let mod_ = mod state
-    compiledCond <- compileExprToWAST cond
-    compiledTrue <- compileExprToWAST true
-    compiledFalse <- compileExprToWAST false
-    liftIO $ Binaryen.Expression.if_ mod_ compiledCond compiledTrue compiledFalse
-compileExprToWAST (Eq a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.eqInt32 compiledA compiledB
-compileExprToWAST (Neq a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.neInt32 compiledA compiledB
-compileExprToWAST (Add a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledA compiledB
-compileExprToWAST (Sub a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.subInt32 compiledA compiledB
-compileExprToWAST (Mul a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.mulInt32 compiledA compiledB
-compileExprToWAST (Div a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.divSInt32 compiledA compiledB
-compileExprToWAST (FuncCall fname args) = do
-    state <- get
-    let parentVarTable = filter (\x -> context x == currentFunction state) (varTable state)
-    let fn = fromMaybe unreachable $ find (\x -> ftname x == fromMaybe unreachable (currentFunction state)) (functionTable state)
-    let mod_ = mod state
-    funcName <- liftIO $ newCString fname
-    compiledArgs <- mapM compileExprToWAST args
-    wasmArgs <- liftIO $ allocaArray (length args) $ \ta -> do
-        liftIO $ pokeArray ta compiledArgs
-        return ta
-    if fname `notElem` map name parentVarTable
-        then liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
-        else do
-            varIndex <- findVarIndex fname
-            case varIndex of
-                Nothing -> error $ "Variable " ++ fname ++ " not found"
-                Just varIndex -> do
-                    let argIndex = fromMaybe unreachable $ elemIndex fname (ftargnames fn)
-                        fnType = ftparams fn !! argIndex
-                        types_ = map typeToWASTType $ case fnType of
-                            Fn args ret -> args
-                            _ -> []
-                    tableIndexConst <- liftIO $ Binaryen.localGet mod_ (fromIntegral varIndex) int32
-                    typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
-                        liftIO $ pokeArray ta types_
-                        return ta
-                    type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
-                    liftIO $
-                        Binaryen.Expression.callIndirect
-                            mod_
-                            tableIndexConst
-                            wasmArgs
-                            (fromIntegral $ length args)
-                            type_
-                            ( typeToWASTType $ case fnType of
-                                Fn _ ret -> ret
-                                _ -> Parser.IO
-                            )
-compileExprToWAST (IntLit int) = do
-    state <- get
-    let mod_ = mod state
-    liftIO $ Binaryen.Expression.constInt32 mod_ (fromIntegral int)
-compileExprToWAST s@(StringLit str) = do
-    state <- get
-    let bytes = compileLiteralToData s
-    bytesPtr <- liftIO $ allocaArray (length bytes) $ \ta -> do
-        liftIO $ pokeArray ta bytes
-        return ta
-    put $ state{memory = MemoryCell{size = length str, data_ = bytesPtr} : memory state}
-    m <- getCellOffset $ length $ memory state
-    let mod_ = mod state
-    liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
-compileExprToWAST (Let name expr) = do
-    state <- get
-    let mod_ = mod state
-    put $ state{varTable = varTable state ++ [VarTableEntry{name = name, context = currentFunction state}]}
-    state <- get
-    let desiredIndex = length (filter (\x -> context x == currentFunction state) $ varTable state) - 1
-    compiledExpr <- compileExprToWAST expr
-    liftIO $ Binaryen.Expression.localSet mod_ (fromIntegral desiredIndex) compiledExpr
-compileExprToWAST (Var vname) = do
-    state <- get
-    let mod_ = mod state
-    varIndex <- findVarIndex vname
-    case varIndex of
-        Nothing -> error $ "Unknown variable: " ++ vname
-        Just varIndex -> liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
-compileExprToWAST (DoBlock exprs) = do
-    state <- get
-    let mod_ = mod state
-    compiledExprs <- mapM compileExprToWAST exprs
-    wasmExprs <- liftIO $ allocaArray (length exprs) $ \ta -> do
-        liftIO $ pokeArray ta compiledExprs
-        return ta
-    liftIO $ Binaryen.Expression.block mod_ nullPtr wasmExprs (fromIntegral $ length exprs) auto
-compileExprToWAST (Discard expr) = do
-    state <- get
-    let mod_ = mod state
-    compiledExpr <- compileExprToWAST expr
-    type_ <- liftIO $ Binaryen.getType compiledExpr
-    liftIO $ Binaryen.drop mod_ compiledExpr
-compileExprToWAST (Ref (FuncCall name args)) = do
-    state <- get
-    let mod_ = mod state
-    namePtr <- liftIO $ newCString name
-    let functionIndex = elemIndex name $ map ftname $ functionTable state
-    liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
-compileExprToWAST (ModernFunc def dec) = do
-    state <- get
-    put $ state{currentFunction = Just $ fname dec}
-    state <- get
-    varTableEntriesForFArgs <- liftIO $ mapM (\x -> return $ VarTableEntry{name = x, context = Just $ fname dec}) $ fargs def
-    put $ state{varTable = varTable state ++ varTableEntriesForFArgs}
-    state <- get
-    let mod_ = mod state
-    funcName <- liftIO $ newCString $ fname dec
-    let types = map typeToWASTType $ ftypes dec
-        types_ = tail types
-        ret = if null types then Binaryen.Type.none else head types
-    typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
-        liftIO $ pokeArray ta types_
-        return ta
-    type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
-    state <- get
-    put $ state{functionTable = functionTable state ++ [FunctionTableEntry{ftname = fname dec, ftparams = tail (ftypes dec), ftresult = if null types then head (ftypes dec) else Parser.IO, ftargnames = fargs def}]}
-    body <- compileExprToWAST $ fbody def
-    bodyLocals <- liftIO $ getLocals body
-    localsValues <- liftIO $ mapM Binaryen.localSetGetValue bodyLocals
-    localsTypes <- liftIO $ mapM Binaryen.getType localsValues
-    localsTypesArr <- liftIO $ allocaArray (length localsTypes) $ \ta -> do
-        liftIO $ pokeArray ta localsTypes
-        return ta
-    fun <- liftIO $ Binaryen.addFunction mod_ funcName type_ ret localsTypesArr (fromIntegral (length bodyLocals)) body
-    if fname dec == "main"
-        then liftIO $ Binaryen.setStart mod_ fun >> liftIO (Binaryen.Expression.nop mod_)
-        else liftIO $ Binaryen.Expression.nop mod_
-compileExprToWAST (Array exprs) = do
-    state <- get
-    let mod_ = mod state
-    let compiledExprs = map compileLiteralToData exprs
-    let c = concat compiledExprs
-    cPtr <- liftIO $ allocaArray (length c) $ \ta -> do
-        liftIO $ pokeArray ta c
-        return ta
-    put $ state{memory = MemoryCell{size = length compiledExprs, data_ = cPtr} : memory state}
-    m <- getCellOffset $ length $ memory state
-    let mod_ = mod state
-    liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
-compileExprToWAST (ArrayAccess a index) = do
-    state <- get
-    let mod_ = mod state
-    case a of
-        Var vname -> do
-            varIndex <- findVarIndex vname
-            case varIndex of
-                Nothing -> error $ "Unknown variable: " ++ vname
-                Just varIndex -> do
-                    compiledIndex <- compileExprToWAST index
-                    compiledVar <- liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
-                    computedIndex <- liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledVar compiledIndex
-                    liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 computedIndex
-        _ -> error "Array access must be a variable"
-compileExprToWAST (Modulo a b) = do
-    state <- get
-    let mod_ = mod state
-    compiledA <- compileExprToWAST a
-    compiledB <- compileExprToWAST b
-    liftIO $ Binaryen.binary mod_ Binaryen.remSInt32 compiledA compiledB
-compileExprToWAST (Target t expr)
-    | t == "wasm" = compileExprToWAST expr
-compileExprToWAST _ = do
-    state <- get
-    let mod_ = mod state
-    liftIO $ Binaryen.Expression.nop mod_
+--     liftIO $ Binaryen.nop mod_
+-- compileExprToWAST (ExternDec lang name types) = do
+--     state <- get
+--     let mod_ = mod state
+--     let types_ = pop $ map typeToWASTType types
+--     let ret = last $ map typeToWASTType types
+--     funcName <- liftIO $ newCString name
+--     moduleName <- liftIO $ newCString lang
+--     externalName <- liftIO $ newCString name
+--     x <- liftIO $ allocaArray (length types_) $ \ta -> do
+--         liftIO $ pokeArray ta types_
+--         return ta
+--     type_ <- liftIO $ Binaryen.Type.create x (fromIntegral $ length types_)
+--     liftIO $ Binaryen.addFunctionImport mod_ funcName moduleName externalName type_ ret
+--     liftIO $ Binaryen.Expression.nop mod_
+-- compileExprToWAST (If cond true false) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledCond <- compileExprToWAST cond
+--     compiledTrue <- compileExprToWAST true
+--     compiledFalse <- compileExprToWAST false
+--     liftIO $ Binaryen.Expression.if_ mod_ compiledCond compiledTrue compiledFalse
+-- compileExprToWAST (Eq a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.eqInt32 compiledA compiledB
+-- compileExprToWAST (Neq a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.neInt32 compiledA compiledB
+-- compileExprToWAST (Add a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledA compiledB
+-- compileExprToWAST (Sub a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.subInt32 compiledA compiledB
+-- compileExprToWAST (Mul a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.mulInt32 compiledA compiledB
+-- compileExprToWAST (Div a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.divSInt32 compiledA compiledB
+-- compileExprToWAST (FuncCall fname args) = do
+--     state <- get
+--     let parentVarTable = filter (\x -> context x == currentFunction state) (varTable state)
+--     let fn = fromMaybe unreachable $ find (\x -> ftname x == fromMaybe unreachable (currentFunction state)) (functionTable state)
+--     let mod_ = mod state
+--     funcName <- liftIO $ newCString fname
+--     compiledArgs <- mapM compileExprToWAST args
+--     wasmArgs <- liftIO $ allocaArray (length args) $ \ta -> do
+--         liftIO $ pokeArray ta compiledArgs
+--         return ta
+--     if fname `notElem` map name parentVarTable
+--         then liftIO $ Binaryen.Expression.call mod_ funcName wasmArgs (fromIntegral $ length args) int32
+--         else do
+--             varIndex <- findVarIndex fname
+--             case varIndex of
+--                 Nothing -> error $ "Variable " ++ fname ++ " not found"
+--                 Just varIndex -> do
+--                     let argIndex = fromMaybe unreachable $ elemIndex fname (ftargnames fn)
+--                         fnType = ftparams fn !! argIndex
+--                         types_ = map typeToWASTType $ case fnType of
+--                             Fn args ret -> args
+--                             _ -> []
+--                     tableIndexConst <- liftIO $ Binaryen.localGet mod_ (fromIntegral varIndex) int32
+--                     typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
+--                         liftIO $ pokeArray ta types_
+--                         return ta
+--                     type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
+--                     liftIO $
+--                         Binaryen.Expression.callIndirect
+--                             mod_
+--                             tableIndexConst
+--                             wasmArgs
+--                             (fromIntegral $ length args)
+--                             type_
+--                             ( typeToWASTType $ case fnType of
+--                                 Fn _ ret -> ret
+--                                 _ -> Parser.IO
+--                             )
+-- compileExprToWAST (IntLit int) = do
+--     state <- get
+--     let mod_ = mod state
+--     liftIO $ Binaryen.Expression.constInt32 mod_ (fromIntegral int)
+-- compileExprToWAST s@(StringLit str) = do
+--     state <- get
+--     let bytes = compileLiteralToData s
+--     bytesPtr <- liftIO $ allocaArray (length bytes) $ \ta -> do
+--         liftIO $ pokeArray ta bytes
+--         return ta
+--     put $ state{memory = MemoryCell{size = length str, data_ = bytesPtr} : memory state}
+--     m <- getCellOffset $ length $ memory state
+--     let mod_ = mod state
+--     liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
+-- compileExprToWAST (Let name expr) = do
+--     state <- get
+--     let mod_ = mod state
+--     put $ state{varTable = varTable state ++ [VarTableEntry{name = name, context = currentFunction state}]}
+--     state <- get
+--     let desiredIndex = length (filter (\x -> context x == currentFunction state) $ varTable state) - 1
+--     compiledExpr <- compileExprToWAST expr
+--     liftIO $ Binaryen.Expression.localSet mod_ (fromIntegral desiredIndex) compiledExpr
+-- compileExprToWAST (Var vname) = do
+--     state <- get
+--     let mod_ = mod state
+--     varIndex <- findVarIndex vname
+--     case varIndex of
+--         Nothing -> error $ "Unknown variable: " ++ vname
+--         Just varIndex -> liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
+-- compileExprToWAST (DoBlock exprs) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledExprs <- mapM compileExprToWAST exprs
+--     wasmExprs <- liftIO $ allocaArray (length exprs) $ \ta -> do
+--         liftIO $ pokeArray ta compiledExprs
+--         return ta
+--     liftIO $ Binaryen.Expression.block mod_ nullPtr wasmExprs (fromIntegral $ length exprs) auto
+-- compileExprToWAST (Discard expr) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledExpr <- compileExprToWAST expr
+--     type_ <- liftIO $ Binaryen.getType compiledExpr
+--     liftIO $ Binaryen.drop mod_ compiledExpr
+-- compileExprToWAST (Ref (FuncCall name args)) = do
+--     state <- get
+--     let mod_ = mod state
+--     namePtr <- liftIO $ newCString name
+--     let functionIndex = elemIndex name $ map ftname $ functionTable state
+--     liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
+-- compileExprToWAST (ModernFunc def dec) = do
+--     state <- get
+--     put $ state{currentFunction = Just $ fname dec}
+--     state <- get
+--     varTableEntriesForFArgs <- liftIO $ mapM (\x -> return $ VarTableEntry{name = x, context = Just $ fname dec}) $ fargs def
+--     put $ state{varTable = varTable state ++ varTableEntriesForFArgs}
+--     state <- get
+--     let mod_ = mod state
+--     funcName <- liftIO $ newCString $ fname dec
+--     let types = map typeToWASTType $ ftypes dec
+--         types_ = tail types
+--         ret = if null types then Binaryen.Type.none else head types
+--     typePtr <- liftIO $ allocaArray (length types_) $ \ta -> do
+--         liftIO $ pokeArray ta types_
+--         return ta
+--     type_ <- liftIO $ Binaryen.Type.create typePtr (fromIntegral $ length types_)
+--     state <- get
+--     put $ state{functionTable = functionTable state ++ [FunctionTableEntry{ftname = fname dec, ftparams = tail (ftypes dec), ftresult = if null types then head (ftypes dec) else Parser.IO, ftargnames = fargs def}]}
+--     body <- compileExprToWAST $ fbody def
+--     bodyLocals <- liftIO $ getLocals body
+--     localsValues <- liftIO $ mapM Binaryen.localSetGetValue bodyLocals
+--     localsTypes <- liftIO $ mapM Binaryen.getType localsValues
+--     localsTypesArr <- liftIO $ allocaArray (length localsTypes) $ \ta -> do
+--         liftIO $ pokeArray ta localsTypes
+--         return ta
+--     fun <- liftIO $ Binaryen.addFunction mod_ funcName type_ ret localsTypesArr (fromIntegral (length bodyLocals)) body
+--     if fname dec == "main"
+--         then liftIO $ Binaryen.setStart mod_ fun >> liftIO (Binaryen.Expression.nop mod_)
+--         else liftIO $ Binaryen.Expression.nop mod_
+-- compileExprToWAST (List exprs) = do
+--     state <- get
+--     let mod_ = mod state
+--     let compiledExprs = map compileLiteralToData exprs
+--     let c = concat compiledExprs
+--     cPtr <- liftIO $ allocaArray (length c) $ \ta -> do
+--         liftIO $ pokeArray ta c
+--         return ta
+--     put $ state{memory = MemoryCell{size = length compiledExprs, data_ = cPtr} : memory state}
+--     m <- getCellOffset $ length $ memory state
+--     let mod_ = mod state
+--     liftIO $ Binaryen.constInt32 mod_ (fromIntegral m)
+-- compileExprToWAST (ArrayAccess a index) = do
+--     state <- get
+--     let mod_ = mod state
+--     case a of
+--         Var vname -> do
+--             varIndex <- findVarIndex vname
+--             case varIndex of
+--                 Nothing -> error $ "Unknown variable: " ++ vname
+--                 Just varIndex -> do
+--                     compiledIndex <- compileExprToWAST index
+--                     compiledVar <- liftIO $ Binaryen.Expression.localGet mod_ (fromIntegral varIndex) int32
+--                     computedIndex <- liftIO $ Binaryen.binary mod_ Binaryen.addInt32 compiledVar compiledIndex
+--                     liftIO $ Binaryen.Expression.load mod_ 4 0 0 0 int32 computedIndex
+--         _ -> error "Array access must be a variable"
+-- compileExprToWAST (Modulo a b) = do
+--     state <- get
+--     let mod_ = mod state
+--     compiledA <- compileExprToWAST a
+--     compiledB <- compileExprToWAST b
+--     liftIO $ Binaryen.binary mod_ Binaryen.remSInt32 compiledA compiledB
+-- compileExprToWAST (Target t expr)
+--     | t == "wasm" = compileExprToWAST expr
+-- compileExprToWAST _ = do
+--     state <- get
+--     let mod_ = mod state
+--     liftIO $ Binaryen.Expression.nop mod_
 
-compileLiteralToData :: Expr -> [Int8]
-compileLiteralToData (IntLit int) = [fromIntegral int :: Int8]
-compileLiteralToData (StringLit str) = map (fromIntegral . ord) str
-compileLiteralToData _ = do
-    error "Literals must be constant"
+-- compileLiteralToData :: Expr -> [Int8]
+-- compileLiteralToData (IntLit int) = [fromIntegral int :: Int8]
+-- compileLiteralToData (StringLit str) = map (fromIntegral . ord) str
+-- compileLiteralToData _ = do
+--     error "Literals must be constant"

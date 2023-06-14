@@ -77,10 +77,10 @@ optionsParser =
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
-prettyPrintExpr (FuncDef _ _ expr) i =
+prettyPrintExpr (FuncDef name _ expr) i =
     case expr of
-        DoBlock _ -> "FuncDef[\n" ++ prettyPrintExpr expr (i + 1) ++ "\n" ++ indent i ++ "]"
-        _ -> "FuncDef[" ++ prettyPrintExpr expr 0 ++ "]"
+        DoBlock _ -> "FuncDef[<" ++ name ++ ">\n" ++ prettyPrintExpr expr (i + 1) ++ "\n" ++ indent i ++ "]"
+        _ -> "FuncDef[<" ++ name ++ ">" ++ prettyPrintExpr expr 0 ++ "]"
 prettyPrintExpr x i = indent i ++ show x
 
 indent :: Int -> [Char]

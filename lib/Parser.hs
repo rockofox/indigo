@@ -29,6 +29,7 @@ import Text.Megaparsec
     , optional
     , registerParseError
     , runParserT
+    , some
     , (<?>)
     )
 import Text.Megaparsec.Char
@@ -67,7 +68,7 @@ data Expr
     | FloatLit Float
     | If Expr Expr Expr
     | Let String Expr
-    | FuncDef {fname :: String, fargs :: [String], fbody :: Expr}
+    | FuncDef {fname :: String, fargs :: [Expr], fbody :: Expr}
     | FuncCall String [Expr]
     | FuncDec {fname :: String, ftypes :: [Type]}
     | ModernFunc {fdef :: Expr, fdec :: Expr}
@@ -94,7 +95,8 @@ data Expr
     | Ref Expr
     | Struct String [(String, Type)]
     | StructLit String [(String, Expr)]
-    | Array [Expr]
+    | ListLit [Expr]
+    | ListPattern [String]
     | ArrayAccess Expr Expr
     | Modulo Expr Expr
     | Power Expr Expr
@@ -107,7 +109,17 @@ data Expr
         , Eq
         )
 
-data Type = Int | Float | Bool | String | IO | Any | None | Fn {args :: [Type], ret :: Type} deriving (Show, Generic)
+data Type
+    = Int
+    | Float
+    | Bool
+    | String
+    | IO
+    | Any
+    | None
+    | Fn {args :: [Type], ret :: Type}
+    | List Type
+    deriving (Show, Generic)
 
 newtype Program = Program [Expr] deriving (Show, Generic)
 
@@ -127,6 +139,7 @@ instance Eq Type where
     None == None = True
     Fn x y == Fn a b = x == a && y == b
     Any == _ = True
+    List x == List y = x == y
     _ == _ = False
 
 typeOf :: Expr -> Parser.Type
@@ -165,7 +178,7 @@ typeOf (Import x y) = error "Cannot infer type of import"
 typeOf (Ref x) = error "Cannot infer type of ref"
 typeOf (Struct x y) = error "Cannot infer type of struct"
 typeOf (StructLit x y) = error "Cannot infer type of struct literal"
-typeOf (Array x) = error "Cannot infer type of array"
+typeOf (ListLit x) = error "Cannot infer type of array"
 typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
 typeOf (Modulo x y) = error "Cannot infer type of modulo"
 typeOf (Target x y) = error "Cannot infer type of target"
@@ -287,6 +300,10 @@ validType =
                 symbol "=>"
                 ret <- validType
                 return Fn{args = args, ret = ret}
+        <|> do
+            symbol "List"
+            curlyBrackets $ do
+                List <$> validType
         <?> "type"
 
 externLanguage :: Parser String
@@ -335,7 +352,7 @@ funcDec = do
 funcDef :: Parser Expr
 funcDef = do
     name <- identifier <?> "function name"
-    args <- many identifier <?> "function arguments"
+    args <- some (var <|> parens listPattern) <?> "function arguments"
     symbol "="
     FuncDef name args <$> expr <?> "function body"
 
@@ -404,13 +421,13 @@ modernFunction = do
             symbol ":"
             argType <- validType <?> "function argument type"
             optional $ symbol "->"
-            return (arg, argType) <?> "function arguments"
+            return (Var arg, argType) <?> "function arguments"
     symbol "=>"
     returnType <- validType <?> "return type"
     symbol "="
 
-    state <- get
-    put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
+    -- state <- get
+    -- put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
 
     body <- recover expr <?> "function body"
     return $ ModernFunc (FuncDef name args body) (FuncDec name (argTypes ++ [returnType]))
@@ -432,7 +449,7 @@ array = do
     symbol "["
     elements <- sepBy expr (symbol ",")
     symbol "]"
-    return $ Array elements
+    return $ ListLit elements
 
 struct :: Parser Expr
 struct = do
@@ -509,6 +526,11 @@ target = do
     target <- (symbol "wasm" <|> symbol "c") <?> "target"
     Target (unpack target) <$> expr
 
+listPattern :: Parser Expr
+listPattern = do
+    elements <- sepBy1 (identifier <|> (symbol "_" >> return "")) (symbol ":")
+    return $ ListPattern elements
+
 verbose :: Show a => String -> Parser a -> Parser a
 verbose str parser = do
     state <- get
@@ -541,6 +563,8 @@ term =
                 , externDec
                 , doBlock
                 , try modernFunction
+                , try funcDef
+                , try funcDec
                 , target
                 , struct
                 , try structLit
@@ -551,6 +575,7 @@ term =
                 , try arrayAccess
                 , ifExpr
                 , var
+                -- , try listPattern
                 -- , ref
                 ]
         )

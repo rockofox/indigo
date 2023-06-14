@@ -1,6 +1,5 @@
-module Interpreter (run, fromBytecode, toBytecode) where
+module Interpreter (run, fromBytecode, toBytecode, pop) where
 
-import CEmitter (pop, popN)
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT), gets)
 import Data.Binary (decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
@@ -35,6 +34,7 @@ data Value
     | StringValue String
     | BoolValue Bool
     | PartialFunction {func :: Expr, args :: [Value]}
+    | ListValue {values :: [Value]}
     | UnitValue
     deriving (Eq)
 
@@ -44,7 +44,16 @@ instance Show Value where
     show (StringValue s) = s
     show (BoolValue b) = show b
     show (PartialFunction func args) = "<partial function: " ++ fname (fdef func) ++ " " ++ show args ++ ">"
+    show (ListValue l) = "[" ++ intercalate "," (map show l) ++ "]"
     show UnitValue = "()"
+
+pop :: [a] -> [a]
+pop [] = []
+pop (x : xs) = xs
+
+popN :: Int -> [a] -> [a]
+popN 0 xs = xs
+popN n xs = popN (n - 1) (pop xs)
 
 valueToExpr :: Value -> Expr
 valueToExpr (IntValue i) = IntLit (toInteger i)
@@ -52,6 +61,7 @@ valueToExpr (StringValue s) = StringLit s
 valueToExpr (FloatValue f) = FloatLit f
 valueToExpr (BoolValue b) = BoolLit b
 valueToExpr (PartialFunction func args) = FuncCall (fname (fdef func)) (map valueToExpr args)
+valueToExpr (ListValue l) = ListLit (map valueToExpr l)
 valueToExpr UnitValue = Placeholder
 
 typeOfV :: Value -> Type
@@ -60,7 +70,11 @@ typeOfV (FloatValue _) = Type.Float
 typeOfV (StringValue _) = Type.String
 typeOfV (BoolValue _) = Type.Bool
 typeOfV (PartialFunction func args) = Type.Fn{Type.args = popN (length args + 1) $ ftypes $ fdec func, Type.ret = last $ ftypes $ fdec func}
+typeOfV (ListValue l) = Type.List $ typeOfV $ head l
 typeOfV _ = Type.Any
+
+lastN :: Int -> [a] -> [a]
+lastN n xs = drop (length xs - n) xs
 
 safeHead :: [a] -> Maybe a
 safeHead [] = Nothing
@@ -230,6 +244,7 @@ interpret (FuncCall name a) = do
     -- fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $
     case ffunc of
         Just func -> do
+            -- traceShowM $ show (length (ftypes $ fdec func) - 1) ++ "==" ++ show (length argumentTypes')
             if length (ftypes $ fdec func) - 1 == length argumentTypes'
                 then do
                     if init (ftypes $ fdec func) == argumentTypes'
@@ -250,11 +265,18 @@ interpret (FuncCall name a) = do
             return ()
   where
     stackToVariables argNames interpretedArgs = do
+        let stuff = zip argNames interpretedArgs
         mapM_
             ( \(x, y) -> do
                 interpret $ Let x $ valueToExpr y
             )
-            (zip argNames interpretedArgs)
+            [(x, y) | (Var x, y) <- stuff]
+        mapM_
+            ( \(x, y) -> do
+                mapM_ (\(a, b) -> interpret $ Let a $ valueToExpr b) $ zip (init x) (init y)
+                interpret $ Let (last x) $ valueToExpr $ ListValue $ lastN (length y - length x + 1) y
+            )
+            [(x, y) | (ListPattern x, ListValue y) <- stuff]
 interpret (IntLit i) = stackPush $ IntValue (fromIntegral i)
 interpret (FloatLit f) = stackPush $ FloatValue f
 interpret (StringLit s) = stackPush $ StringValue s
@@ -288,4 +310,28 @@ interpret (Bind a@(FuncCall _ _) (FuncCall bname bargs)) = do
 interpret (Bind a b) = do
     interpret a
     interpret b
+interpret (ListLit expr) = do
+    mapM_ interpret expr
+    list <- stackPopN $ length expr
+    stackPush $ ListValue $ reverse list
+interpret (FuncDec name types) = do
+    state <- get
+    -- If the function is already defined, we need to update the types
+    let ffunc = find (\(ModernFunc def dec) -> fname def == name) [mf | mf@(ModernFunc _ _) <- functions state]
+    case ffunc of
+        Just func -> do
+            put $ state{functions = (ModernFunc{fdef = fdef func, fdec = FuncDec{fname = name, ftypes = types}}) : filter (\(ModernFunc def dec) -> fname def /= name) [mf | mf@(ModernFunc _ _) <- functions state]}
+        Nothing -> do
+            put $ state{functions = (ModernFunc{fdef = FuncDef{fname = name, fargs = [], fbody = Placeholder}, fdec = FuncDec{fname = name, ftypes = types}}) : functions state}
+interpret (FuncDef name args body) = do
+    state <- get
+    -- If the function is already defined, we need to update the body
+    let ffunc = find (\(ModernFunc def dec) -> fname def == name) [mf | mf@(ModernFunc _ _) <- functions state]
+    case ffunc of
+        Just func -> do
+            put $ state{functions = (ModernFunc{fdef = FuncDef{fname = name, fargs = args, fbody = body}, fdec = fdec func}) : filter (\(ModernFunc def dec) -> fname def /= name) [mf | mf@(ModernFunc _ _) <- functions state]}
+        Nothing -> do
+            put $ state{functions = (ModernFunc{fdef = FuncDef{fname = name, fargs = args, fbody = body}, fdec = FuncDec{fname = name, ftypes = []}}) : functions state}
+    state <- get
+    traceShowM $ find (\(ModernFunc def dec) -> fname def == name) [mf | mf@(ModernFunc _ _) <- functions state]
 interpret ex = error $ "Unimplemented expression: " ++ show ex
