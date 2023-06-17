@@ -27,3 +27,16 @@ pow x: Float -> y: Float => Float = internal_pow x, y
 eq  x: Float -> y: Float => Bool  = internal_eq  x, y
 
 flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
+
+map :: Fn{Any => Any} -> List{Any} -> List{Any}
+map fun [] = []
+map fun (x:xs) = (fun x) : (map fun, xs)
+
+filter :: Fn{Any => Bool} -> List{Any} -> List{Any}
+filter fun [] = []
+filter fun (x:xs) = do
+    if fun x then
+        x : (filter fun, xs)
+    else
+        filter fun, xs
+end

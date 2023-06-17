@@ -5,17 +5,15 @@ bla => IO = (println "Hello World") >> (print "The factorial of 6.0 is ") >> (fa
 
 switchedDivide a: Float -> b: Float => Float = flip (div _), a, b
 
-xxx :: List{Float} -> List{Float}
-xxx (a:b:xs) = xs
-
 main => IO = do
-  println fact 5.0
-  println call ffact 4.0
-  bla _
-  print "2.0 / 4.0 is "
-  println (switchedDivide 4.0, 2.0)
-  print "4.0 / 2.0 is "
-  println 4.0/2.0
-  println [1,2,3]
-  println xxx [1.0,2.0,3.0]
+  # println fact 5.0
+  # println call ffact 4.0
+  # bla _
+  # print "2.0 / 4.0 is "
+  # println (switchedDivide 4.0, 2.0)
+  # print "4.0 / 2.0 is "
+  # println 4.0/2.0
+  # println [1,2,3]
+  # xxx [1.0,2.0,3.0]
+  println map (add 1.0), [1.0,2.0,3.0]
 end
