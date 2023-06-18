@@ -6,7 +6,6 @@ import Data.ByteString.Lazy (LazyByteString)
 import Data.List (find, intercalate)
 import Data.Maybe
 import Data.Text qualified
-import Debug.Trace (traceShow, traceShowM)
 import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
 import Parser qualified as Type
 import Paths_prisma qualified
@@ -24,7 +23,8 @@ data InterpreterState = InterpreterState
     heap :: [Value],
     functions :: [Expr],
     currentFunction :: String,
-    variables :: [VarTableEntry]
+    variables :: [VarTableEntry],
+    structs :: [Expr]
   }
   deriving (Show)
 
@@ -35,6 +35,7 @@ data Value
   | BoolValue Bool
   | PartialFunction {func :: Expr, args :: [Value]}
   | ListValue {values :: [Value]}
+  | StructValue {struct :: String, fields :: [(String, Value)]}
   | UnitValue
   deriving (Eq)
 
@@ -45,6 +46,7 @@ instance Show Value where
   show (BoolValue b) = show b
   show (PartialFunction func args) = "<partial function: " ++ fname (fdec func) ++ " " ++ show args ++ ">"
   show (ListValue l) = "[" ++ intercalate "," (map show l) ++ "]"
+  show (StructValue struct fields) = "<struct " ++ struct ++ " " ++ show fields ++ ">"
   show UnitValue = "()"
 
 pop :: [a] -> [a]
@@ -62,6 +64,7 @@ valueToExpr (FloatValue f) = FloatLit f
 valueToExpr (BoolValue b) = BoolLit b
 valueToExpr (PartialFunction func args) = FuncCall (fname (fdec func)) (map valueToExpr args)
 valueToExpr (ListValue l) = ListLit (map valueToExpr l)
+valueToExpr (StructValue struct fields) = StructLit struct (map (\(name, value) -> (name, valueToExpr value)) fields)
 valueToExpr UnitValue = Placeholder
 
 typeOfV :: Value -> Type
@@ -71,6 +74,7 @@ typeOfV (StringValue _) = Type.String
 typeOfV (BoolValue _) = Type.Bool
 typeOfV (PartialFunction func args) = Type.Fn {Type.args = popN (length args + 1) $ ftypes $ fdec func, Type.ret = last $ ftypes $ fdec func}
 typeOfV (ListValue l) = Type.List $ if not (null l) then typeOfV $ head l else Type.Any
+typeOfV (StructValue struct _) = Type.StructT struct
 typeOfV _ = Type.Any
 
 lastN :: Int -> [a] -> [a]
@@ -229,7 +233,7 @@ interpret (FuncCall "internal_div" [arg1, arg2]) = do
     (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 `div` i2)
     (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 / f2)
     _ -> error "Cannot divide values of different types"
-interpret f@(ModernFunc _ _) = do
+interpret f@(Function _ _) = do
   state <- get
   put $ state {functions = f : functions state}
 interpret (FuncCall name a) = do
@@ -239,21 +243,21 @@ interpret (FuncCall name a) = do
   interpretedArgs <- stackPopN (length args)
   let argumentTypes = map typeOfV interpretedArgs
   let argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
-  let ffunc = find (\(ModernFunc _ dec) -> fname dec == name) [mf | mf@(ModernFunc _ _) <- functions state]
-  case ffunc of
-    Just ffunc -> do
-      let ffdef = find (\x -> all (\(formal, actual) -> case formal of (Var _) -> True; (ListPattern _) -> True; _ -> formal == valueToExpr actual) $ zip (fargs x) interpretedArgs) $ fdef ffunc
-      case ffdef of
-        Just def -> do
-          if length (ftypes $ fdec ffunc) - 1 == length argumentTypes'
+  let function = find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+  case function of
+    Just function -> do
+      let definition = find (\x -> all (\(formal, actual) -> case formal of (Var _) -> True; (ListPattern _) -> True; _ -> formal == valueToExpr actual) $ zip (fargs x) interpretedArgs) $ fdef function
+      case definition of
+        Just definiton -> do
+          if length (ftypes $ fdec function) - 1 == length argumentTypes'
             then do
-              if init (ftypes $ fdec ffunc) == argumentTypes'
+              if init (ftypes $ fdec function) == argumentTypes'
                 then do
-                  stackToVariables (fargs def) interpretedArgs
-                  interpret $ fbody def
+                  stackToVariables (fargs definiton) interpretedArgs
+                  interpret $ fbody definiton
                 else error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
             else do
-              stackPush $ PartialFunction {func = ffunc, args = interpretedArgs}
+              stackPush $ PartialFunction {func = function, args = interpretedArgs}
         Nothing -> error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
     Nothing -> do
       let vfunc = fromMaybe (error $ "VFunction " ++ showFunction name argumentTypes' True ++ " not found") $ find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry {}) <- variables state]
@@ -265,11 +269,11 @@ interpret (FuncCall name a) = do
         _ -> error $ "Value " ++ name ++ " is not a function"
       return ()
   where
-    stackToVariables argNames interpretedArgs = do
-      let stuff = zip argNames interpretedArgs
+    stackToVariables formal actual = do
+      let stuff = zip formal actual
       mapM_
-        ( \(x, y) -> do
-            interpret $ Let x $ valueToExpr y
+        ( \(formal, actual) -> do
+            interpret $ Let formal $ valueToExpr actual
         )
         [(x, y) | (Var x, y) <- stuff]
       mapM_
@@ -322,12 +326,11 @@ interpret (ListLit expr) = do
   stackPush $ ListValue $ reverse list
 interpret (FuncDec name types) = do
   state <- get
-  put $ state {functions = ModernFunc {fdec = FuncDec {fname = name, ftypes = types}, fdef = []} : functions state}
+  put $ state {functions = Function {fdec = FuncDec {fname = name, ftypes = types}, fdef = []} : functions state}
 interpret (FuncDef name args body) = do
   state <- get
-  -- If the function is already defined, we need to update the body
-  let ffunc = fromMaybe (error "No function declaration found") $ find (\(ModernFunc _ dec) -> fname dec == name) [mf | mf@(ModernFunc _ _) <- functions state]
-  put $ state {functions = ModernFunc {fdec = fdec ffunc, fdef = fdef ffunc ++ [FuncDef {fname = name, fbody = body, fargs = args}]} : filter (\(ModernFunc def dec) -> fname dec /= name) (functions state)}
+  let ffunc = fromMaybe (error "No function declaration found") $ find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+  put $ state {functions = Function {fdec = fdec ffunc, fdef = fdef ffunc ++ [FuncDef {fname = name, fbody = body, fargs = args}]} : filter (\(Function _ dec) -> fname dec /= name) (functions state)}
 interpret (ListConcat a b) = do
   interpret a
   interpret b
@@ -335,5 +338,25 @@ interpret (ListConcat a b) = do
   a <- stackPop
   case (a, b) of
     (_, ListValue b) -> stackPush $ ListValue $ a : b
+    (ListValue a, _) -> stackPush $ ListValue $ a ++ [b]
+    (StringValue a, _) -> stackPush $ StringValue $ a ++ show b
+    (_, StringValue b) -> stackPush $ StringValue $ show a ++ b
     _ -> error $ "Cannot concatenate values of different types. Tried to concatenate " ++ show a ++ " and " ++ show b
+interpret s@(Struct _ _) = do
+  state <- get
+  put $ state {structs = s : structs state}
+interpret (StructLit name values) = do
+  state <- get
+  interpretedValues <- mapM (\(name, value) -> do interpret value; v <- stackPop; return (name, v)) values
+  let struct = find (\(Struct sname _) -> sname == name) [s | s@(Struct {}) <- structs state]
+  when (isNothing struct) $ error $ "Struct " ++ name ++ " not found"
+  stackPush $ StructValue {struct = name, fields = interpretedValues}
+interpret (StructAccess struct (Var field)) = do
+  interpret struct
+  struct <- stackPop
+  case struct of
+    StructValue {struct = sname, fields = fields} -> do
+      let value = fromMaybe (error $ "Field " ++ field ++ " not found in struct " ++ sname) $ lookup field fields
+      stackPush value
+    _ -> error $ "Cannot access field " ++ field ++ " of non-struct value " ++ show struct
 interpret ex = error $ "Unimplemented expression: " ++ show ex

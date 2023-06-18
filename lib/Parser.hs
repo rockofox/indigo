@@ -69,7 +69,7 @@ data Expr
   | FuncDef {fname :: String, fargs :: [Expr], fbody :: Expr}
   | FuncCall String [Expr]
   | FuncDec {fname :: String, ftypes :: [Type]}
-  | ModernFunc {fdef :: [Expr], fdec :: Expr}
+  | Function {fdef :: [Expr], fdec :: Expr}
   | DoBlock [Expr]
   | ExternDec String String [Type]
   | Add Expr Expr
@@ -93,6 +93,7 @@ data Expr
   | Ref Expr
   | Struct String [(String, Type)]
   | StructLit String [(String, Expr)]
+  | StructAccess Expr Expr
   | ListLit [Expr]
   | ListPattern [String]
   | ListConcat Expr Expr
@@ -118,6 +119,7 @@ data Type
   | None
   | Fn {args :: [Type], ret :: Type}
   | List Type
+  | StructT String
   deriving (Show, Generic)
 
 newtype Program = Program [Expr] deriving (Show, Generic)
@@ -141,6 +143,7 @@ instance Eq Type where
   List Any == List _ = True
   List _ == List Any = True
   List x == List y = x == y
+  StructT x == StructT y = x == y
   _ == _ = False
 
 typeOf :: Expr -> Parser.Type
@@ -170,7 +173,7 @@ typeOf (Let x y) = error "Cannot infer type of let"
 typeOf (If x y z) = error "Cannot infer type of if"
 typeOf (FuncDef x y z) = error "Cannot infer type of function definition"
 typeOf (FuncDec x y) = error "Cannot infer type of function declaration"
-typeOf (ModernFunc x y) = error "Cannot infer type of modern function"
+typeOf (Function x y) = error "Cannot infer type of modern function"
 typeOf (DoBlock x) = error "Cannot infer type of do block"
 typeOf (ExternDec x y z) = error "Cannot infer type of extern declaration"
 typeOf (InternalFunction x y) = error "Cannot infer type of internal function"
@@ -183,6 +186,7 @@ typeOf (ListLit x) = error "Cannot infer type of array"
 typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
 typeOf (Modulo x y) = error "Cannot infer type of modulo"
 typeOf (Target x y) = error "Cannot infer type of target"
+typeOf (StructLit name _) = StructT name
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
@@ -191,6 +195,7 @@ binOpTable =
     [binary "%" Modulo],
     [binary ">>" Then],
     [binary "~>" Bind],
+    [binary "." StructAccess],
     [binary ":" ListConcat],
     [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge],
     [binary "&&" And, binary "||" Or],
@@ -306,6 +311,8 @@ validType =
       symbol "List"
       curlyBrackets $ do
         List <$> validType
+    <|> do
+      StructT <$> identifier
     <?> "type"
 
 externLanguage :: Parser String
@@ -414,8 +421,8 @@ doBlock = do
   symbol "end" <|> lookAhead (symbol "else")
   return $ DoBlock exprs
 
-modernFunction :: Parser Expr
-modernFunction = do
+combinedFunc :: Parser Expr
+combinedFunc = do
   name <- identifier <?> "function name"
   (args, argTypes) <-
     unzip <$> many do
@@ -432,7 +439,7 @@ modernFunction = do
   -- put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
 
   body <- recover expr <?> "function body"
-  return $ ModernFunc [(FuncDef name args body)] (FuncDec name (argTypes ++ [returnType]))
+  return $ Function [(FuncDef name args body)] (FuncDec name (argTypes ++ [returnType]))
 
 discard :: Parser Expr
 discard = do
@@ -457,19 +464,17 @@ struct :: Parser Expr
 struct = do
   symbol "struct"
   name <- identifier
-  symbol "{"
-  optional newline'
+  symbol "="
   fields <-
-    sepBy1
-      ( do
-          fieldName <- identifier
-          symbol ":"
-          fieldType <- validType
-          return (fieldName, fieldType)
-      )
-      (symbol "," <* optional newline')
-  optional newline'
-  symbol "}"
+    parens $
+      sepBy1
+        ( do
+            fieldName <- identifier <?> "field name"
+            symbol ":"
+            fieldType <- validType <?> "field type"
+            return (fieldName, fieldType)
+        )
+        (symbol "," <* optional newline')
   return $ Struct name fields
 
 structLit :: Parser Expr
@@ -564,7 +569,7 @@ term =
             import_,
             externDec,
             doBlock,
-            try modernFunction,
+            try combinedFunc,
             try funcDef,
             try funcDec,
             target,

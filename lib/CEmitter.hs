@@ -43,7 +43,7 @@ compileExprToC = error "Not implemented"
 -- --         "" ++ retType ++ " " ++ fname ++ "(" ++ popcatMap (\(t, a) -> t ++ " " ++ a ++ ",") argsWithTypes ++ ");\n"
 -- compileExprToC (StringLit s) = show s
 -- compileExprToC (IntLit i) = show i
--- compileExprToC (ModernFunc def dec) = do
+-- compileExprToC (Function def dec) = do
 --     let retType = typeToC $ last $ ftypes dec
 --     let argTypes = pop $ ftypes dec
 --     let args = fargs def

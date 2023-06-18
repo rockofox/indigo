@@ -1,3 +1,5 @@
+# This tries to test all/most features of the language
+
 fact n : Float => Float = (if n == 0.0 then 1.0 else n * fact ((n) - 1.0))
 ffact a: Float -> b: Float => Float = (fact a) * b
 call fn : Fn {Float => Float} => Float = fn 3.0
@@ -5,15 +7,21 @@ bla => IO = (println "Hello World") >> (print "The factorial of 6.0 is ") >> (fa
 
 switchedDivide a: Float -> b: Float => Float = flip (div _), a, b
 
+struct Point = (x: Float, y: Float)
+
+printPoint :: Point -> IO
+printPoint p = println ("Point: ": p.x: ", ": p.y)
+
 main => IO = do
-  # println fact 5.0
-  # println call ffact 4.0
-  # bla _
-  # print "2.0 / 4.0 is "
-  # println (switchedDivide 4.0, 2.0)
-  # print "4.0 / 2.0 is "
-  # println 4.0/2.0
-  # println [1,2,3]
-  # xxx [1.0,2.0,3.0]
+  println fact 5.0
+  println call ffact 4.0
+  bla _
+  print "2.0 / 4.0 is "
+  println (switchedDivide 4.0, 2.0)
+  print "4.0 / 2.0 is "
+  println 4.0/2.0
+  println [1,2,3]
   println map (add 1.0), [1.0,2.0,3.0]
+  let p = Point { x: 1.0, y: 2.0}
+  printPoint p
 end

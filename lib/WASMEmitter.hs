@@ -52,116 +52,116 @@ sizeOf (StringLit s) = length s + 1
 sizeOf _ = 1
 
 data VarTableEntry = VarTableEntry
-    { name :: String
-    , context :: Maybe String
-    }
-    deriving (Show)
+  { name :: String,
+    context :: Maybe String
+  }
+  deriving (Show)
 
 data FunctionTableEntry = FunctionTableEntry
-    { ftname :: String
-    , ftargnames :: [String]
-    , ftparams :: [Parser.Type]
-    , ftresult :: Parser.Type
-    }
-    deriving (Show)
+  { ftname :: String,
+    ftargnames :: [String],
+    ftparams :: [Parser.Type],
+    ftresult :: Parser.Type
+  }
+  deriving (Show)
 
 data MemoryCell = MemoryCell
-    { size :: Int
-    , data_ :: Ptr Int8
-    }
-    deriving (Show)
+  { size :: Int,
+    data_ :: Ptr Int8
+  }
+  deriving (Show)
 
 data CompilerState = CompilerState
-    { mod :: Binaryen.Module
-    , varTable :: [VarTableEntry]
-    , memory :: [MemoryCell]
-    , currentFunction :: Maybe String
-    , importedModules :: [(String, Binaryen.Module)]
-    , functionTable :: [FunctionTableEntry]
-    }
-    deriving (Show)
+  { mod :: Binaryen.Module,
+    varTable :: [VarTableEntry],
+    memory :: [MemoryCell],
+    currentFunction :: Maybe String,
+    importedModules :: [(String, Binaryen.Module)],
+    functionTable :: [FunctionTableEntry]
+  }
+  deriving (Show)
 
 getCellOffset :: Int -> StateT CompilerState IO Int
 getCellOffset index = do
-    state <- get
-    let memory_ = memory state
-    let offset = sum $ map size (take index memory_)
-    return (offset + 8)
+  state <- get
+  let memory_ = memory state
+  let offset = sum $ map size (take index memory_)
+  return (offset + 8)
 
 findVarIndex :: String -> StateT CompilerState IO (Maybe Int)
 findVarIndex name_ = do
-    state <- get
-    let varTable_ = varTable state
-    let context_ = fromMaybe "" $ currentFunction state
-    let varsInContext =
-            filter
-                ( \x -> case context x of
-                    Just c -> context_ == c
-                    Nothing -> False
-                )
-                varTable_
-    return $ elemIndex name_ (map name varsInContext)
+  state <- get
+  let varTable_ = varTable state
+  let context_ = fromMaybe "" $ currentFunction state
+  let varsInContext =
+        filter
+          ( \x -> case context x of
+              Just c -> context_ == c
+              Nothing -> False
+          )
+          varTable_
+  return $ elemIndex name_ (map name varsInContext)
 
 compileProgramToWAST :: Program -> IO String
 compileProgramToWAST (Program exprs) = do
-    newModule <- Binaryen.Module.create
-    let initialState = CompilerState{mod = newModule, varTable = [], memory = [], currentFunction = Nothing, importedModules = [], functionTable = []}
-    (_, state) <- runStateT (mapM_ compileExprToWAST exprs) initialState
-    let mod_ = mod state
-    let memory_ = memory state
+  newModule <- Binaryen.Module.create
+  let initialState = CompilerState {mod = newModule, varTable = [], memory = [], currentFunction = Nothing, importedModules = [], functionTable = []}
+  (_, state) <- runStateT (mapM_ compileExprToWAST exprs) initialState
+  let mod_ = mod state
+  let memory_ = memory state
 
-    memoryName <- newCString "memory"
-    dataPtr <- newArray (fmap data_ memory_)
-    sizePtr <- newArray (fmap (fromIntegral . size) memory_)
-    offsets <- newArray =<< mapM (liftIO . constInt32 mod_ . fromIntegral) . fst =<< runStateT (mapM getCellOffset [0 .. length memory_ - 1]) state
-    segmentsPassive <- malloc
-    poke segmentsPassive 0
+  memoryName <- newCString "memory"
+  dataPtr <- newArray (fmap data_ memory_)
+  sizePtr <- newArray (fmap (fromIntegral . size) memory_)
+  offsets <- newArray =<< mapM (liftIO . constInt32 mod_ . fromIntegral) . fst =<< runStateT (mapM getCellOffset [0 .. length memory_ - 1]) state
+  segmentsPassive <- malloc
+  poke segmentsPassive 0
 
-    dataPtr <- newArray (fmap (castPtr . data_) memory_)
-    _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
+  dataPtr <- newArray (fmap (castPtr . data_) memory_)
+  _ <- Binaryen.setMemory mod_ 1 (fromIntegral (length memory_)) memoryName dataPtr segmentsPassive offsets sizePtr (fromIntegral $ length memory_) 0
 
-    functionTablePtr <- newArray =<< mapM ((newCString . (++ "\0")) . ftname) (functionTable state)
-    offsetExpr <- Binaryen.constInt32 mod_ 0
-    _ <- Binaryen.setFunctionTable mod_ (fromIntegral $ length $ functionTable state) (fromIntegral $ length $ functionTable state) functionTablePtr (fromIntegral $ length (functionTable state)) offsetExpr
-    -- status <- Binaryen.validate mod_        FIXME: Validator is broken ;(
-    let status = (1 :: Integer)
+  functionTablePtr <- newArray =<< mapM ((newCString . (++ "\0")) . ftname) (functionTable state)
+  offsetExpr <- Binaryen.constInt32 mod_ 0
+  _ <- Binaryen.setFunctionTable mod_ (fromIntegral $ length $ functionTable state) (fromIntegral $ length $ functionTable state) functionTablePtr (fromIntegral $ length (functionTable state)) offsetExpr
+  -- status <- Binaryen.validate mod_        FIXME: Validator is broken ;(
+  let status = (1 :: Integer)
 
-    isTTY <- hIsTerminalDevice IO.stdin
-    when isTTY $ Binaryen.setColorsEnabled 0
-    if status == 1
-        then do
-            -- _ <- Binaryen.autoDrop mod_
-            x <- Binaryen.allocateAndWriteText mod_
-            peekCString x
-        else error "Error validating module"
+  isTTY <- hIsTerminalDevice IO.stdin
+  when isTTY $ Binaryen.setColorsEnabled 0
+  if status == 1
+    then do
+      -- _ <- Binaryen.autoDrop mod_
+      x <- Binaryen.allocateAndWriteText mod_
+      peekCString x
+    else error "Error validating module"
 
 getLocals :: Binaryen.Expression -> IO [Binaryen.Expression]
 getLocals expr = do
-    type_ <- getId expr
-    exprs <- getLocals' type_ expr
-    filterM
-        ( \x -> do
-            xid <- getId x
-            return $ xid == localSetId
-        )
-        exprs
+  type_ <- getId expr
+  exprs <- getLocals' type_ expr
+  filterM
+    ( \x -> do
+        xid <- getId x
+        return $ xid == localSetId
+    )
+    exprs
   where
     getLocals' :: Binaryen.ExpressionId -> Binaryen.Expression -> IO [Binaryen.Expression]
     getLocals' type_ expr
-        | type_ == blockId = do
-            numChildren <- Binaryen.Expression.blockGetNumChildren expr
-            exprs <- mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
-            exprsFlattened <- mapM getLocals exprs
-            return $ concat exprsFlattened
-        | type_ == ifId = do
-            trueBranch <- ifGetIfTrue expr
-            falseBranch <- ifGetIfFalse expr
-            condition <- ifGetCondition expr
-            trueBranchLocals <- getLocals trueBranch
-            falseBranchLocals <- getLocals falseBranch
-            conditionLocals <- getLocals condition
-            return $ concat [trueBranchLocals, falseBranchLocals, conditionLocals]
-        | otherwise = return [expr]
+      | type_ == blockId = do
+          numChildren <- Binaryen.Expression.blockGetNumChildren expr
+          exprs <- mapM (Binaryen.Expression.blockGetChild expr) [0 .. numChildren - 1]
+          exprsFlattened <- mapM getLocals exprs
+          return $ concat exprsFlattened
+      | type_ == ifId = do
+          trueBranch <- ifGetIfTrue expr
+          falseBranch <- ifGetIfFalse expr
+          condition <- ifGetCondition expr
+          trueBranchLocals <- getLocals trueBranch
+          falseBranchLocals <- getLocals falseBranch
+          conditionLocals <- getLocals condition
+          return $ concat [trueBranchLocals, falseBranchLocals, conditionLocals]
+      | otherwise = return [expr]
 
 -- type_ <- liftIO $ getType expr
 -- return $ case type_ of
@@ -204,29 +204,30 @@ getLocals expr = do
 
 readBinaryFileToPtr :: FilePath -> IO (Ptr CChar, Int)
 readBinaryFileToPtr filePath = do
-    bs <- BS.readFile filePath
-    let len = BS.length bs
-    ptr <- mallocBytes len
-    BS.useAsCString bs $ \cstr -> copyBytes ptr cstr len
-    return (ptr, len)
+  bs <- BS.readFile filePath
+  let len = BS.length bs
+  ptr <- mallocBytes len
+  BS.useAsCString bs $ \cstr -> copyBytes ptr cstr len
+  return (ptr, len)
 
 findModule :: String -> String
 findModule name = name ++ ".wasm" -- This will, in the future, search the include path for the module
 
 moduleFromFile :: String -> IO Binaryen.Module
 moduleFromFile path = do
-    exists <- doesFileExist path
-    if exists
-        then do
-            (contents, len) <- readBinaryFileToPtr path
-            Binaryen.read contents (fromIntegral len)
-        else error $ "File not found: " ++ path
+  exists <- doesFileExist path
+  if exists
+    then do
+      (contents, len) <- readBinaryFileToPtr path
+      Binaryen.read contents (fromIntegral len)
+    else error $ "File not found: " ++ path
 
 unreachable :: a
 unreachable = error "Unreachable code reached"
 
 compileExprToWAST :: Expr -> StateT CompilerState IO Binaryen.Expression
 compileExprToWAST = error "Not implemented"
+
 -- compileExprToWAST (InternalFunction name args) = do
 --     state <- get
 --     let mod_ = mod state
@@ -418,7 +419,7 @@ compileExprToWAST = error "Not implemented"
 --     namePtr <- liftIO $ newCString name
 --     let functionIndex = elemIndex name $ map ftname $ functionTable state
 --     liftIO $ constInt32 mod_ (maybe unreachable fromIntegral functionIndex)
--- compileExprToWAST (ModernFunc def dec) = do
+-- compileExprToWAST (Function def dec) = do
 --     state <- get
 --     put $ state{currentFunction = Just $ fname dec}
 --     state <- get
