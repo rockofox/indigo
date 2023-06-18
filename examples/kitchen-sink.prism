@@ -20,4 +20,5 @@ main => IO = do
   println map (add 1.0), [1.0,2.0,3.0]
   let p = examples.test2.Point { x: 1.0, y: 2.0}
   examples.test2.printPoint p
+  println map (\x -> x * 3.0), [1.0,2.0,3.0]
 end
