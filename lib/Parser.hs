@@ -264,8 +264,8 @@ integer = lexeme L.decimal
 float :: Parser Float
 float = lexeme L.float
 
-foreignIdentifier :: Parser String
-foreignIdentifier = do
+extra :: Parser String
+extra = do
   name <- (lexeme . try) (p >>= check)
   if name `elem` rws
     then fail $ "keyword " ++ show name ++ " cannot be an identifier"
@@ -341,7 +341,7 @@ externDec :: Parser Expr
 externDec = do
   symbol "extern"
   lang <- externLanguage
-  name <- foreignIdentifier
+  name <- extra
   symbol "::"
   args <- sepBy validType (symbol "->")
   symbol "=>"
@@ -368,7 +368,7 @@ funcDef = do
 funcCall :: Parser Expr
 funcCall = do
   state <- get
-  name <- foreignIdentifier <?> "function name"
+  name <- extra <?> "function name"
   -- unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
   args <- sepBy1 expr (symbol ",") <?> "function arguments"
   return $ FuncCall name args
@@ -449,9 +449,9 @@ discard = do
 import_ :: Parser Expr
 import_ = do
   symbol "import"
-  objects <- sepBy identifier (symbol ",")
+  objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",")
   symbol "from"
-  Import objects <$> stringLit
+  Import objects <$> extra
 
 array :: Parser Expr
 array = do
@@ -463,7 +463,7 @@ array = do
 struct :: Parser Expr
 struct = do
   symbol "struct"
-  name <- identifier
+  name <- extra
   symbol "="
   fields <-
     parens $
@@ -479,7 +479,7 @@ struct = do
 
 structLit :: Parser Expr
 structLit = do
-  name <- identifier
+  name <- extra
   symbol "{"
   fields <-
     sepBy1

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Interpreter (run, fromBytecode, toBytecode, pop) where
 
 import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT), gets, when)
@@ -5,6 +7,7 @@ import Data.Binary (decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.List (find, intercalate)
 import Data.Maybe
+import Data.Text (replace)
 import Data.Text qualified
 import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
 import Parser qualified as Type
@@ -142,7 +145,7 @@ fromBytecode = decode
 
 run :: Program -> IO ()
 run (Program exprs) = do
-  let initialState = InterpreterState {stack = [], heap = [], functions = [], variables = [], currentFunction = ""}
+  let initialState = InterpreterState {stack = [], heap = [], functions = [], variables = [], currentFunction = "", structs = []}
   prelude <- liftIO $ (parseProgram . Data.Text.pack <$> preludeFile) <*> pure CompilerFlags {verboseMode = False}
   case prelude of
     Left err -> error $ errorBundlePretty err
@@ -359,4 +362,25 @@ interpret (StructAccess struct (Var field)) = do
       let value = fromMaybe (error $ "Field " ++ field ++ " not found in struct " ++ sname) $ lookup field fields
       stackPush value
     _ -> error $ "Cannot access field " ++ field ++ " of non-struct value " ++ show struct
+interpret (Import objects name) = do
+  when (objects /= ["*"]) $ error "Only wildcard imports are supported right now"
+  let file = Data.Text.unpack (replace "." "/" (Data.Text.pack name)) ++ ".prism"
+  contents <- liftIO $ readFile file
+  let parsed = parseProgram (Data.Text.pack contents) CompilerFlags {verboseMode = False}
+  case parsed of
+    Left err -> error $ errorBundlePretty err
+    Right (Program exprs) -> do
+      let treatedProgram = map (rewriteExpr name) exprs
+      mapM_ interpret treatedProgram
+  where
+    rewriteExpr :: String -> Expr -> Expr
+    rewriteExpr name (FuncCall fname args) = FuncCall (name ++ "." ++ fname) args
+    rewriteExpr name (FuncDec fname ftypes) = FuncDec (name ++ "." ++ fname) (map (rewriteType name) ftypes)
+    rewriteExpr name (FuncDef fname fargs fbody) = FuncDef (name ++ "." ++ fname) fargs fbody
+    rewriteExpr name (Function def dec) = Function (map (rewriteExpr name) def) (rewriteExpr name dec)
+    rewriteExpr name (Struct sname fields) = Struct (name ++ "." ++ sname) fields
+    rewriteExpr _ x = x
+    rewriteType :: String -> Type -> Type
+    rewriteType name (StructT sname) = StructT (name ++ "." ++ sname)
+    rewriteType _ x = x
 interpret ex = error $ "Unimplemented expression: " ++ show ex
