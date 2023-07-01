@@ -104,6 +104,7 @@ data Expr
     | Then Expr Expr
     | Bind Expr Expr
     | Lambda [Expr] Expr
+    | IOLit
     deriving
         ( Show
         , Generic
@@ -169,7 +170,7 @@ typeOf (Or x y) = Bool
 typeOf (Not x) = Bool
 typeOf (FuncCall _ _) = error "Cannot infer type of function call"
 typeOf Placeholder = None
-typeOf (Var x) = error "Cannot infer type of variable"
+typeOf (Var x) = Any
 typeOf (Let x y) = error "Cannot infer type of let"
 typeOf (If x y z) = error "Cannot infer type of if"
 typeOf (FuncDef x y z) = error "Cannot infer type of function definition"
@@ -183,11 +184,13 @@ typeOf (Import x y) = error "Cannot infer type of import"
 typeOf (Ref x) = error "Cannot infer type of ref"
 typeOf (Struct x y) = error "Cannot infer type of struct"
 typeOf (StructLit x y) = error "Cannot infer type of struct literal"
-typeOf (ListLit x) = error "Cannot infer type of array"
+typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
 typeOf (Modulo x y) = error "Cannot infer type of modulo"
 typeOf (Target x y) = error "Cannot infer type of target"
 typeOf (StructLit name _) = StructT name
+typeOf (IOLit) = IO
+typeOf x = error $ "Cannot infer type of " <> show x
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =

@@ -3,12 +3,14 @@ module Main where
 import CEmitter
 import Control.Monad
 import Control.Monad.Cont (MonadIO (liftIO))
+import Control.Monad.State (evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
+import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
-import Interpreter (fromBytecode, run, toBytecode)
+import Interpreter (fromBytecode, initialState, repl, run, toBytecode)
 import Options.Applicative
 import Parser hiding (expr)
 import System.Posix.IO (stdOutput)
@@ -26,6 +28,7 @@ data Options = Options
     , target :: Maybe Target
     , useInterpreter :: Bool
     , runBytecode :: Bool
+    , launchRepl :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -74,6 +77,11 @@ optionsParser =
                 <> short 'x'
                 <> help "Run bytecode from file"
             )
+        <*> switch
+            ( long "repl"
+                <> short 'p'
+                <> help "Launch a REPL"
+            )
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -104,7 +112,7 @@ inputFileBinary input = case input of
 
 main :: IO ()
 main = do
-    Options input output debug verbose target useInterpreter runBytecode <-
+    Options input output debug verbose target useInterpreter runBytecode launchRepl <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -113,36 +121,39 @@ main = do
                     <> header "prisma - a functional programming language"
                 )
 
-    if runBytecode
-        then do
-            bytecode <- inputFileBinary input
-            run (fromBytecode bytecode)
-        else do
-            i <- inputFile input
-            let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = verbose} of
-                    Left err -> error $ "Parse error: " ++ errorBundlePretty err
-                    Right expr -> expr
-            when debug $ putStrLn $ prettyPrintProgram expr
-            if useInterpreter
-                then run expr
+    if launchRepl
+        then void $ evalStateT repl Interpreter.initialState
+        else
+            if runBytecode
+                then do
+                    bytecode <- inputFileBinary input
+                    run (fromBytecode bytecode)
                 else do
-                    let t = fromMaybe (error "No target specified") target
-                    case t of
-                        WASM -> do
-                            wat <- compileProgramToWAST expr
-                            case output of
-                                Just "-" -> putStrLn wat
-                                Just file -> writeFile file wat
-                                Nothing -> putStrLn wat
-                        C -> do
-                            let c = compileProgramToC expr
-                            case output of
-                                Just "-" -> putStrLn c
-                                Just file -> writeFile file c
-                                Nothing -> putStrLn c
-                        Bytecode -> do
-                            let bytecode = toBytecode expr
-                            case output of
-                                Just "-" -> B.hPut stdout bytecode
-                                Just file -> B.writeFile file bytecode
-                                Nothing -> B.hPut stdout bytecode
+                    i <- inputFile input
+                    let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = verbose} of
+                            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+                            Right expr -> expr
+                    when debug $ putStrLn $ prettyPrintProgram expr
+                    if useInterpreter
+                        then run expr
+                        else do
+                            let t = fromMaybe (error "No target specified") target
+                            case t of
+                                WASM -> do
+                                    wat <- compileProgramToWAST expr
+                                    case output of
+                                        Just "-" -> putStrLn wat
+                                        Just file -> writeFile file wat
+                                        Nothing -> putStrLn wat
+                                C -> do
+                                    let c = compileProgramToC expr
+                                    case output of
+                                        Just "-" -> putStrLn c
+                                        Just file -> writeFile file c
+                                        Nothing -> putStrLn c
+                                Bytecode -> do
+                                    let bytecode = toBytecode expr
+                                    case output of
+                                        Just "-" -> B.hPut stdout bytecode
+                                        Just file -> B.writeFile file bytecode
+                                        Nothing -> B.hPut stdout bytecode

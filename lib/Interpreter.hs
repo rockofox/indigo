@@ -1,16 +1,19 @@
-{-# LANGUAGE LambdaCase #-}
+module Interpreter (run, fromBytecode, toBytecode, pop, interpret, repl, initialState) where
 
-module Interpreter (run, fromBytecode, toBytecode, pop) where
-
-import Control.Monad.State (MonadIO (liftIO), MonadState (get, put), StateT (runStateT), gets, when)
+import Control.Exception (Exception (toException), throw, try)
+import Control.Exception.Base ()
+import Control.Monad.Error
+import Control.Monad.State (MonadState (get, put), StateT (runStateT), gets)
 import Data.Binary (decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
+import Data.Data (Typeable)
 import Data.List (find, intercalate)
-import Data.Maybe
+import Data.Maybe (isNothing)
 import Data.Text (replace)
 import Data.Text qualified
-import Debug.Trace (traceShowM)
-import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram, typeOf)
+import GHC.IO.Handle (hFlush)
+import GHC.IO.Handle.FD (stdout)
+import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
 import Parser qualified as Type
 import Paths_prisma qualified
 import Text.Megaparsec
@@ -40,6 +43,7 @@ data Value
     | PartialFunction {func :: Expr, args :: [Value]}
     | ListValue {values :: [Value]}
     | StructValue {struct :: String, fields :: [(String, Value)]}
+    | IOValue
     | UnitValue
     deriving (Eq)
 
@@ -52,6 +56,7 @@ instance Show Value where
     show (ListValue l) = "[" ++ intercalate "," (map show l) ++ "]"
     show (StructValue struct fields) = "<struct " ++ struct ++ " " ++ show fields ++ ">"
     show UnitValue = "()"
+    show IOValue = "<IO>"
 
 pop :: [a] -> [a]
 pop [] = []
@@ -69,6 +74,7 @@ valueToExpr (BoolValue b) = BoolLit b
 valueToExpr (PartialFunction func args) = FuncCall (fname (fdec func)) (map valueToExpr args)
 valueToExpr (ListValue l) = ListLit (map valueToExpr l)
 valueToExpr (StructValue struct fields) = StructLit struct (map (\(name, value) -> (name, valueToExpr value)) fields)
+valueToExpr IOValue = IOLit
 valueToExpr UnitValue = Placeholder
 
 typeOfV :: Value -> Type
@@ -79,6 +85,7 @@ typeOfV (BoolValue _) = Type.Bool
 typeOfV (PartialFunction func args) = Type.Fn{Type.args = popN (length args + 1) $ ftypes $ fdec func, Type.ret = last $ ftypes $ fdec func}
 typeOfV (ListValue l) = Type.List $ if not (null l) then typeOfV $ head l else Type.Any
 typeOfV (StructValue struct _) = Type.StructT struct
+typeOfV IOValue = Type.IO
 typeOfV _ = Type.Any
 
 lastN :: Int -> [a] -> [a]
@@ -144,9 +151,19 @@ toBytecode (Program exprs) = encode exprs
 fromBytecode :: LazyByteString -> Program
 fromBytecode = decode
 
+initialState :: InterpreterState
+initialState = InterpreterState{stack = [], heap = [], functions = [], variables = [], currentFunction = "", structs = []}
+
+newtype RuntimeError = RuntimeError String
+    deriving (Show, Typeable)
+
+instance Exception RuntimeError
+
+runtimeError :: String -> StateT InterpreterState IO ()
+runtimeError err = throw $ RuntimeError err
+
 run :: Program -> IO ()
 run (Program exprs) = do
-    let initialState = InterpreterState{stack = [], heap = [], functions = [], variables = [], currentFunction = "", structs = []}
     prelude <- liftIO $ (parseProgram . Data.Text.pack <$> preludeFile) <*> pure CompilerFlags{verboseMode = False}
     case prelude of
         Left err -> error $ errorBundlePretty err
@@ -185,12 +202,12 @@ interpret (FuncCall "println" [arg]) = do
     interpret arg
     value <- stackPop
     liftIO $ print value
-interpret (FuncCall "println" _) = error "println takes exactly one argument"
+interpret (FuncCall "println" _) = runtimeError "println takes exactly one argument"
 interpret (FuncCall "print" [arg]) = do
     interpret arg
     value <- stackPop
     liftIO $ putStr $ show value
-interpret (FuncCall "print" _) = error "print takes exactly one argument"
+interpret (FuncCall "print" _) = runtimeError "print takes exactly one argument"
 interpret (FuncCall "internal_eq" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
@@ -205,38 +222,38 @@ interpret (FuncCall "internal_neg" [arg]) = do
     case value of
         IntValue i -> stackPush $ IntValue (-i)
         FloatValue f -> stackPush $ FloatValue (-f)
-        _ -> error "Cannot negate value of non-numeric type"
+        _ -> runtimeError "Cannot negate value of non-numeric type"
 interpret (FuncCall "internal_pow" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 ^ i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 ** f2)
-        _ -> error "Cannot raise values of different types"
+        _ -> runtimeError "Cannot raise values of different types"
 interpret (FuncCall "internal_add" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 + i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 + f2)
         (StringValue s1, StringValue s2) -> stackPush $ StringValue (s1 ++ s2)
-        _ -> error "Cannot add values of different types"
+        _ -> runtimeError "Cannot add values of different types"
 interpret (FuncCall "internal_sub" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 - i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 - f2)
-        _ -> error "Cannot subtract values of different types"
+        _ -> runtimeError "Cannot subtract values of different types"
 interpret (FuncCall "internal_mul" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 * i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 * f2)
-        _ -> error "Cannot multiply values of different types"
+        _ -> runtimeError "Cannot multiply values of different types"
 interpret (FuncCall "internal_div" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
         (IntValue i1, IntValue i2) -> stackPush $ IntValue (i1 `div` i2)
         (FloatValue f1, FloatValue f2) -> stackPush $ FloatValue (f1 / f2)
-        _ -> error "Cannot divide values of different types"
+        _ -> runtimeError "Cannot divide values of different types"
 interpret f@(Function _ _) = do
     state <- get
     put $ state{functions = f : functions state}
@@ -247,7 +264,8 @@ interpret (FuncCall name a) = do
     interpretedArgs <- stackPopN (length args)
     let argumentTypes = map typeOfV interpretedArgs
     let argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
-    let function = find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+    let availableFunctions = filter (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+    let function = find (\(Function _ dec) -> take (length argumentTypes') (ftypes dec) == argumentTypes') availableFunctions
     case function of
         Just function -> do
             let definition = find (\x -> all (\(formal, actual) -> case formal of (Var _) -> True; (ListPattern _) -> True; _ -> formal == valueToExpr actual) $ zip (fargs x) interpretedArgs) $ fdef function
@@ -259,18 +277,21 @@ interpret (FuncCall name a) = do
                                 then do
                                     stackToVariables (fargs definiton) interpretedArgs
                                     interpret $ fbody definiton
-                                else error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
+                                else runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong argument types)"
                         else do
                             stackPush $ PartialFunction{func = function, args = interpretedArgs}
-                Nothing -> error $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
+                Nothing -> runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong number of arguments)"
         Nothing -> do
-            let vfunc = fromMaybe (error $ "Function " ++ showFunction name argumentTypes' True ++ " not found") $ find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
-            case value vfunc of
-                PartialFunction{func = func, args = partialArgs} -> do
-                    let newArgs = interpretedArgs ++ partialArgs
-                    stackToVariables (fargs $ head $ fdef func) $ reverse newArgs
-                    interpret $ fbody $ head $ fdef func
-                _ -> error $ "Value " ++ name ++ " is not a function"
+            let vfunc = find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
+            case vfunc of
+                Just vfunc -> do
+                    case value vfunc of
+                        PartialFunction{func = func, args = partialArgs} -> do
+                            let newArgs = interpretedArgs ++ partialArgs
+                            stackToVariables (fargs $ head $ fdef func) $ reverse newArgs
+                            interpret $ fbody $ head $ fdef func
+                        _ -> runtimeError $ "Value " ++ name ++ " is not a function"
+                Nothing -> runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
             return ()
   where
     stackToVariables formal actual = do
@@ -296,8 +317,10 @@ interpret (FloatLit f) = stackPush $ FloatValue f
 interpret (StringLit s) = stackPush $ StringValue s
 interpret (Var vname) = do
     state <- get
-    let vvalue = fromMaybe (error $ "Variable " ++ vname ++ " not found") $ find (\v -> name v == vname && function v == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
-    stackPush $ value vvalue
+    let vvalue = find (\v -> name v == vname && function v == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
+    case vvalue of
+        Just vvalue -> stackPush $ value vvalue
+        Nothing -> runtimeError $ "Variable " ++ vname ++ " not found"
 interpret (Let name expr) = do
     interpret expr
     state <- get
@@ -309,7 +332,7 @@ interpret (If cond thenExpr elseExpr) = do
     case value of
         BoolValue True -> interpret thenExpr
         BoolValue False -> interpret elseExpr
-        _ -> error "Condition must be of type Bool"
+        _ -> runtimeError "Condition must be of type Bool"
 interpret (BoolLit b) = do
     stackPush $ BoolValue b
 interpret (ExternDec{}) = return ()
@@ -333,8 +356,10 @@ interpret (FuncDec name types) = do
     put $ state{functions = Function{fdec = FuncDec{fname = name, ftypes = types}, fdef = []} : functions state}
 interpret (FuncDef name args body) = do
     state <- get
-    let ffunc = fromMaybe (error "No function declaration found") $ find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
-    put $ state{functions = Function{fdec = fdec ffunc, fdef = fdef ffunc ++ [FuncDef{fname = name, fbody = body, fargs = args}]} : filter (\(Function _ dec) -> fname dec /= name) (functions state)}
+    let ffunc = find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+    case ffunc of
+        Nothing -> runtimeError $ "No function declaration found for function " ++ name
+        Just ffunc -> put $ state{functions = Function{fdec = fdec ffunc, fdef = fdef ffunc ++ [FuncDef{fname = name, fbody = body, fargs = args}]} : filter (\(Function _ dec) -> fname dec /= name) (functions state)}
 interpret (ListConcat a b) = do
     interpret a
     interpret b
@@ -345,7 +370,7 @@ interpret (ListConcat a b) = do
         (ListValue a, _) -> stackPush $ ListValue $ a ++ [b]
         (StringValue a, _) -> stackPush $ StringValue $ a ++ show b
         (_, StringValue b) -> stackPush $ StringValue $ show a ++ b
-        _ -> error $ "Cannot concatenate values of different types. Tried to concatenate " ++ show a ++ " and " ++ show b
+        _ -> runtimeError $ "Cannot concatenate values of different types. Tried to concatenate " ++ show a ++ " and " ++ show b
 interpret s@(Struct _ _) = do
     state <- get
     put $ state{structs = s : structs state}
@@ -353,23 +378,25 @@ interpret (StructLit name values) = do
     state <- get
     interpretedValues <- mapM (\(name, value) -> do interpret value; v <- stackPop; return (name, v)) values
     let struct = find (\(Struct sname _) -> sname == name) [s | s@(Struct{}) <- structs state]
-    when (isNothing struct) $ error $ "Struct " ++ name ++ " not found"
+    when (isNothing struct) $ runtimeError $ "Struct " ++ name ++ " not found"
     stackPush $ StructValue{struct = name, fields = interpretedValues}
 interpret (StructAccess struct (Var field)) = do
     interpret struct
     struct <- stackPop
     case struct of
         StructValue{struct = sname, fields = fields} -> do
-            let value = fromMaybe (error $ "Field " ++ field ++ " not found in struct " ++ sname) $ lookup field fields
-            stackPush value
-        _ -> error $ "Cannot access field " ++ field ++ " of non-struct value " ++ show struct
+            let value = lookup field fields
+            case value of
+                Just value -> stackPush value
+                Nothing -> runtimeError $ "Field " ++ field ++ " not found in struct " ++ sname
+        _ -> runtimeError $ "Cannot access field " ++ field ++ " of non-struct value " ++ show struct
 interpret (Import objects name) = do
-    when (objects /= ["*"]) $ error "Only wildcard imports are supported right now"
+    when (objects /= ["*"]) $ runtimeError "Only wildcard imports are supported right now"
     let file = Data.Text.unpack (replace "." "/" (Data.Text.pack name)) ++ ".prism"
     contents <- liftIO $ readFile file
     let parsed = parseProgram (Data.Text.pack contents) CompilerFlags{verboseMode = False}
     case parsed of
-        Left err -> error $ errorBundlePretty err
+        Left err -> runtimeError $ errorBundlePretty err
         Right (Program exprs) -> do
             let treatedProgram = map (rewriteExpr name) exprs
             mapM_ interpret treatedProgram
@@ -392,4 +419,51 @@ interpret (Lambda args body) = do
     let function = Function{fdef = def, fdec = dec}
     interpret function
     stackPush $ PartialFunction{func = function, args = []}
-interpret ex = error $ "Unimplemented expression: " ++ show ex
+interpret IOLit = do
+    stackPush IOValue
+interpret ex = runtimeError $ "Unimplemented expression: " ++ show ex
+
+-- REPL
+read_ :: IO String
+read_ = do
+    putStr "> "
+    hFlush stdout
+    getLine
+
+eval_ :: String -> [Expr] -> StateT InterpreterState IO ()
+eval_ input prelude = do
+    let parsed = parseProgram (Data.Text.pack input) CompilerFlags{verboseMode = False}
+    case parsed of
+        Left err -> liftIO $ putStrLn $ errorBundlePretty err
+        Right (Program exprs) -> do
+            mapM_ interpretCatch (prelude ++ exprs)
+            stackPop >>= liftIO . print
+  where
+    interpretCatch :: Expr -> StateT InterpreterState IO ()
+    interpretCatch expr = do
+        s <- get
+        result <- liftIO $ Control.Exception.try $ runStateT (interpret expr) s
+        case result of
+            Left (RuntimeError ex) -> liftIO $ putStrLn ex
+            Right x -> put $ snd x
+
+repl :: StateT InterpreterState IO ()
+repl = do
+    prelude <- liftIO $ (parseProgram . Data.Text.pack <$> preludeFile) <*> pure CompilerFlags{verboseMode = False}
+    case prelude of
+        Left err -> runtimeError $ errorBundlePretty err
+        Right (Program preludeExprs) -> do
+            input <- liftIO read_
+            case input of
+                ":quit" -> return ()
+                ":exit" -> return ()
+                ":help" -> liftIO $ putStrLn "Prism REPL\nType ':quit' or ':exit' to exit"
+                ":fn" -> do
+                    functions <- gets functions
+                    liftIO $ print functions
+                    liftIO $ mapM_ (\x -> putStrLn $ showFunction (fname $ fdec x) (ftypes $ fdec x) True) functions
+                ":state" -> do
+                    state <- get
+                    liftIO $ print state
+                _ -> eval_ input preludeExprs
+            repl
