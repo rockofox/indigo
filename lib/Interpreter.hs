@@ -11,6 +11,7 @@ import Data.List (find, intercalate)
 import Data.Maybe (isNothing)
 import Data.Text (replace)
 import Data.Text qualified
+import Debug.Trace
 import GHC.IO.Handle (hFlush)
 import GHC.IO.Handle.FD (stdout)
 import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
@@ -136,8 +137,8 @@ showFunction :: String -> [Type] -> Bool -> String
 showFunction name types argsOnly = do
     if not argsOnly
         then do
-            let args = pop types
-            let ret = if null types then None else head types
+            let args = init types
+            let ret = if null types then None else last types
             name ++ " " ++ intercalate " -> " (map show args) ++ " => " ++ show ret
         else do
             name ++ " " ++ intercalate " -> " (map show types) ++ " => ?"
@@ -257,30 +258,30 @@ interpret (FuncCall "internal_div" [arg1, arg2]) = do
 interpret f@(Function _ _) = do
     state <- get
     put $ state{functions = f : functions state}
-interpret (FuncCall name a) = do
+interpret (FuncCall name args) = do
     state <- get
-    let args = filter (/= Placeholder) a
-    mapM_ interpret $ reverse args
-    interpretedArgs <- stackPopN (length args)
+    let filteredArgs = filter (/= Placeholder) args
+    mapM_ interpret $ reverse filteredArgs
+    interpretedArgs <- stackPopN (length filteredArgs)
     let argumentTypes = map typeOfV interpretedArgs
-    let argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
-    let availableFunctions = filter (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
-    let function = find (\(Function _ dec) -> take (length argumentTypes') (ftypes dec) == argumentTypes') availableFunctions
+        argumentTypes' = if argumentTypes == [None] then [] else argumentTypes
+        availableFunctions = filter (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
+        function = find (\(Function _ dec) -> take (length argumentTypes') (ftypes dec) == argumentTypes') availableFunctions
     case function of
         Just function -> do
             let definition = find (\x -> all (\(formal, actual) -> case formal of (Var _) -> True; (ListPattern _) -> True; _ -> formal == valueToExpr actual) $ zip (fargs x) interpretedArgs) $ fdef function
             case definition of
-                Just definiton -> do
+                Just definition -> do
                     if length (ftypes $ fdec function) - 1 == length argumentTypes'
                         then do
                             if init (ftypes $ fdec function) == argumentTypes'
                                 then do
-                                    stackToVariables (fargs definiton) interpretedArgs
-                                    interpret $ fbody definiton
-                                else runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong argument types)"
+                                    stackToVariables (fargs definition) interpretedArgs
+                                    interpret $ fbody definition
+                                else runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong argument types)."
                         else do
                             stackPush $ PartialFunction{func = function, args = interpretedArgs}
-                Nothing -> runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong number of arguments)"
+                Nothing -> runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong number of arguments)."
         Nothing -> do
             let vfunc = find (\(VarTableEntry vname _ vfunction) -> vname == name && vfunction == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
             case vfunc of
@@ -291,8 +292,7 @@ interpret (FuncCall name a) = do
                             stackToVariables (fargs $ head $ fdef func) $ reverse newArgs
                             interpret $ fbody $ head $ fdef func
                         _ -> runtimeError $ "Value " ++ name ++ " is not a function"
-                Nothing -> runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found"
-            return ()
+                Nothing -> runtimeError $ "No callable " ++ showFunction name argumentTypes' True
   where
     stackToVariables formal actual = do
         let stuff = zip formal actual
@@ -320,7 +320,8 @@ interpret (Var vname) = do
     let vvalue = find (\v -> name v == vname && function v == currentFunction state) [v | v@(VarTableEntry{}) <- variables state]
     case vvalue of
         Just vvalue -> stackPush $ value vvalue
-        Nothing -> runtimeError $ "Variable " ++ vname ++ " not found"
+        Nothing -> do
+            interpret $ FuncCall vname []
 interpret (Let name expr) = do
     interpret expr
     state <- get
@@ -344,6 +345,10 @@ interpret (Bind a@(FuncCall _ _) (FuncCall bname bargs)) = do
     interpret a
     aResult <- stackPop
     interpret $ FuncCall bname (bargs ++ [valueToExpr aResult])
+interpret (Bind a (Var bName)) = do
+    interpret a
+    aResult <- stackPop
+    interpret $ FuncCall bName [valueToExpr aResult]
 interpret (Bind a b) = do
     interpret a
     interpret b
@@ -358,7 +363,8 @@ interpret (FuncDef name args body) = do
     state <- get
     let ffunc = find (\(Function _ dec) -> fname dec == name) [mf | mf@(Function _ _) <- functions state]
     case ffunc of
-        Nothing -> runtimeError $ "No function declaration found for function " ++ name
+        Nothing ->
+            put $ state{functions = Function{fdec = FuncDec{fname = name, ftypes = replicate (length args + 1) Any}, fdef = [FuncDef{fname = name, fbody = body, fargs = args}]} : functions state}
         Just ffunc -> put $ state{functions = Function{fdec = fdec ffunc, fdef = fdef ffunc ++ [FuncDef{fname = name, fbody = body, fargs = args}]} : filter (\(Function _ dec) -> fname dec /= name) (functions state)}
 interpret (ListConcat a b) = do
     interpret a
@@ -374,6 +380,9 @@ interpret (ListConcat a b) = do
 interpret s@(Struct _ _) = do
     state <- get
     put $ state{structs = s : structs state}
+    let constructorDec = FuncDec{fname = sname s, ftypes = map snd (sfields s) ++ [StructT (sname s)]}
+    let constructorDef = FuncDef{fname = sname s, fargs = map (Var . fst) (sfields s), fbody = StructLit (sname s) (zip (map fst (sfields s)) (map (Var . fst) (sfields s)))}
+    interpret $ Function [constructorDef] constructorDec
 interpret (StructLit name values) = do
     state <- get
     interpretedValues <- mapM (\(name, value) -> do interpret value; v <- stackPop; return (name, v)) values

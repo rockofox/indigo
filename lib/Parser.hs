@@ -20,7 +20,7 @@ import Data.Text (Text, unpack)
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import Text.Megaparsec
-    ( MonadParsec (eof, lookAhead, takeWhile1P, try, withRecovery)
+    ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
     , ParseError
     , ParseErrorBundle
     , ParsecT
@@ -91,7 +91,7 @@ data Expr
     | Discard Expr
     | Import [String] String
     | Ref Expr
-    | Struct String [(String, Type)]
+    | Struct {sname :: String, sfields :: [(String, Type)]}
     | StructLit String [(String, Expr)]
     | StructAccess Expr Expr
     | ListLit [Expr]
