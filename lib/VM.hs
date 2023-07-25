@@ -10,7 +10,8 @@ import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Maybe (fromMaybe)
-import Debug.Trace (trace, traceM, traceShowM)
+import Data.Text qualified
+import Debug.Trace (trace, traceM, traceShow, traceShowM)
 import GHC.Generics (Generic)
 
 data Instruction
@@ -48,6 +49,8 @@ data Instruction
       Jf String
     | -- | Call a function
       Call String
+    | -- | Call a function from the stack
+      CallS
     | -- | Pop a value off the stack
       Pop
     | -- | Duplicate the top value of the stack
@@ -86,7 +89,7 @@ data Instruction
 
 data Action = Print deriving (Show, Eq, Generic)
 
-data Data = DInt Int | DFloat Float | DString String | DBool Bool | DList [Data] | DNone | DChar Char deriving (Generic)
+data Data = DInt Int | DFloat Float | DString String | DBool Bool | DList [Data] | DNone | DChar Char | DFuncRef String deriving (Generic)
 
 instance Binary Instruction
 
@@ -102,6 +105,7 @@ instance Show Data where
     show (DList x) = show x
     show DNone = "None"
     show (DChar x) = show x
+    show (DFuncRef x) = "<" ++ x ++ ">"
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -155,6 +159,10 @@ tailOrNothing (_ : xs) = Just xs
 headOrEmpty :: [a] -> [a]
 headOrEmpty [] = []
 headOrEmpty (x : _) = [x]
+
+headOrError :: String -> [a] -> a
+headOrError err [] = error err
+headOrError _ (x : _) = x
 
 stackPush :: Data -> StateT VM IO ()
 stackPush d = do
@@ -234,6 +242,9 @@ instance Fractional Data where
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
     (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
 
+stackLen :: StateT VM IO Int
+stackLen = length . stack <$> get
+
 runInstruction :: Instruction -> StateT VM IO ()
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
@@ -250,12 +261,15 @@ runInstruction (Intr Print) = stackPop >>= liftIO . putStr . show
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
+runInstruction CallS = stackPop >>= \d -> case d of DFuncRef x -> runInstruction (Call x); _ -> error $ "Cannot call " ++ show d
 runInstruction (Jmp x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm}
 runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
 runInstruction (Jf x) = stackPop >>= \d -> when (d == DBool False) $ runInstruction (Jmp x)
-runInstruction Ret = modify $ \vm -> vm{pc = returnAddress $ safeHead $ callStack vm, callStack = tail $ callStack vm}
+runInstruction Ret = do
+    -- stackLen >>= \l -> when (l > 1) (error "Stack contains more than one item before return")
+    modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
 -- Comparison
 runInstruction Eq = stackPopN 2 >>= \(x : y : _) -> stackPush $ DBool $ x == y
 runInstruction Lt = stackPopN 2 >>= \(x : y : _) -> stackPush $ DBool $ x < y
@@ -291,6 +305,7 @@ runInstruction (LLoad name) = do
         Just x -> stackPush x
         Nothing -> error $ "Local not found: " ++ name
 -- List
+runInstruction (Concat 0) = stackPush $ DList []
 runInstruction (Concat n) =
     -- TODO: make this more efficient, it's yucky
     stackPopN n >>= \x -> do
@@ -387,7 +402,10 @@ printAssembly program showLineNumbers = do
   where
     printAssembly' :: Instruction -> String
     printAssembly' (Label name) = name ++ ":\n"
-    printAssembly' a = "\t" ++ show a ++ "\n"
+    printAssembly' a = "\t" ++ Data.Text.unpack a'' ++ "\n"
+      where
+        a' = Data.Text.pack $ show a
+        a'' = Data.Text.replace "\n" "\\n" a'
 
 toBytecode :: Program -> LazyByteString
 toBytecode = encode

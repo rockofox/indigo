@@ -5,6 +5,7 @@ import Data.List (elemIndex, find)
 import Data.Maybe (fromJust)
 import Data.Text (splitOn)
 import Data.Text qualified
+import Debug.Trace
 import Parser (parseProgram)
 import Parser qualified
 import Text.Megaparsec (errorBundlePretty)
@@ -59,6 +60,9 @@ findFunction name xs = do
     let minId = minimum ids'
     find (\y -> funame y == (name ++ "#" ++ show minId)) candidates
 
+unmangleFunctionName :: String -> String
+unmangleFunctionName name = takeWhile (/= '#') name
+
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
 compileExpr (Parser.Add x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Add])
 compileExpr (Parser.Sub x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Sub])
@@ -75,10 +79,29 @@ compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
 compileExpr (Parser.FuncCall "print" [x]) = compileExpr x >>= \x' -> return (x' ++ [Intr Print])
 compileExpr (Parser.FuncCall name args) = do
     functions' <- gets functions
-    let fun = findFunction name functions'
-    case fun of
-        (Just f) -> concatMapM compileExpr args >>= \args' -> return (args' ++ [Call (funame f)])
-        Nothing -> error $ "Function " ++ name ++ " not found"
+    funcDecs' <- gets funcDecs
+
+    let fun = case findFunction name functions' of
+            (Just f) -> f
+            Nothing -> Function{baseName = unmangleFunctionName name, funame = name, function = []}
+    let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
+    case funcDec of
+        (Just fd) -> do
+            if length args == length (Parser.ftypes fd) - 1
+                then concatMapM compileExpr args >>= \args' -> return (args' ++ [Call (funame fun)])
+                else
+                    return
+                        [ Push $
+                            DFuncRef
+                                (funame fun)
+                        ]
+        Nothing ->
+            concatMapM compileExpr args >>= \args' ->
+                return $
+                    args'
+                        ++ [ LLoad name
+                           , CallS
+                           ]
 compileExpr fd@(Parser.FuncDec _ _) = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
@@ -88,7 +111,7 @@ compileExpr (Parser.FuncDef name args body) = do
 
     body' <- compileExpr body
     funcDecs' <- gets funcDecs
-    args' <- concatMapM (`compileParameter` name) args
+    args' <- concatMapM (`compileParameter` name) (reverse args)
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs'
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     modify (\s -> s{functions = Function name funame function : tail (functions s)})
@@ -109,6 +132,7 @@ compileExpr (Parser.FuncDef name args body) = do
         let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
         let rest = [Push $ DInt (length elements - 1), Push DNone, Slice, last elements']
         return $ concat xToY ++ rest
+    compileParameter Parser.Placeholder _ = return []
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
 compileExpr (Parser.Var x) = do
     functions' <- gets functions
@@ -122,7 +146,6 @@ compileExpr (Parser.Let name value) = do
 compileExpr (Parser.Function a b) = mapM_ compileExpr a >> compileExpr b >> return []
 compileExpr (Parser.Flexible a) = compileExpr a >>= \a' -> return $ Meta "flex" : a'
 compileExpr (Parser.ListConcat a b) = do
-    -- compileExpr a >>= \a' -> compileExpr b >>= \b' -> return (b' ++ a' ++ [Concat 2])
     a' <- compileExpr a
     b' <- compileExpr b
     let a'' = case a' of

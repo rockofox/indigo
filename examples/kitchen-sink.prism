@@ -1,76 +1,9 @@
 # # This tries to test all/most features of the language
-# import * from examples.test2
-
-# fact n : Float => Float = (if n == 0.0 then 1.0 else n * fact ((n) - 1.0))
-# ffact a: Float -> b: Float => Float = (fact a) * b
-# call fn : Fn {Float => Float} => Float = fn 3.0
-# bla => IO = (println "Hello World") >> (print "The factorial of 6.0 is ") >> fact 6.0 ~> println
-
-# switchedDivide a: Float -> b: Float => Float = flip div, a, b
-
-# circle :: Float -> Float
-# circle x = sqrt (abs (1.0 - (x ^ 2.0)))
-
-# area :: Float -> Float -> Float
-# area x1 x2 = ((x2) - (x1)) * (circle x2)
-
-# estimate :: List{Float} -> Float
-# estimate (x:[]) = 0.0
-# estimate (x:y:xs) = do
-#   println ("x: ") : x : ("\ty: ") : y : ("\ty:xs: ") : (y:xs)
-#   (area x, y) + (estimate y:xs)
-#   # (estimate y:xs) + (area x, y)
-#   # area 1.0, 2.0
-#   # estimate (y:xs)
-# end
-
-# main => IO = do
-#   println fact 5.0
-#   println call ffact 4.0
-#   bla
-#   print "2.0 / 4.0 is "
-#   println switchedDivide 4.0, 2.0
-#   print "4.0 / 2.0 is "
-#   println 4.0/2.0
-#   println map (add 1.0), [1.0,2.0,3.0]
-#   let p = examples.test2.Point 1.0, 2.0
-#   examples.test2.printPoint p
-#   println map (\x -> x * 3.0), [1.0,2.0,3.0]
-#   println sum [1.0,2.0,3.0,4.0,5.0]
-#   println estimate [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
-# end
-
-# fact :: Int -> Int
-# fact n = do
-#   if n == 0 then do
-#     1
-#   else do
-#     n * fact ((n) - 1)
-#   end
-# end
-
-# count :: Int -> IO
-# count n = do
-#   if n == 0 then do
-#     println 0
-#     println "Done"
-#   else do
-#     println n
-#     count ((n) - 1)
-#   end
-# end
 
 println :: String -> IO
 println s = do
   print s
   print "\n"
-end
-
-patMa :: List{Int} -> List{Int}
-patMa (x:y:xs) = do
-  println x
-  println y
-  println xs
 end
 
 printPairs :: List{Int} -> IO
@@ -82,6 +15,7 @@ printPairs (x:y:xs) = do
   printPairs xs
 end
 
+fact :: Int -> Int
 fact n = do
   if n == 0 then do
     1
@@ -90,7 +24,25 @@ fact n = do
   end
 end
 
+addOne :: Int -> Int
+addOne n = n + 1
+
+add :: Int -> Int -> Int
+add x y = x + y
+
+map :: Fn {Any -> Any => Any} -> List{Any} -> List{Any}
+map f [] = []
+map f (x:xs) = (f x) : map f, xs
+
+call :: Fn {Int -> Int => Int} -> IO
+call f = do
+  println (f 10)
+end
+
 main => IO = do
-  printPairs [1,2,3,4]
-  println fact 5
+  # printPairs [1,2,3,4]
+  # println fact 20
+  println (map addOne, [1,2,3])
+  # println (argOrderTest 10, 5)
+  # call addOne
 end
