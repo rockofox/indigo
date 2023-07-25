@@ -90,11 +90,10 @@ compileExpr (Parser.FuncCall name args) = do
             if length args == length (Parser.ftypes fd) - 1
                 then concatMapM compileExpr args >>= \args' -> return (args' ++ [Call (funame fun)])
                 else
-                    return
-                        [ Push $
-                            DFuncRef
-                                (funame fun)
-                        ]
+                    concatMapM compileExpr args >>= \args' ->
+                        return $
+                            args'
+                                ++ [PushPf (funame fun) (length args')]
         Nothing ->
             concatMapM compileExpr args >>= \args' ->
                 return $

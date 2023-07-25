@@ -51,6 +51,8 @@ data Instruction
       Call String
     | -- | Call a function from the stack
       CallS
+    | -- | Push a partial function onto the stack
+      PushPf String Int
     | -- | Pop a value off the stack
       Pop
     | -- | Duplicate the top value of the stack
@@ -89,7 +91,7 @@ data Instruction
 
 data Action = Print deriving (Show, Eq, Generic)
 
-data Data = DInt Int | DFloat Float | DString String | DBool Bool | DList [Data] | DNone | DChar Char | DFuncRef String deriving (Generic)
+data Data = DInt Int | DFloat Float | DString String | DBool Bool | DList [Data] | DNone | DChar Char | DFuncRef String [Data] deriving (Generic)
 
 instance Binary Instruction
 
@@ -105,7 +107,7 @@ instance Show Data where
     show (DList x) = show x
     show DNone = "None"
     show (DChar x) = show x
-    show (DFuncRef x) = "<" ++ x ++ ">"
+    show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -248,6 +250,7 @@ stackLen = length . stack <$> get
 runInstruction :: Instruction -> StateT VM IO ()
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
+runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
 runInstruction Pop = void stackPop
 -- Arithmetic
 runInstruction Add = stackPopN 2 >>= \[y, x] -> stackPush $ x + y
@@ -261,7 +264,12 @@ runInstruction (Intr Print) = stackPop >>= liftIO . putStr . show
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
-runInstruction CallS = stackPop >>= \d -> case d of DFuncRef x -> runInstruction (Call x); _ -> error $ "Cannot call " ++ show d
+runInstruction CallS = do
+    stackPop >>= \d -> case d of
+        DFuncRef x args -> do
+            stackPushN args
+            runInstruction (Call x)
+        _ -> error $ "Cannot call " ++ show d
 runInstruction (Jmp x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm}
 runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)

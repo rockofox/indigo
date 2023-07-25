@@ -42,7 +42,7 @@ end
 main => IO = do
   # printPairs [1,2,3,4]
   # println fact 20
-  println (map addOne, [1,2,3])
+  println (map (add 2), [1,2,3])
   # println (argOrderTest 10, 5)
   # call addOne
 end
