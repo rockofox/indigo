@@ -30,6 +30,7 @@ data Options = Options
     , verbose :: Bool
     , emitBytecode :: Bool
     , runBytecode :: Bool
+    , breakpoints :: Maybe String
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -59,6 +60,7 @@ optionsParser =
         <*> switch (long "verbose" <> short 'v' <> help "Enable verbose mode")
         <*> switch (long "emit-bytecode" <> short 'b' <> help "Emit bytecode")
         <*> switch (long "run-bytecode" <> short 'r' <> help "Run bytecode")
+        <*> optional (strOption (long "breakpoints" <> short 't' <> help "Breakpoints for the VM to trace (space separated list of program counter indices). -1 to trace on every instruction"))
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -89,12 +91,12 @@ inputFileBinary input = case input of
 
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode <-
+    Options input output debug verbose emitBytecode runBytecode breakpoints <-
         execParser $
             info
                 (optionsParser <**> helper)
                 ( fullDesc
-                    <> progDesc "Compile a Prisma program to WebAssembly, C, or bytecode"
+                    <> progDesc "TODO"
                     <> header "prisma - a functional programming language"
                 )
     program <-
@@ -116,5 +118,8 @@ main = do
             Nothing -> error "No output file specified"
         exitSuccess
 
+    when debug $ putStrLn $ VM.printAssembly program True
+
     let mainPc = BytecodeCompiler.locateLabel program "main"
-    VM.runVM $ (VM.initVM program){VM.pc = mainPc, VM.breakpoints = [], VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
+    VM.runVM $ (VM.initVM program){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
