@@ -1,6 +1,6 @@
-module Main where
+module Main (main) where
 
-import CEmitter
+import BytecodeCompiler qualified
 import Control.Monad
 import Control.Monad.Cont (MonadIO (liftIO))
 import Control.Monad.State (evalStateT)
@@ -10,25 +10,26 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
-import Interpreter (fromBytecode, initialState, repl, run, toBytecode)
 import Options.Applicative
-import Parser hiding (expr)
+import Parser
+    ( CompilerFlags (CompilerFlags, verboseMode)
+    , Expr (DoBlock, FuncDef)
+    , Program (..)
+    , parseProgram
+    )
+import System.Exit (exitSuccess)
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
-import WASMEmitter
-
-data Target = WASM | C | Bytecode deriving (Show, Eq, Read)
+import VM qualified
 
 data Options = Options
     { input :: Maybe FilePath
     , output :: Maybe FilePath
     , debug :: Bool
     , verbose :: Bool
-    , target :: Maybe Target
-    , useInterpreter :: Bool
+    , emitBytecode :: Bool
     , runBytecode :: Bool
-    , launchRepl :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -47,7 +48,7 @@ optionsParser =
                 ( long "output"
                     <> short 'o'
                     <> metavar "FILE"
-                    <> help "Output file. Use - for stdout."
+                    <> help "Output file for bytecode compilation. Use - for stdout."
                 )
             )
         <*> switch
@@ -56,32 +57,8 @@ optionsParser =
                 <> help "Enable debug mode"
             )
         <*> switch (long "verbose" <> short 'v' <> help "Enable verbose mode")
-        <*> optional
-            ( option
-                auto
-                ( long "target"
-                    <> short 't'
-                    <> metavar "TARGET"
-                    <> help "Target language. Either 'wasm', 'c', or 'bytecode'. Default is 'c'."
-                    <> value C
-                    <> showDefault
-                )
-            )
-        <*> switch
-            ( long "interpreter"
-                <> short 'r'
-                <> help "Use the interpreter to run the program"
-            )
-        <*> switch
-            ( long "run-bytecode"
-                <> short 'x'
-                <> help "Run bytecode from file"
-            )
-        <*> switch
-            ( long "repl"
-                <> short 'p'
-                <> help "Launch a REPL"
-            )
+        <*> switch (long "emit-bytecode" <> short 'b' <> help "Emit bytecode")
+        <*> switch (long "run-bytecode" <> short 'r' <> help "Run bytecode")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -112,7 +89,7 @@ inputFileBinary input = case input of
 
 main :: IO ()
 main = do
-    Options input output debug verbose target useInterpreter runBytecode launchRepl <-
+    Options input output debug verbose emitBytecode runBytecode <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -120,40 +97,24 @@ main = do
                     <> progDesc "Compile a Prisma program to WebAssembly, C, or bytecode"
                     <> header "prisma - a functional programming language"
                 )
+    program <-
+        if not runBytecode
+            then do
+                i <- inputFile input
+                let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = verbose} of
+                        Left err -> error $ "Parse error: " ++ errorBundlePretty err
+                        Right expr -> expr
+                when debug $ putStrLn $ prettyPrintProgram expr
+                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.CompilerState expr [] [] 0)
+            else do
+                bytecode <- inputFileBinary input
+                return $ VM.fromBytecode bytecode
+    when emitBytecode $ do
+        case output of
+            Just "-" -> B.putStr $ VM.toBytecode program
+            Just file -> B.writeFile file $ VM.toBytecode program
+            Nothing -> error "No output file specified"
+        exitSuccess
 
-    if launchRepl
-        then void $ evalStateT repl Interpreter.initialState
-        else
-            if runBytecode
-                then do
-                    bytecode <- inputFileBinary input
-                    run (fromBytecode bytecode)
-                else do
-                    i <- inputFile input
-                    let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = verbose} of
-                            Left err -> error $ "Parse error: " ++ errorBundlePretty err
-                            Right expr -> expr
-                    when debug $ putStrLn $ prettyPrintProgram expr
-                    if useInterpreter
-                        then run expr
-                        else do
-                            let t = fromMaybe (error "No target specified") target
-                            case t of
-                                WASM -> do
-                                    wat <- compileProgramToWAST expr
-                                    case output of
-                                        Just "-" -> putStrLn wat
-                                        Just file -> writeFile file wat
-                                        Nothing -> putStrLn wat
-                                C -> do
-                                    let c = compileProgramToC expr
-                                    case output of
-                                        Just "-" -> putStrLn c
-                                        Just file -> writeFile file c
-                                        Nothing -> putStrLn c
-                                Bytecode -> do
-                                    let bytecode = toBytecode expr
-                                    case output of
-                                        Just "-" -> B.hPut stdout bytecode
-                                        Just file -> B.writeFile file bytecode
-                                        Nothing -> B.hPut stdout bytecode
+    let mainPc = BytecodeCompiler.locateLabel program "main"
+    VM.runVM $ (VM.initVM program){VM.pc = mainPc, VM.breakpoints = [], VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}

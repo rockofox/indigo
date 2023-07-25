@@ -95,7 +95,7 @@ data Expr
     | StructLit String [(String, Expr)]
     | StructAccess Expr Expr
     | ListLit [Expr]
-    | ListPattern [String]
+    | ListPattern [Expr]
     | ListConcat Expr Expr
     | ArrayAccess Expr Expr
     | Modulo Expr Expr
@@ -104,6 +104,9 @@ data Expr
     | Then Expr Expr
     | Bind Expr Expr
     | Lambda [Expr] Expr
+    | Cast Expr Expr
+    | TypeLit Type
+    | Flexible Expr
     | IOLit
     deriving
         ( Show
@@ -195,14 +198,16 @@ typeOf x = error $ "Cannot infer type of " <> show x
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [binary "+" Add, binary "-" Sub]
-    , [binary "*" Mul, binary "/" Div, binary "^" Power]
+    , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary ">>" Then]
     , [binary "~>" Bind]
     , [binary "." StructAccess]
+    , [binary "as" Cast]
     , [binary ":" ListConcat]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
+    , [prefix "^" Flexible]
     , [prefix "!" Not]
     , [prefix "-" UnaryMinus]
     ]
@@ -247,7 +252,7 @@ symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
 rws :: [String]
-rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard", "let"]
+rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard", "let", "as"]
 
 identifier :: Parser String
 identifier = do
@@ -315,8 +320,8 @@ validType =
             symbol "List"
             curlyBrackets $ do
                 List <$> validType
-        <|> do
-            StructT <$> identifier
+        -- <|> do TODO: REIMPLMENT
+        --     StructT <$> identifier
         <?> "type"
 
 externLanguage :: Parser String
@@ -339,7 +344,7 @@ externLanguage =
         <?> "language"
 
 stringLit :: Parser String
-stringLit = char '\"' *> manyTill L.charLiteral (char '\"')
+stringLit = lexeme $ char '\"' *> manyTill L.charLiteral (char '\"')
 
 externDec :: Parser Expr
 externDec = do
@@ -539,7 +544,8 @@ target = do
 
 listPattern :: Parser Expr
 listPattern = do
-    elements <- sepBy1 (identifier <|> (symbol "_" >> return "")) (symbol ":")
+    -- elements <- sepBy1 (identifier <|> (symbol "_" >> return "")) (symbol ":")
+    elements <- sepBy1 (var <|> placeholder <|> array) (symbol ":")
     return $ ListPattern elements
 
 lambda :: Parser Expr
@@ -563,6 +569,10 @@ recover = withRecovery recover'
         registerParseError err
         return $ Placeholder
 
+typeLiteral :: Parser Expr
+typeLiteral = do
+    TypeLit <$> validType
+
 term :: Parser Expr
 term =
     choice $
@@ -571,6 +581,7 @@ term =
                 [0 ..]
                 [ placeholder
                 , parens expr
+                , typeLiteral
                 , FloatLit <$> try float
                 , IntLit <$> try integer
                 , StringLit <$> try stringLit

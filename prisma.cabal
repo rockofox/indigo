@@ -63,9 +63,10 @@ library prisma-lib
     exposed-modules: Parser,
                 --    Analyzer,
                 --    JSEmitter,
-                   WASMEmitter,
-                   CEmitter,
-                   Interpreter
+                --    WASMEmitter,
+                --    CEmitter,
+                   VM,
+                   BytecodeCompiler
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

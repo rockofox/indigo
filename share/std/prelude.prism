@@ -40,3 +40,14 @@ filter fun (x:xs) = do
     else
         filter fun, xs
 end
+
+foldl :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
+foldl fun acc [] = acc
+foldl fun acc (x:xs) = foldl fun, (fun acc, x), xs
+
+foldr :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
+foldr fun acc [] = acc
+foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
+
+sum :: List{Any} -> Int
+sum xs = foldl add, 0.0, xs

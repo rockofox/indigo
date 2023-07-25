@@ -209,6 +209,20 @@ interpret (FuncCall "print" [arg]) = do
     value <- stackPop
     liftIO $ putStr $ show value
 interpret (FuncCall "print" _) = runtimeError "print takes exactly one argument"
+interpret (FuncCall "sqrt" [arg]) = do
+    interpret arg
+    value <- stackPop
+    case value of
+        IntValue i -> stackPush $ FloatValue $ sqrt $ fromIntegral i
+        FloatValue f -> stackPush $ FloatValue $ sqrt f
+        _ -> runtimeError "sqrt takes an integer or a float"
+interpret (FuncCall "abs" [arg]) = do
+    interpret arg
+    value <- stackPop
+    case value of
+        IntValue i -> stackPush $ IntValue $ abs i
+        FloatValue f -> stackPush $ FloatValue $ abs f
+        _ -> runtimeError "abs takes an integer or a float"
 interpret (FuncCall "internal_eq" [arg1, arg2]) = do
     [value1, value2] <- interpretAndPop [arg1, arg2]
     case (value1, value2) of
@@ -269,14 +283,14 @@ interpret (FuncCall name args) = do
         function = find (\(Function _ dec) -> take (length argumentTypes') (ftypes dec) == argumentTypes') availableFunctions
     case function of
         Just function -> do
-            let definition = find (\x -> all (\(formal, actual) -> case formal of (Var _) -> True; (ListPattern _) -> True; _ -> formal == valueToExpr actual) $ zip (fargs x) interpretedArgs) $ fdef function
+            let definition = find (\x -> all (uncurry matchDefinition) $ zip (fargs x) interpretedArgs) $ fdef function
             case definition of
                 Just definition -> do
                     if length (ftypes $ fdec function) - 1 == length argumentTypes'
                         then do
                             if init (ftypes $ fdec function) == argumentTypes'
                                 then do
-                                    stackToVariables (fargs definition) interpretedArgs
+                                    bindParameters (fargs definition) interpretedArgs
                                     interpret $ fbody definition
                                 else runtimeError $ "Function " ++ showFunction name argumentTypes' True ++ " not found (wrong argument types)."
                         else do
@@ -289,29 +303,45 @@ interpret (FuncCall name args) = do
                     case value vfunc of
                         PartialFunction{func = func, args = partialArgs} -> do
                             let newArgs = interpretedArgs ++ partialArgs
-                            stackToVariables (fargs $ head $ fdef func) $ reverse newArgs
+                            bindParameters (fargs $ head $ fdef func) $ reverse newArgs
                             interpret $ fbody $ head $ fdef func
                         _ -> runtimeError $ "Value " ++ name ++ " is not a function"
                 Nothing -> runtimeError $ "No callable " ++ showFunction name argumentTypes' True
   where
-    stackToVariables formal actual = do
-        let stuff = zip formal actual
+    matchDefinition :: Expr -> Value -> Bool
+    matchDefinition formal actual =
+        case formal of
+            (Var _) -> True
+            (ListPattern lp) -> case actual of
+                ListValue lv -> (last lp == ListLit [] && length lp - 1 == length lv) || (last lp /= ListLit [] && length lp - 1 <= length lv)
+                _ -> False -- TODO: Add pattern match error
+            _ -> formal == valueToExpr actual
+    bindParameters formal actual = do
+        let formalPlusActual = zip formal actual
         mapM_
             ( \(formal, actual) -> do
                 interpret $ Let formal $ valueToExpr actual
             )
-            [(x, y) | (Var x, y) <- stuff]
+            [(x, y) | (Var x, y) <- formalPlusActual]
         mapM_
             ( \(pattern, list) -> do
                 if length list /= length pattern - 1
                     then do
-                        mapM_ (\(a, b) -> interpret $ Let a $ valueToExpr b) $ zip (init pattern) (init list)
-                        interpret (Let (last pattern) (valueToExpr (ListValue (drop (length (init pattern)) list))))
+                        mapM_ (\(a, b) -> handleListExpr a b >>= interpret) $ zip (init pattern) (init list)
+                        handleListExpr (last pattern) (ListLit (drop (length (init pattern)) list)) >>= interpret
                     else do
-                        mapM_ (\(a, b) -> interpret $ Let a $ valueToExpr b) $ zip pattern list
-                        interpret (Let (last pattern) (valueToExpr (ListValue [])))
+                        mapM_ (\(a, b) -> handleListExpr a b >>= interpret) $ zip pattern list
+                        handleListExpr (last pattern) (valueToExpr (ListValue [])) >>= interpret
             )
-            [(x, y) | (ListPattern x, ListValue y) <- stuff]
+            [(x, map valueToExpr y) | (ListPattern x, ListValue y) <- formalPlusActual]
+      where
+        handleListExpr :: Expr -> Expr -> StateT InterpreterState IO Expr
+        handleListExpr a b = do
+            case a of
+                Var x -> return $ Let x b
+                ListLit [] -> return b
+                Placeholder -> return b
+                _ -> runtimeError "Invalid list pattern" >> return Placeholder
 interpret (IntLit i) = stackPush $ IntValue (fromIntegral i)
 interpret (FloatLit f) = stackPush $ FloatValue f
 interpret (StringLit s) = stackPush $ StringValue s
@@ -327,6 +357,8 @@ interpret (Let name expr) = do
     state <- get
     value <- stackPeek
     put $ state{stack = pop $ stack state, variables = (VarTableEntry{value = value, name = name, function = currentFunction state}) : variables state}
+    state <- get
+    traceShowM $ variables state
 interpret (If cond thenExpr elseExpr) = do
     interpret cond
     value <- stackPop
