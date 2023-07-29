@@ -370,7 +370,7 @@ funcDec = do
 funcDef :: Parser Expr
 funcDef = do
     name <- identifier <?> "function name"
-    args <- some (var <|> parens listPattern <|> array) <?> "function arguments"
+    args <- some (var <|> parens listPattern <|> array <|> placeholder) <?> "function arguments"
     symbol "="
     FuncDef name args <$> expr <?> "function body"
 

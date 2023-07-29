@@ -1,4 +1,4 @@
-module Main (main) where
+module Main (main, inputFile) where
 
 import BytecodeCompiler qualified
 import Control.Monad

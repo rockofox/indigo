@@ -1,12 +1,13 @@
 module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..)) where
 
-import Control.Monad.State (StateT, evalStateT, gets, modify)
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.List (elemIndex, find)
 import Data.Maybe (fromJust)
 import Data.Text (splitOn)
 import Data.Text qualified
+import Data.Text qualified as T
 import Debug.Trace
-import Parser (parseProgram)
+import Parser (CompilerFlags (CompilerFlags), parseProgram)
 import Parser qualified
 import Text.Megaparsec (errorBundlePretty)
 import VM
@@ -61,7 +62,7 @@ findFunction name xs = do
     find (\y -> funame y == (name ++ "#" ++ show minId)) candidates
 
 unmangleFunctionName :: String -> String
-unmangleFunctionName name = takeWhile (/= '#') name
+unmangleFunctionName = takeWhile (/= '#')
 
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
 compileExpr (Parser.Add x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Add])
@@ -124,7 +125,7 @@ compileExpr (Parser.FuncDef name args body) = do
             then return [Dup, Push $ DList [], Eq, Jf nextFunName]
             else do
                 lex' <- compileExpr lex
-                return $ lex' ++ [Dup, Eq, Jf nextFunName] -- TODO: Check if this works
+                return $ [Dup] ++ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
     compileParameter (Parser.ListPattern elements) n = do
         elements' <- concatMapM (`compileParameter` n) elements
         let paramsWithIndex = zip elements' [0 ..]
