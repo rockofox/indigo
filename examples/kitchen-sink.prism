@@ -1,4 +1,4 @@
-# # This tries to test all/most features of the language
+# This tries to test all/most features of the language
 
 println :: String -> IO
 println s = do
@@ -39,10 +39,35 @@ call f = do
   println (f 10)
 end
 
+# Equation for the upper hemisphere of the unit circle
+circle :: Float -> Float
+circle x = sqrt (abs(1.0 - x**2.0))
+
+# Calculate the area of a right-handed Riemann rectangle
+
+area :: Float -> Float -> Float
+area x1 x2 = ((x2) - x1) * circle x2
+
+# Recursively add the areas of the Riemann rectangles
+estimate :: Any -> Float
+estimate (x:[]) = 0.0
+estimate (x:y:xs) = (area x, y) + estimate (y:xs)
+
+range :: Int -> Int -> List{Int}
+range a b = do
+  if a == b then do
+    []
+  else do
+    a : range (a + 1.0), b
+  end
+end
+
+divide :: Int -> Int -> Int
+divide x y = x / y
+
 main => IO = do
-  # printPairs [1,2,3,4]
-  # println fact 20
-  println (map (add 2), [1,2,3])
-  # println (argOrderTest 10, 5)
-  # call addOne
+  let n = 4000.0
+  let rsum = estimate (map (divide n), (range 1.0, n))
+  let pi = 4.0 * rsum
+  println "Pi is approximately: " : ^pi
 end

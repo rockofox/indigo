@@ -27,6 +27,10 @@ data Instruction
       Div
     | -- | Pop two values off the stack, divide them, and push the remainder
       Mod
+    | -- | Pop two values off the stack, calculate the power, and push the result
+      Pow
+    | -- | Absolute value
+      Abs
     | -- | Pop two values off the stack, push T if the first is greater than the second, F otherwise
       Gt
     | -- | Pop two values off the stack, push T if the first is less than the second, F otherwise
@@ -35,8 +39,14 @@ data Instruction
       Not
     | -- | Pop two values off the stack, push T if they are equal, F otherwise
       Eq
-    | -- | Perform an IO action on the top value(s) of the stack
-      Intr Action
+    | -- | Pop two values off the stack, push T if they are not equal, F otherwise
+      Neq
+    | -- | Pop two values off the stack and push T if they are both truthy, F otherwise
+      And
+    | -- | Pop two values off the stack and push T if either is truthy, F otherwise
+      Or
+    | -- | Perform a builtin action
+      Builtin Action
     | -- | Jump to a label
       Jmp String
     | -- | Jump to a label if the top value of the stack is not zero
@@ -81,8 +91,14 @@ data Instruction
       Index
     | -- | Slice a list
       Slice
+    | -- | Length of a list
+      Length
+    | -- | Get length of the stack
+      StackLength
     | -- | Casts a to the type of b
       Cast
+    | -- | Comment, does nothing
+      Comment String
     | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
       Meta String
     | -- | Exit the program
@@ -191,6 +207,9 @@ stackPushN ds = do
 stackPeek :: StateT VM IO Data
 stackPeek = safeHead . stack <$> get
 
+stackLen :: StateT VM IO Int
+stackLen = length . stack <$> get
+
 run :: Program -> IO ()
 run program = do
     let vm = initVM program
@@ -207,22 +226,17 @@ runVM vm = evalStateT (run' (program vm)) vm
 locateLabels :: Program -> [(String, Int)]
 locateLabels program = [(x, n) | (Label x, n) <- zip program [0 ..]]
 
-showDebugInfo :: VM -> String
-showDebugInfo vm = show (pc vm) ++ "\t" ++ show (program vm !! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (head $ callStack vm)
+showDebugInfo :: StateT VM IO String
+showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm !! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
 
 run' :: Program -> StateT VM IO ()
 run' program = do
     vm <- get
     let inst = program !! pc vm
-    -- traceM $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show (stack vm) -- ++ "\t" ++ show (callStack vm)
     put $ vm{program = program, labels = locateLabels program}
-    catchError (runInstruction inst) $ \e -> do
-        traceM $ "### Error: " ++ show e
-        traceM $ "### STACK: " ++ show (stack vm)
-        traceM $ "### CALLSTACK: " ++ show (callStack vm)
-        traceM $ "### PC: " ++ show (pc vm)
+    when (not (null (breakpoints vm)) && pc vm `elem` breakpoints vm || -1 `elem` breakpoints vm) $ showDebugInfo >>= traceM
+    runInstruction inst
     vm <- get
-    when (not (null (breakpoints vm)) && pc vm `elem` breakpoints vm || -1 `elem` breakpoints vm) $ traceM $ showDebugInfo vm
     put $ vm{pc = pc vm + 1}
     when (running vm) $ run' program
 
@@ -230,7 +244,7 @@ instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
     (+) (DString x) (DString y) = DString $ x ++ y
-    (+) (DList x) (DList y) = DList $ x ++ y
+    -- (+) (DList x) (DList y) = DList $ x ++ y
     (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
@@ -238,29 +252,40 @@ instance Num Data where
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
     (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
+    fromInteger = DInt . fromInteger
 
 instance Fractional Data where
     (/) (DInt x) (DInt y) = DInt $ x `div` y
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
     (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
+    fromRational = DFloat . fromRational
 
-stackLen :: StateT VM IO Int
-stackLen = length . stack <$> get
+instance Floating Data where
+    (**) (DInt x) (DInt y) = DInt $ x ^ y
+    (**) (DFloat x) (DFloat y) = DFloat $ x ** y
+    (**) x y = error $ "Cannot raise " ++ show x ++ " to the power of " ++ show y
 
 runInstruction :: Instruction -> StateT VM IO ()
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
 runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
 runInstruction Pop = void stackPop
+runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
 runInstruction Add = stackPopN 2 >>= \[y, x] -> stackPush $ x + y
 runInstruction Sub = stackPopN 2 >>= \[y, x] -> stackPush $ x - y
 runInstruction Mul = stackPopN 2 >>= \[y, x] -> stackPush $ x * y
 runInstruction Div = stackPopN 2 >>= \[y, x] -> stackPush $ x / y
+runInstruction Pow = stackPopN 2 >>= \[y, x] -> stackPush $ x ** y
+runInstruction Abs =
+    stackPop >>= \x -> stackPush $ case x of
+        DInt x -> DInt $ abs x
+        DFloat x -> DFloat $ abs x
+        _ -> error $ "Cannot take absolute value of " ++ show x
 -- runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
 runInstruction Mod = error "Mod not implemented"
 -- IO
-runInstruction (Intr Print) = stackPop >>= liftIO . putStr . show
+runInstruction (Builtin Print) = stackPop >>= liftIO . putStr . show
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
@@ -276,19 +301,23 @@ runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
 runInstruction (Jf x) = stackPop >>= \d -> when (d == DBool False) $ runInstruction (Jmp x)
 runInstruction Ret = do
-    -- stackLen >>= \l -> when (l > 1) (error "Stack contains more than one item before return")
+    -- stackLen >>= \l -> when (l > 1) (error $ "Stack contains more than one item before return. Items: " ++ l)
+    -- get >>= \vm -> traceM $ show (stack vm)
     modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
 -- Comparison
-runInstruction Eq = stackPopN 2 >>= \(x : y : _) -> stackPush $ DBool $ x == y
-runInstruction Lt = stackPopN 2 >>= \(x : y : _) -> stackPush $ DBool $ x < y
-runInstruction Gt = stackPopN 2 >>= \(x : y : _) -> stackPush $ DBool $ x > y
+runInstruction Eq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x == y
+runInstruction Neq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x /= y
+runInstruction Lt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x < y
+runInstruction Gt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x > y
 runInstruction Not = stackPop >>= \d -> stackPush $ DBool $ not $ case d of DBool x -> x; _ -> error "Not a boolean"
+runInstruction And = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a && b; _ -> error "Not a boolean"
+runInstruction Or = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a || b; _ -> error "Not a boolean"
 -- Label
 runInstruction (Label _) = return () -- modify $ \vm -> vm{labels = (x, pc vm) : labels vm}
 runInstruction (Locate x) = get >>= \vm -> stackPush $ DInt $ fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm
 -- Stack
 runInstruction Swp = stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
-runInstruction Dup = stackPeek >>= stackPush
+runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
 runInstruction (DupN n) = stackPeek >>= \d -> stackPushN $ replicate n d
 -- Memory
 runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
@@ -350,6 +379,10 @@ runInstruction Slice = do
         end' = case maybeEnd of
             Just end -> if end > 0 then min end len else max 0 (len + end)
             Nothing -> len
+runInstruction Length = do
+    stackLen >>= \case
+        0 -> stackPush $ DInt (-1)
+        _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; _ -> error "Invalid type for length"
 -- Type
 runInstruction Cast = do
     to <- stackPop
@@ -380,6 +413,8 @@ runInstruction Cast = do
             DChar _ -> DChar $ head x
         x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
 runInstruction (Meta _) = return ()
+runInstruction (Comment _) = return ()
+runInstruction x = error $ show x ++ ": not implemented"
 
 -- then
 --     if start < 0
@@ -397,7 +432,7 @@ test =
     , Push $ DInt 1
     , Sub
     , DupN 2
-    , Intr Print
+    , Builtin Print
     , Jnz "loop"
     , Exit
     ]
@@ -410,6 +445,7 @@ printAssembly program showLineNumbers = do
   where
     printAssembly' :: Instruction -> String
     printAssembly' (Label name) = name ++ ":\n"
+    printAssembly' (Comment text) = "; " ++ text ++ "\n"
     printAssembly' a = "\t" ++ Data.Text.unpack a'' ++ "\n"
       where
         a' = Data.Text.pack $ show a

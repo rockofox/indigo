@@ -197,9 +197,10 @@ typeOf x = error $ "Cannot infer type of " <> show x
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
-    [ [binary "+" Add, binary "-" Sub]
+    [ [prefix "^" Flexible]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
+    , [binary "+" Add, binary "-" Sub]
     , [binary ">>" Then]
     , [binary "~>" Bind]
     , [binary "." StructAccess]
@@ -207,7 +208,6 @@ binOpTable =
     , [binary ":" ListConcat]
     , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
     , [binary "&&" And, binary "||" Or]
-    , [prefix "^" Flexible]
     , [prefix "!" Not]
     , [prefix "-" UnaryMinus]
     ]

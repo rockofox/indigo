@@ -64,20 +64,35 @@ findFunction name xs = do
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
 
+doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
+doBinOp x y op = do
+    x' <- compileExpr x
+    y' <- compileExpr y
+    case (x, y) of
+        (_, Parser.FuncCall _ _) -> return (y' ++ x' ++ [Swp] ++ [op])
+        (Parser.FuncCall _ _, _) -> return (x' ++ y' ++ [op])
+        _ -> return (x' ++ y' ++ [op])
+
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
-compileExpr (Parser.Add x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Add])
-compileExpr (Parser.Sub x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Sub])
-compileExpr (Parser.Mul x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mul])
-compileExpr (Parser.Div x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Div])
-compileExpr (Parser.Modulo x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mod])
-compileExpr (Parser.Gt x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Gt])
-compileExpr (Parser.Lt x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Lt])
+compileExpr (Parser.Add x y) = doBinOp x y Add
+compileExpr (Parser.Sub x y) = doBinOp x y Sub
+compileExpr (Parser.Mul x y) = doBinOp x y Mul
+compileExpr (Parser.Div x y) = doBinOp x y Div
+compileExpr (Parser.Modulo x y) = doBinOp x y Mod
+compileExpr (Parser.Power x y) = doBinOp x y Pow
+compileExpr (Parser.Gt x y) = doBinOp x y Gt
+compileExpr (Parser.Lt x y) = doBinOp x y Lt
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq x y) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Eq])
+compileExpr (Parser.Eq x y) = doBinOp x y Eq
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
+compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
+compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
-compileExpr (Parser.FuncCall "print" [x]) = compileExpr x >>= \x' -> return (x' ++ [Intr Print])
+compileExpr (Parser.FuncCall "print" [x]) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
+compileExpr (Parser.FuncCall "abs" [x]) = compileExpr x >>= \x' -> return (x' ++ [Abs])
+compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
+compileExpr (Parser.FuncCall "sqrt" [x]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
 compileExpr (Parser.FuncCall name args) = do
     functions' <- gets functions
     funcDecs' <- gets funcDecs
@@ -127,11 +142,22 @@ compileExpr (Parser.FuncDef name args body) = do
                 lex' <- compileExpr lex
                 return $ [Dup] ++ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
     compileParameter (Parser.ListPattern elements) n = do
-        elements' <- concatMapM (`compileParameter` n) elements
-        let paramsWithIndex = zip elements' [0 ..]
-        let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
-        let rest = [Push $ DInt (length elements - 1), Push DNone, Slice, last elements']
-        return $ concat xToY ++ rest
+        nextFunName <- ((name ++ "#") ++) . show . (+ 1) <$> allocId
+        let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length elements - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextFunName]
+        case last elements of
+            Parser.ListLit l -> do
+                elements' <- concatMapM (`compileParameter` n) (init elements)
+                let paramsWithIndex = zip elements' [0 ..]
+                let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
+                l' <- compileExpr (Parser.ListLit l)
+                let listThing = [Comment "List thing", Dup, Push $ DInt (length elements - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextFunName]
+                return $ lengthCheck ++ concat xToY ++ listThing
+            _ -> do
+                elements' <- concatMapM (`compileParameter` n) elements
+                let paramsWithIndex = zip elements' [0 ..]
+                let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
+                let rest = [Push $ DInt (length elements - 1), Push DNone, Slice, last elements']
+                return $ lengthCheck ++ concat xToY ++ rest
     compileParameter Parser.Placeholder _ = return []
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
 compileExpr (Parser.Var x) = do

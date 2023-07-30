@@ -100,7 +100,8 @@ library prisma-lib
                         DuplicateRecordFields,
                         DeriveGeneric,
                         BlockArguments,
-                        TemplateHaskell
+                        TemplateHaskell,
+                        ViewPatterns
     
 executable prisma
     -- .hs or .lhs file containing the Main module.
