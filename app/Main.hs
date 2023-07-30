@@ -97,7 +97,7 @@ main = do
                 (optionsParser <**> helper)
                 ( fullDesc
                     <> progDesc "TODO"
-                    <> header "prisma - a functional programming language"
+                    <> header "indigo - a functional programming language"
                 )
     program <-
         if not runBytecode

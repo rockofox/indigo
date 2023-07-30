@@ -67,7 +67,7 @@ divide x y = x / y
 
 main => IO = do
   let n = 4000.0
-  let rsum = estimate (map (divide n), (range 1.0, n))
-  let pi = 4.0 * rsum
-  println "Pi is approximately: " : ^pi
+  # let rsum = estimate (map (divide n), (range 1.0, n))
+  # let pi = 4.0 * rsum
+  let r = range 1.0, n
 end

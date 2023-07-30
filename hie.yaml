@@ -1,9 +1,9 @@
 # cradle:
 #   cabal:
 #     - path: "./app"
-#       component: "exe:prisma"
+#       component: "exe:indigo"
 #     - path: "./lib"
-#       component: "lib:prisma-lib"
+#       component: "lib:indigo-lib"
 #     - path: "./test"
 #       component: "test:tests"
 cradle:

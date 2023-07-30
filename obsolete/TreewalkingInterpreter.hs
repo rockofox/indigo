@@ -16,7 +16,7 @@ import GHC.IO.Handle (hFlush)
 import GHC.IO.Handle.FD (stdout)
 import Parser (CompilerFlags (CompilerFlags, verboseMode), Expr (..), Program (..), Type (..), parseProgram)
 import Parser qualified as Type
-import Paths_prisma qualified
+import Paths_indigo qualified
 import Text.Megaparsec
 
 data VarTableEntry = VarTableEntry
@@ -144,7 +144,7 @@ showFunction name types argsOnly = do
             name ++ " " ++ intercalate " -> " (map show types) ++ " => ?"
 
 preludeFile :: IO String
-preludeFile = Paths_prisma.getDataFileName "std/prelude.prism" >>= readFile
+preludeFile = Paths_indigo.getDataFileName "std/prelude.prism" >>= readFile
 
 toBytecode :: Program -> LazyByteString
 toBytecode (Program exprs) = encode exprs

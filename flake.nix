@@ -15,12 +15,12 @@
       overlay = se: su: {
         haskellPackages = su.haskellPackages.override {
           overrides = hse: _hsu: {
-            "prisma" = hse.callCabal2nix "prisma" ./. { };
+            "indigo" = hse.callCabal2nix "indigo" ./. { };
           };
         };
-        prisma =
+        indigo =
           se.haskell.lib.justStaticExecutables
-            se.haskellPackages.prisma;
+            se.haskellPackages.indigo;
       };
     in
     { inherit overlay; } // flake-utils.lib.eachDefaultSystem (system:
@@ -28,9 +28,9 @@
         pkgs = import nixpkgs { inherit system; overlays = [ overlay ]; };
       in
       {
-        defaultPackage = pkgs.prisma;
+        defaultPackage = pkgs.indigo;
         devShell = pkgs.haskellPackages.shellFor {
-          packages = p: [ p."prisma"  ];
+          packages = p: [ p."indigo"  ];
           buildInputs = [
             pkgs.haskellPackages.haskell-language-server
             pkgs.haskellPackages.cabal-install

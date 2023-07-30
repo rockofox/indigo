@@ -1,4 +1,4 @@
-# Revision history for prisma
+# Revision history for indigo
 
 ## 0.1.0.0 -- YYYY-mm-dd
 
