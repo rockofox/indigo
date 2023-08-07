@@ -1,5 +1,7 @@
 # This tries to test all/most features of the language
 
+# import * from test2.prism
+
 println :: String -> IO
 println s = do
   print s
@@ -25,14 +27,10 @@ fact n = do
 end
 
 addOne :: Int -> Int
-addOne n = n + 1
+addOne n = n + 1.0
 
 add :: Int -> Int -> Int
 add x y = x + y
-
-map :: Fn {Any -> Any => Any} -> List{Any} -> List{Any}
-map f [] = []
-map f (x:xs) = (f x) : map f, xs
 
 call :: Fn {Int -> Int => Int} -> IO
 call f = do
@@ -62,12 +60,12 @@ range a b = do
   end
 end
 
-divide :: Int -> Int -> Int
-divide x y = x / y
-
 main => IO = do
-  let n = 4000.0
+  # let n = 4000.0
   # let rsum = estimate (map (divide n), (range 1.0, n))
   # let pi = 4.0 * rsum
-  let r = range 1.0, n
+  # let r = range 1.0, n
+  # println _/2
+  println (map (`/`2.0), (range 1.0, 10.0))
+  # println "Hello, world!"
 end

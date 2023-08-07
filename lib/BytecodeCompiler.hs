@@ -1,6 +1,6 @@
 module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..)) where
 
-import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify, when)
 import Data.List (elemIndex, find)
 import Data.Maybe (fromJust)
 import Data.Text (splitOn)
@@ -9,6 +9,7 @@ import Data.Text qualified as T
 import Debug.Trace
 import Parser (CompilerFlags (CompilerFlags), parseProgram)
 import Parser qualified
+import Paths_indigo qualified
 import Text.Megaparsec (errorBundlePretty)
 import VM
     ( Action (Print)
@@ -48,9 +49,15 @@ concatMapM f xs = concat <$> mapM f xs
 
 compileProgram :: Parser.Program -> StateT CompilerState IO [Instruction]
 compileProgram (Parser.Program expr) = do
+    prelude <- do
+        i <- liftIO preludeFile
+        let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+                Left err -> error $ "Parse error: " ++ errorBundlePretty err
+                Right (Parser.Program expr) -> expr
+        concatMapM compileExpr expr
     freePart <- concatMapM compileExpr expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ functions' ++ freePart ++ [Exit]
+    return $ prelude ++ functions' ++ freePart ++ [Exit]
 
 findFunction :: String -> [Function] -> Maybe Function
 findFunction name xs = do
@@ -64,13 +71,21 @@ findFunction name xs = do
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
 
+preludeFile :: IO String
+preludeFile = Paths_indigo.getDataFileName "std/prelude.prism" >>= readFile
+
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
 doBinOp x y op = do
+    functions' <- gets functions
+    let f = findFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
     x' <- compileExpr x
     y' <- compileExpr y
     case (x, y) of
         (_, Parser.FuncCall _ _) -> return (y' ++ x' ++ [Swp] ++ [op])
         (Parser.FuncCall _ _, _) -> return (x' ++ y' ++ [op])
+        (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
+        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
+        (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ [op])
 
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
@@ -89,6 +104,7 @@ compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
+compileExpr Parser.Placeholder = return []
 compileExpr (Parser.FuncCall "print" [x]) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
 compileExpr (Parser.FuncCall "abs" [x]) = compileExpr x >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
@@ -126,7 +142,7 @@ compileExpr (Parser.FuncDef name args body) = do
 
     body' <- compileExpr body
     funcDecs' <- gets funcDecs
-    args' <- concatMapM (`compileParameter` name) (reverse args)
+    args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs'
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     modify (\s -> s{functions = Function name funame function : tail (functions s)})
@@ -198,6 +214,22 @@ compileExpr (Parser.TypeLit x) = case x of
     Parser.Bool -> return [Push $ DBool False]
     _ -> error $ show x ++ " is not implemented"
 compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
+compileExpr (Parser.Import o from) = do
+    when (o /= ["*"]) $ error "Only * imports are supported right now"
+    program <- do
+        i <- liftIO $ readFile from
+        let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+                Left err -> error $ "Parse error: " ++ errorBundlePretty err
+                Right expr -> expr
+        -- when debug $ putStrLn $ prettyPrintProgram expr -- FIXME: pass on flags
+        compileProgram expr
+    return $ mangle from program
+  where
+    mangle :: String -> [Instruction] -> [Instruction]
+    mangle _ [] = []
+    mangle name (x : xs) = case x of
+        Label x -> Label (from ++ "#" ++ x) : mangle name xs
+        _ -> x : mangle name xs
 compileExpr x = error $ show x ++ " is not implemented"
 
 locateLabel :: [Instruction] -> String -> Int

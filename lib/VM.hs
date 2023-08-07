@@ -9,6 +9,7 @@ import Control.Monad.RWS
 import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
+import Data.Function ((&))
 import Data.Maybe (fromMaybe)
 import Data.Text qualified
 import Debug.Trace (trace, traceM, traceShow, traceShowM)
@@ -441,15 +442,30 @@ printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers = do
     if not showLineNumbers
         then concatMap printAssembly' program
-        else concatMap (\(n, i) -> show n ++ "    " ++ printAssembly' i) $ zip [0 :: Integer ..] program
+        else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] program
   where
     printAssembly' :: Instruction -> String
-    printAssembly' (Label name) = name ++ ":\n"
-    printAssembly' (Comment text) = "; " ++ text ++ "\n"
-    printAssembly' a = "\t" ++ Data.Text.unpack a'' ++ "\n"
+    printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
+    printAssembly' (Comment text) = "\t;\ESC[0;33m " <> text <> " \ESC[0m " ++ "\n"
+    printAssembly' (PushPf x y) = asmLine ("push_pf " ++ show x ++ " " ++ show y)
+    printAssembly' (Push x) = asmLine $ "push " ++ show x
+    printAssembly' (Call name) = asmLine ("call " <> name)
+    printAssembly' a = asmLine $ show a
+
+    asmLine :: String -> String
+    asmLine a = "\t" ++ Data.Text.unpack a'''' ++ "\n"
       where
-        a' = Data.Text.pack $ show a
+        a' = Data.Text.pack a
         a'' = Data.Text.replace "\n" "\\n" a'
+        -- lowercase the first word
+        a''' =
+            Data.Text.split (== ' ') a'' & \case
+                [] -> ""
+                (x : xs) -> Data.Text.toLower x <> " " <> Data.Text.unwords xs
+        a'''' =
+            Data.Text.split (== ' ') a''' & \case
+                [] -> ""
+                (x : xs) -> "\ESC[0;34m" <> x <> " \ESC[0m " <> Data.Text.unwords xs
 
 toBytecode :: Program -> LazyByteString
 toBytecode = encode

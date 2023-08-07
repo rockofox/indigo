@@ -24,6 +24,7 @@ import Text.Megaparsec
     , ParseError
     , ParseErrorBundle
     , ParsecT
+    , oneOf
     , optional
     , registerParseError
     , runParserT
@@ -362,22 +363,29 @@ externDec = do
 
 funcDec :: Parser Expr
 funcDec = do
-    name <- identifier
+    name <- identifier <|> gravis
     symbol "::"
     argTypes <- sepBy1 validType (symbol "->")
     return $ FuncDec name argTypes
 
 funcDef :: Parser Expr
 funcDef = do
-    name <- identifier <?> "function name"
+    name <- identifier <|> gravis <?> "function name"
     args <- some (var <|> parens listPattern <|> array <|> placeholder) <?> "function arguments"
     symbol "="
     FuncDef name args <$> expr <?> "function body"
 
+gravis :: Parser String
+gravis = do
+    symbol "`"
+    name <- (: []) <$> oneOf ("+-/*" :: String)
+    symbol "`"
+    return name
+
 funcCall :: Parser Expr
 funcCall = do
     state <- get
-    name <- extra <?> "function name"
+    name <- (extra <|> gravis) <?> "function name"
     -- unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     return $ FuncCall name args

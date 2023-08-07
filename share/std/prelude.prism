@@ -1,30 +1,38 @@
-extern runtime internal_add :: Int -> Int => Int
-extern runtime internal_sub :: Int -> Int => Int
-extern runtime internal_mul :: Int -> Int => Int
-extern runtime internal_div :: Int -> Int => Int
-extern runtime internal_pow :: Int -> Int => Int
-extern runtime internal_eq  :: Int -> Int => Bool
+# extern runtime internal_add :: Int -> Int => Int
+# extern runtime internal_sub :: Int -> Int => Int
+# extern runtime internal_mul :: Int -> Int => Int
+# extern runtime internal_div :: Int -> Int => Int
+# extern runtime internal_pow :: Int -> Int => Int
+# extern runtime internal_eq  :: Int -> Int => Bool
 
-add x: Int -> y: Int => Int = internal_add x, y
-sub x: Int -> y: Int => Int = internal_sub x, y
-mul x: Int -> y: Int => Int = internal_mul x, y
-div x: Int -> y: Int => Int = internal_div x, y
-pow x: Int -> y: Int => Int = internal_pow x, y
-eq  x: Int -> y: Int => Bool = internal_eq x, y
+# add x: Int -> y: Int => Int = internal_add x, y
+# sub x: Int -> y: Int => Int = internal_sub x, y
+# mul x: Int -> y: Int => Int = internal_mul x, y
+# div x: Int -> y: Int => Int = internal_div x, y
+# pow x: Int -> y: Int => Int = internal_pow x, y
+# eq  x: Int -> y: Int => Bool = internal_eq x, y
 
-extern runtime internal_add :: Float -> Float => Float
-extern runtime internal_sub :: Float -> Float => Float
-extern runtime internal_mul :: Float -> Float => Float
-extern runtime internal_div :: Float -> Float => Float
-extern runtime internal_pow :: Float -> Float => Float
-extern runtime internal_eq  :: Float -> Float => Bool
+# extern runtime internal_add :: Float -> Float => Float
+# extern runtime internal_sub :: Float -> Float => Float
+# extern runtime internal_mul :: Float -> Float => Float
+# extern runtime internal_div :: Float -> Float => Float
+# extern runtime internal_pow :: Float -> Float => Float
+# extern runtime internal_eq  :: Float -> Float => Bool
 
-add x: Float -> y: Float => Float = internal_add x, y
-sub x: Float -> y: Float => Float = internal_sub x, y
-mul x: Float -> y: Float => Float = internal_mul x, y
-div x: Float -> y: Float => Float = internal_div x, y
-pow x: Float -> y: Float => Float = internal_pow x, y
-eq  x: Float -> y: Float => Bool  = internal_eq  x, y
+# add x: Float -> y: Float => Float = internal_add x, y
+# sub x: Float -> y: Float => Float = internal_sub x, y
+# mul x: Float -> y: Float => Float = internal_mul x, y
+# div x: Float -> y: Float => Float = internal_div x, y
+# pow x: Float -> y: Float => Float = internal_pow x, y
+# eq  x: Float -> y: Float => Bool  = internal_eq  x, y
+`+` :: Any -> Any -> Any
+`+` x y = x + y
+`-` :: Any -> Any -> Any
+`-` x y = (x) - y
+`*` :: Any -> Any -> Any
+`*` x y = x * y
+`/` :: Any -> Any -> Any
+`/` x y = x / y
 
 flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 
