@@ -10,6 +10,7 @@ import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
+import Data.Map qualified as Data
 import Data.Maybe (fromMaybe)
 import Data.Text qualified
 import Debug.Trace (trace, traceM, traceShow, traceShowM)
@@ -108,7 +109,17 @@ data Instruction
 
 data Action = Print deriving (Show, Eq, Generic)
 
-data Data = DInt Int | DFloat Float | DString String | DBool Bool | DList [Data] | DNone | DChar Char | DFuncRef String [Data] deriving (Generic)
+data Data
+    = DInt Int
+    | DFloat Float
+    | DString String
+    | DBool Bool
+    | DList [Data]
+    | DNone
+    | DChar Char
+    | DFuncRef String [Data]
+    | DStruct String [(String, Data)]
+    deriving (Generic)
 
 instance Binary Instruction
 
@@ -125,6 +136,7 @@ instance Show Data where
     show DNone = "None"
     show (DChar x) = show x
     show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
+    show x@(DStruct _ _) = show x
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -396,6 +408,7 @@ runInstruction Cast = do
             DList _ -> DList [DInt x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum x
+            x -> error $ "Cast for type not implemented: " ++ show x
         (DFloat x) -> stackPush $ case to of
             DInt _ -> DInt $ round x
             DFloat _ -> DFloat x
@@ -404,6 +417,7 @@ runInstruction Cast = do
             DList _ -> DList [DFloat x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum $ round x
+            x -> error $ "Cast for type not implemented: " ++ show x
         (DString x) -> stackPush $ case to of
             DInt _ -> DInt $ read x
             DFloat _ -> DFloat $ read x
@@ -412,6 +426,7 @@ runInstruction Cast = do
             DList _ -> DList [DString x]
             DNone -> DNone
             DChar _ -> DChar $ head x
+            x -> error $ "Cast for type not implemented: " ++ show x
         x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
@@ -447,9 +462,15 @@ printAssembly program showLineNumbers = do
     printAssembly' :: Instruction -> String
     printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
     printAssembly' (Comment text) = "\t;\ESC[0;33m " <> text <> " \ESC[0m " ++ "\n"
-    printAssembly' (PushPf x y) = asmLine ("push_pf " ++ show x ++ " " ++ show y)
+    printAssembly' (PushPf x y) = asmLine ("push_pf " ++ x ++ " " ++ show y)
     printAssembly' (Push x) = asmLine $ "push " ++ show x
     printAssembly' (Call name) = asmLine ("call " <> name)
+    printAssembly' (Jmp name) = asmLine ("jmp " <> name)
+    printAssembly' (Jz name) = asmLine ("jz " <> name)
+    printAssembly' (Jnz name) = asmLine ("jnz " <> name)
+    printAssembly' (Jt name) = asmLine ("jl " <> name)
+    printAssembly' (Jf name) = asmLine ("jf " <> name)
+    printAssembly' (LLoad name) = asmLine ("lload " <> name)
     printAssembly' a = asmLine $ show a
 
     asmLine :: String -> String

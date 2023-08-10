@@ -1,6 +1,6 @@
 # This tries to test all/most features of the language
 
-# import * from test2.prism
+import * from examples.test2
 
 println :: String -> IO
 println s = do
@@ -67,5 +67,6 @@ main => IO = do
   # let r = range 1.0, n
   # println _/2
   println (map (`/`2.0), (range 1.0, 10.0))
+  println examples.test2.bla 2, 4
   # println "Hello, world!"
 end

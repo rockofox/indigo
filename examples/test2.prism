@@ -1,4 +1,0 @@
-struct Point = (x: Float, y: Float)
-
-printPoint :: Point -> IO
-printPoint p = println ("Point: ": p.x: ", ": p.y)

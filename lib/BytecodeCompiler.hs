@@ -59,6 +59,12 @@ compileProgram (Parser.Program expr) = do
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude ++ functions' ++ freePart ++ [Exit]
 
+-- | Compile, but don't include the prelude
+compileProgramBare :: Parser.Program -> StateT CompilerState IO [Instruction]
+compileProgramBare (Parser.Program expr) = do
+    functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
+    return $ functions'
+
 findFunction :: String -> [Function] -> Maybe Function
 findFunction name xs = do
     -- TODO: I don't like this function
@@ -216,20 +222,18 @@ compileExpr (Parser.TypeLit x) = case x of
 compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
 compileExpr (Parser.Import o from) = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
-    program <- do
-        i <- liftIO $ readFile from
-        let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
-                Left err -> error $ "Parse error: " ++ errorBundlePretty err
-                Right expr -> expr
-        -- when debug $ putStrLn $ prettyPrintProgram expr -- FIXME: pass on flags
-        compileProgram expr
-    return $ mangle from program
+    let convertedPath = map (\x -> if x == '.' then '/' else x) from
+    i <- liftIO $ readFile $ convertedPath ++ ".in"
+    let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Right (Parser.Program exprs) -> exprs
+    concatMapM compileExpr (map mangleAST expr)
   where
-    mangle :: String -> [Instruction] -> [Instruction]
-    mangle _ [] = []
-    mangle name (x : xs) = case x of
-        Label x -> Label (from ++ "#" ++ x) : mangle name xs
-        _ -> x : mangle name xs
+    mangleAST :: Parser.Expr -> Parser.Expr
+    mangleAST (Parser.FuncDec name types) = Parser.FuncDec (from ++ "." ++ name) types
+    mangleAST (Parser.Function fdef fdec) = Parser.Function (map mangleAST fdef) (mangleAST fdec)
+    mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "." ++ name) args (mangleAST body)
+    mangleAST x = x
 compileExpr x = error $ show x ++ " is not implemented"
 
 locateLabel :: [Instruction] -> String -> Int
