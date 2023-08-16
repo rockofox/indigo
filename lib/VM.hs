@@ -1,20 +1,22 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..)) where
+module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
 import Control.Exception (SomeException, catch, throw)
-import Control.Monad.Error (Error (strMsg), MonadError (catchError, throwError))
+import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
+import Data.Map qualified
 import Data.Map qualified as Data
 import Data.Maybe (fromMaybe)
 import Data.Text qualified
 import Debug.Trace (trace, traceM, traceShow, traceShowM)
 import GHC.Generics (Generic)
+import Data.List.Split (chunksOf)
 
 data Instruction
     = -- | Push a value onto the stack
@@ -103,6 +105,10 @@ data Instruction
       Comment String
     | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
       Meta String
+    | -- | Access a field
+      Access String
+    | -- | Pack map
+      PackMap Int
     | -- | Exit the program
       Exit
     deriving (Show, Eq, Generic)
@@ -118,7 +124,7 @@ data Data
     | DNone
     | DChar Char
     | DFuncRef String [Data]
-    | DStruct String [(String, Data)]
+    | DMap (Data.Map String Data)
     deriving (Generic)
 
 instance Binary Instruction
@@ -136,7 +142,7 @@ instance Show Data where
     show DNone = "None"
     show (DChar x) = show x
     show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
-    show x@(DStruct _ _) = show x
+    show (DMap x) = show x
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -171,11 +177,17 @@ data VM = VM
     , memory :: [Data]
     , callStack :: [StackFrame]
     , breakpoints :: [Int]
+    , ioMode :: IOMode
+    , ioBuffer :: IOBuffer
     }
     deriving (Show)
 
+data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
+
+data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
+
 initVM :: Program -> VM
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = []}
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}}
 
 type Program = [Instruction]
 
@@ -235,6 +247,10 @@ runPc program pc = do
 
 runVM :: VM -> IO ()
 runVM vm = evalStateT (run' (program vm)) vm
+
+-- FIXME: This is a mess
+runVMVM :: VM -> IO VM
+runVMVM vm = execStateT (run' (program vm)) vm
 
 locateLabels :: Program -> [(String, Int)]
 locateLabels program = [(x, n) | (Label x, n) <- zip program [0 ..]]
@@ -298,7 +314,11 @@ runInstruction Abs =
 -- runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
 runInstruction Mod = error "Mod not implemented"
 -- IO
-runInstruction (Builtin Print) = stackPop >>= liftIO . putStr . show
+runInstruction (Builtin Print) = do
+    vm <- get
+    case ioMode vm of
+        HostDirect -> stackPop >>= liftIO . putStr . show
+        VMBuffer -> stackPop >>= \x -> put $ vm{ioBuffer = (ioBuffer vm){output = output (ioBuffer vm) ++ show x}}
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
@@ -430,6 +450,10 @@ runInstruction Cast = do
         x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
+runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "Invalid type for access"
+runInstruction (PackMap n) = do
+    elems <- stackPopN n
+    stackPush $ DMap $ Data.Map.fromList $ map (\[DString x, y] -> (x, y)) $ chunksOf 2 elems
 runInstruction x = error $ show x ++ ": not implemented"
 
 -- then

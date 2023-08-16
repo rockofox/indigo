@@ -2,7 +2,6 @@ module Main where
 
 import BytecodeCompiler qualified
 import Control.Monad
-import Control.Monad.Cont (MonadIO (liftIO))
 import Control.Monad.State (evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
@@ -107,7 +106,7 @@ main = do
                         Left err -> error $ "Parse error: " ++ errorBundlePretty err
                         Right expr -> expr
                 when debug $ putStrLn $ prettyPrintProgram expr
-                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.CompilerState expr [] [] 0)
+                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.CompilerState expr [] [] [] 0)
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

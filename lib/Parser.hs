@@ -236,7 +236,7 @@ lineComment = L.skipLineComment "#"
 blockComment = L.skipBlockComment "/*" "*/"
 
 sc :: Parser ()
-sc = L.space (void $ takeWhile1P Nothing f) lineComment blockComment
+sc = L.space (takeWhile1P Nothing f >> return ()) lineComment blockComment
   where
     f x = x == ' ' || x == '\t'
 

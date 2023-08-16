@@ -1,0 +1,25 @@
+cabal-version: 3.0
+name: indigo-wasm-reactor
+version:            0.1.0.0
+
+executable indigo-wasm-reactor
+    main-is:          WASMReactor.hs
+    c-sources:        cbits/init.c
+    hs-source-dirs:   app
+    build-depends:    base ^>=4.16.4.0,
+                      megaparsec,
+                      mtl,
+                      text,
+                      bytestring,
+                      indigo
+    -- other-modules:    Parser, VM
+    -- Language Extensions
+    default-extensions: OverloadedStrings,
+                        ImportQualifiedPost,
+                        DisambiguateRecordFields,
+                        DuplicateRecordFields
+
+    ghc-options:
+        -Wall -Wunused-packages -no-hs-main -optl-mexec-model=reactor
+        "-optl-Wl,--export=mallocPtr,--export=mallocBytes,--export=free_,--export=runProgramRawBuffered,--export=runProgramRaw,--export=runProgramRawBuffered"
+

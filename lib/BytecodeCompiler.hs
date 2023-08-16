@@ -1,6 +1,7 @@
 module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..)) where
 
-import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify, when)
+import Control.Monad
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.List (elemIndex, find)
 import Data.Maybe (fromJust)
 import Data.Text (splitOn)
@@ -19,8 +20,23 @@ import VM
     , VM (breakpoints, callStack, pc)
     , initVM
     , printAssembly
-    , runVM
+    , runVM, ioMode, IOMode (..), runVMVM, ioBuffer, output
     )
+import Foreign.C (CString, newCString)
+import Foreign.C.String (peekCString)
+import Foreign hiding (void, And)
+import Foreign.C.Types
+import Foreign.C (peekCStringLen)
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
+import Data.ByteString.Lazy (toStrict, pack)
+import Data.ByteString.Builder (toLazyByteString)
+import qualified Data.ByteString.Char8 as BS
+import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Unsafe qualified as BU
+import Data.IORef (readIORef)
+import Data.Char (ord)
+import System.Directory (doesFileExist)
+import qualified Data.Map
 
 data Function = Function
     { baseName :: String
@@ -34,6 +50,7 @@ data CompilerState = CompilerState
     , -- , functions :: [(String, String, [Instruction])]
       functions :: [Function]
     , funcDecs :: [Parser.Expr]
+    , structDecs :: [Parser.Expr]
     , lastLabel :: Int
     }
     deriving (Show)
@@ -77,8 +94,29 @@ findFunction name xs = do
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
 
+-- FIXME: this is horrible
+findSourceFile :: String -> IO String
+findSourceFile name = do
+    e1 <- doesFileExist name
+    if e1 then
+        return name
+    else do
+        p2 <- Paths_indigo.getDataFileName name
+        e2 <- doesFileExist p2
+        if e2 then
+            return p2
+        else do
+            e3 <- doesFileExist ("/usr/local/lib/indigo/" ++ name)
+            if e3 then
+                return $ "/usr/local/lib/indigo/" ++ name
+            else do
+                e4 <- doesFileExist ("/usr/lib/indigo/" ++ name)
+                if e4 then
+                    return $ "/usr/lib/indigo/" ++ name
+                else
+                    error $ "Could not find file " ++ name
 preludeFile :: IO String
-preludeFile = Paths_indigo.getDataFileName "std/prelude.prism" >>= readFile
+preludeFile = findSourceFile "std/prelude.prism" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
 doBinOp x y op = do
@@ -220,6 +258,17 @@ compileExpr (Parser.TypeLit x) = case x of
     Parser.Bool -> return [Push $ DBool False]
     _ -> error $ show x ++ " is not implemented"
 compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
+compileExpr st@(Parser.Struct _ _) = do
+    modify (\s -> s{structDecs = st : structDecs s})
+    return []
+compileExpr (Parser.StructLit name fields) = do
+    fields' <- concatMapM compileExpr (map snd fields)
+    let names = map (DString . fst) fields
+    let instructions = zip names fields' >>= \(name', field) -> [Push name', field]
+    return $ reverse instructions ++ [ Push $ DString name,Push $ DString "__name", PackMap $ length instructions + 2]
+compileExpr (Parser.StructAccess struct (Parser.Var field)) = do
+    struct' <- compileExpr struct
+    return $ struct' ++ [Access field]
 compileExpr (Parser.Import o from) = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     let convertedPath = map (\x -> if x == '.' then '/' else x) from
@@ -276,8 +325,10 @@ runTestProgram = do
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
             putStrLn ""
-            xxx <- evalStateT (compileProgram program) (CompilerState program [] [] 0)
+            xxx <- evalStateT (compileProgram program) (CompilerState program [] [] [] 0)
             -- print program
             putStrLn $ printAssembly xxx True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM xxx){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
+
+

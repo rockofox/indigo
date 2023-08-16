@@ -60,6 +60,8 @@ range a b = do
   end
 end
 
+struct Point = (x: Int, y: Int)
+
 main => IO = do
   # let n = 4000.0
   # let rsum = estimate (map (divide n), (range 1.0, n))
@@ -68,5 +70,7 @@ main => IO = do
   # println _/2
   println (map (`/`2.0), (range 1.0, 10.0))
   println examples.test2.bla 2, 4
+  let p = Point { x : 1, y : 2 }
+  println p.x
   # println "Hello, world!"
 end

@@ -54,19 +54,15 @@ data-dir:           share
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall -Wno-name-shadowing -Wno-incomplete-uni-patterns -threaded -O0
+    ghc-options: -Wall -Wno-incomplete-uni-patterns -threaded
 
-library indigo-lib
+library
     -- Import common warning flags.
     import:           warnings
 
-    exposed-modules: Parser,
-                --    Analyzer,
-                --    JSEmitter,
-                --    WASMEmitter,
-                --    CEmitter,
-                   VM,
-                   BytecodeCompiler
+    exposed-modules: , Parser
+                     , VM
+                     , BytecodeCompiler
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -74,18 +70,18 @@ library indigo-lib
     other-modules: Paths_indigo
 
     -- Other library packages from which modules are imported.
-    build-depends:    base,
+    build-depends: base ^>=4.16.4.0,
         containers,
         text,
         megaparsec,
         parser-combinators,
         unix,
         mtl,
-        binaryen,
+        -- binaryen,
         directory,
         bytestring,
         binary,
-        file-embed,
+        split
 
     -- Directories containing source files.
     hs-source-dirs:   lib
@@ -99,27 +95,46 @@ library indigo-lib
                         DisambiguateRecordFields,
                         DuplicateRecordFields,
                         DeriveGeneric,
-                        BlockArguments,
-                        TemplateHaskell,
-                        ViewPatterns
+                        BlockArguments
     
-executable indigo
+executable indigoc
     -- .hs or .lhs file containing the Main module.
     main-is:          Main.hs
     hs-source-dirs:   app
-    build-depends:    base,
+    build-depends:    base ^>=4.16.4.0,
                       optparse-applicative,
                       unix,
                       megaparsec,
                       mtl,
                       text,
                       bytestring,
-                      indigo-lib
+                      indigo
     -- Language Extensions
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
                         DuplicateRecordFields
+
+-- executable indigo-wasm-reactor
+--     main-is:          WASMReactor.hs
+--     c-sources:        cbits/init.c
+--     hs-source-dirs:   wasm_reactor
+--     build-depends:    base ^>=4.16.4.0,
+--                       megaparsec,
+--                       mtl,
+--                       text,
+--                       bytestring,
+--                       indigo-lib
+--     other-modules:    Parser, VM
+--     -- Language Extensions
+--     default-extensions: OverloadedStrings,
+--                         ImportQualifiedPost,
+--                         DisambiguateRecordFields,
+--                         DuplicateRecordFields
+--
+--     ghc-options:
+--         -Wall -Wunused-packages -no-hs-main -optl-mexec-model=reactor
+--         "-optl-Wl,--export=mallocPtr,--export=mallocBytes,--export=free_,--export=runProgramRawBuffered,--export=runProgramRaw,--export=runProgramRawBuffered"
 
 
 

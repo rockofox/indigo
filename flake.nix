@@ -39,6 +39,7 @@
             pkgs.haskellPackages.hlint
             pkgs.wasmtime
             pkgs.wabt
+            pkgs.wizer
           ];
           # shellHook = ''
           #   alias wasi-cc=$HOME/Downloads/wasi-sdk-20.0/bin/clang
