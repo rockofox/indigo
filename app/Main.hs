@@ -117,7 +117,7 @@ main = do
             Nothing -> error "No output file specified"
         exitSuccess
 
-    when debug $ putStrLn $ VM.printAssembly program True
+    when debug $ putStrLn $ VM.printAssembly program False
 
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]

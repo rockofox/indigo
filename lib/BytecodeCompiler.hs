@@ -2,46 +2,53 @@ module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProg
 
 import Control.Monad
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
-import Data.List (elemIndex, find)
-import Data.Maybe (fromJust)
+import Data.ByteString.Builder (toLazyByteString)
+import Data.ByteString.Char8 qualified as BS
+import Data.ByteString.Lazy (pack, toStrict)
+import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
+import Data.ByteString.Unsafe qualified as BU
+import Data.Char (ord)
+import Data.Functor ((<&>))
+import Data.IORef (readIORef)
+import Data.List (elemIndex, find, intercalate)
+import Data.Map qualified
+import Data.Maybe (fromJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Debug.Trace
-import Parser (CompilerFlags (CompilerFlags), parseProgram)
+import Foreign hiding (And, void)
+import Foreign.C (CString, newCString, peekCStringLen)
+import Foreign.C.String (peekCString)
+import Foreign.C.Types
+import Parser (CompilerFlags (CompilerFlags), fname, ftypes, parseProgram)
 import Parser qualified
+import Parser qualified as Parser.Type
 import Paths_indigo qualified
+import System.Directory (doesFileExist)
 import Text.Megaparsec (errorBundlePretty)
 import VM
     ( Action (Print)
     , Data (..)
+    , IOMode (..)
     , Instruction (..)
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, pc)
     , initVM
+    , ioBuffer
+    , ioMode
+    , output
     , printAssembly
-    , runVM, ioMode, IOMode (..), runVMVM, ioBuffer, output
+    , runVM
+    , runVMVM
     )
-import Foreign.C (CString, newCString)
-import Foreign.C.String (peekCString)
-import Foreign hiding (void, And)
-import Foreign.C.Types
-import Foreign.C (peekCStringLen)
-import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.ByteString.Lazy (toStrict, pack)
-import Data.ByteString.Builder (toLazyByteString)
-import qualified Data.ByteString.Char8 as BS
-import Data.ByteString.Lazy qualified as BL
-import Data.ByteString.Unsafe qualified as BU
-import Data.IORef (readIORef)
-import Data.Char (ord)
-import System.Directory (doesFileExist)
-import qualified Data.Map
 
 data Function = Function
     { baseName :: String
     , funame :: String
     , function :: [Instruction]
+    , types :: [Parser.Type]
     }
     deriving (Show)
 
@@ -76,20 +83,29 @@ compileProgram (Parser.Program expr) = do
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude ++ functions' ++ freePart ++ [Exit]
 
--- | Compile, but don't include the prelude
-compileProgramBare :: Parser.Program -> StateT CompilerState IO [Instruction]
-compileProgramBare (Parser.Program expr) = do
-    functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ functions'
-
-findFunction :: String -> [Function] -> Maybe Function
-findFunction name xs = do
+findAnyFunction :: String -> [Function] -> Maybe Function
+findAnyFunction name xs = do
     -- TODO: I don't like this function
     let candidates = filter (\y -> baseName y == name && funame y /= "main") xs
     let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
     find (\y -> funame y == (name ++ "#" ++ show minId)) candidates
+
+findFunction :: String -> [Function] -> [Parser.Type] -> Maybe Function
+findFunction name xs typess = do
+    -- traceM $ "findFunction: " ++ name ++ " " ++ show typess
+    -- TODO: I don't like this function
+    let candidates = filter (\y -> baseName y == name && funame y /= "main" && typesMatch y typess) xs
+    let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates
+    let ids' = map (read . Data.Text.unpack) ids :: [Int]
+    let minId = minimum ids'
+    case find (\y -> funame y == (name ++ "#" ++ show minId)) candidates of
+        Just x -> Just x
+        Nothing -> findAnyFunction name xs --  error $ "No function found: " ++ name ++ " " ++ show typess
+
+typesMatch :: Function -> [Parser.Type] -> Bool
+typesMatch fun typess = all (uncurry (==)) (zip (types fun) typess)
 
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
@@ -98,30 +114,30 @@ unmangleFunctionName = takeWhile (/= '#')
 findSourceFile :: String -> IO String
 findSourceFile name = do
     e1 <- doesFileExist name
-    if e1 then
-        return name
-    else do
-        p2 <- Paths_indigo.getDataFileName name
-        e2 <- doesFileExist p2
-        if e2 then
-            return p2
+    if e1
+        then return name
         else do
-            e3 <- doesFileExist ("/usr/local/lib/indigo/" ++ name)
-            if e3 then
-                return $ "/usr/local/lib/indigo/" ++ name
-            else do
-                e4 <- doesFileExist ("/usr/lib/indigo/" ++ name)
-                if e4 then
-                    return $ "/usr/lib/indigo/" ++ name
-                else
-                    error $ "Could not find file " ++ name
+            p2 <- Paths_indigo.getDataFileName name
+            e2 <- doesFileExist p2
+            if e2
+                then return p2
+                else do
+                    e3 <- doesFileExist ("/usr/local/lib/indigo/" ++ name)
+                    if e3
+                        then return $ "/usr/local/lib/indigo/" ++ name
+                        else do
+                            e4 <- doesFileExist ("/usr/lib/indigo/" ++ name)
+                            if e4
+                                then return $ "/usr/lib/indigo/" ++ name
+                                else error $ "Could not find file " ++ name
+
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.prism" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
 doBinOp x y op = do
     functions' <- gets functions
-    let f = findFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
+    let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
     x' <- compileExpr x
     y' <- compileExpr y
     case (x, y) of
@@ -131,6 +147,25 @@ doBinOp x y op = do
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ [op])
+
+typeOf :: Parser.Expr -> StateT CompilerState IO Parser.Type
+typeOf (Parser.FuncCall name _) = do
+    funcDecs' <- gets funcDecs
+    let a =
+            maybe
+                [Parser.Type.Unknown]
+                ftypes
+                (find (\x -> fname x == name) funcDecs')
+    return $ last a
+typeOf x = return $ Parser.typeOf x
+
+constructFQName :: String -> [Parser.Expr] -> StateT CompilerState IO String
+constructFQName "main" _ = return "main"
+constructFQName name args = mapM (typeOf >=> (return . show)) args <&> \x -> name ++ ":" ++ intercalate "," x
+
+constructFQName' :: String -> [Parser.Type] -> StateT CompilerState IO String
+constructFQName' "main" _ = return "main"
+constructFQName' name args = return $ name ++ ":" ++ intercalate "," (map show args)
 
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
 compileExpr (Parser.Add x y) = doBinOp x y Add
@@ -154,10 +189,11 @@ compileExpr (Parser.FuncCall "abs" [x]) = compileExpr x >>= \x' -> return (x' ++
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
 compileExpr (Parser.FuncCall name args) = do
+    argTypes <- mapM typeOf args
     functions' <- gets functions
     funcDecs' <- gets funcDecs
 
-    let fun = case findFunction name functions' of
+    let fun = case findFunction name functions' argTypes of
             (Just f) -> f
             Nothing -> Function{baseName = unmangleFunctionName name, funame = name, function = []}
     let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
@@ -181,15 +217,21 @@ compileExpr fd@(Parser.FuncDec _ _) = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
 compileExpr (Parser.FuncDef name args body) = do
+    -- let argTypes = map Parser.typeOf args
+    funcDecs' <- gets funcDecs
+    when (isNothing $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs') $ do
+        modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) : funcDecs s})
+
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
-    modify (\s -> s{functions = Function name funame [] : functions s})
+    modify (\s -> s{functions = Function name funame [] [] : functions s})
 
     body' <- compileExpr body
     funcDecs' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
+
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs'
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
-    modify (\s -> s{functions = Function name funame function : tail (functions s)})
+    modify (\s -> s{functions = Function name funame function (ftypes funcDec) : tail (functions s)})
     return [] -- Function definitions get appended at the last stage of compilation
   where
     compileParameter :: Parser.Expr -> String -> StateT CompilerState IO [Instruction]
@@ -222,7 +264,7 @@ compileExpr (Parser.FuncDef name args body) = do
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
 compileExpr (Parser.Var x) = do
     functions' <- gets functions
-    let fun = findFunction x functions'
+    let fun = findAnyFunction x functions'
     case fun of
         (Just f) -> compileExpr (Parser.FuncCall (funame f) [])
         Nothing -> return [LLoad x]
@@ -265,7 +307,7 @@ compileExpr (Parser.StructLit name fields) = do
     fields' <- concatMapM compileExpr (map snd fields)
     let names = map (DString . fst) fields
     let instructions = zip names fields' >>= \(name', field) -> [Push name', field]
-    return $ reverse instructions ++ [ Push $ DString name,Push $ DString "__name", PackMap $ length instructions + 2]
+    return $ reverse instructions ++ [Push $ DString name, Push $ DString "__name", PackMap $ length instructions + 2]
 compileExpr (Parser.StructAccess struct (Parser.Var field)) = do
     struct' <- compileExpr struct
     return $ struct' ++ [Access field]
@@ -330,5 +372,3 @@ runTestProgram = do
             putStrLn $ printAssembly xxx True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM xxx){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
-
-

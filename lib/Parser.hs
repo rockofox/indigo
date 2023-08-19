@@ -123,6 +123,7 @@ data Type
     | IO
     | Any
     | None
+    | Unknown
     | Fn {args :: [Type], ret :: Type}
     | List Type
     | StructT String
@@ -146,11 +147,16 @@ instance Eq Type where
     None == None = True
     Fn x y == Fn a b = x == a && y == b
     Any == _ = True
+    _ == Any = True
     List Any == List _ = True
     List _ == List Any = True
     List x == List y = x == y
     StructT x == StructT y = x == y
     _ == _ = False
+
+-- x == y = error $ "Type checking for " ++ show x ++ " and " ++ show y ++ " not implemented"
+
+-- _ == _ = False
 
 typeOf :: Expr -> Parser.Type
 typeOf (IntLit _) = Int
@@ -194,7 +200,7 @@ typeOf (Modulo x y) = error "Cannot infer type of modulo"
 typeOf (Target x y) = error "Cannot infer type of target"
 typeOf (StructLit name _) = StructT name
 typeOf (IOLit) = IO
-typeOf x = error $ "Cannot infer type of " <> show x
+typeOf x = Unknown
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
