@@ -1,22 +1,33 @@
 name: build
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: GHC ${{ matrix.ghc-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        ghc-version: ['latest']
     steps:
       - uses: actions/checkout@v3
-      - uses: haskell/actions/setup@v2
+
+      - name: Set up GHC ${{ matrix.ghc-version }}
+        uses: haskell/actions/setup@v2
+        id: setup
         with:
-          ghc-version: '9.2' # Resolves to the latest point release of GHC 8.8
-          cabal-version: '3.10.1.0' # Exact version of Cabal
+          ghc-version: ${{ matrix.ghc-version }}
+          # Defaults, added for clarity:
+          cabal-version: 'latest'
+          cabal-update: true
 
       - name: Configure the build
         run: |
