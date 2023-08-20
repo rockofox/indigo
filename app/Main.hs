@@ -2,12 +2,14 @@ module Main where
 
 import BytecodeCompiler qualified
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State (evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import Data.Void qualified
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import Options.Applicative
@@ -20,6 +22,7 @@ import Parser
 import System.Exit (exitSuccess)
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
+import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
 import VM qualified
 
@@ -31,6 +34,7 @@ data Options = Options
     , emitBytecode :: Bool
     , runBytecode :: Bool
     , breakpoints :: Maybe String
+    , showTime :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -61,6 +65,7 @@ optionsParser =
         <*> switch (long "emit-bytecode" <> short 'b' <> help "Emit bytecode")
         <*> switch (long "run-bytecode" <> short 'r' <> help "Run bytecode")
         <*> optional (strOption (long "breakpoints" <> short 't' <> help "Breakpoints for the VM to trace (space separated list of program counter indices). -1 to trace on every instruction"))
+        <*> switch (long "profile" <> short 'p' <> help "Show time spent parsing, compiling and running")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -89,9 +94,17 @@ inputFileBinary input = case input of
     Just file -> B.readFile file
     Nothing -> error "No input file specified"
 
+potentiallyTimedOperation :: MonadIO m => String -> Bool -> m a -> m a
+potentiallyTimedOperation msg showTime action = do
+    if showTime then timeItNamed msg action else action
+
+parse :: String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) Program)
+parse input compilerFlags = do
+    return $ parseProgram (T.pack input) CompilerFlags{verboseMode = False}
+
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode breakpoints <-
+    Options input output debug verbose emitBytecode runBytecode breakpoints showTime <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -103,11 +116,12 @@ main = do
         if not runBytecode
             then do
                 i <- inputFile input
-                let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = verbose} of
+                prog <- potentiallyTimedOperation "Parsing" showTime (parse i CompilerFlags{verboseMode = verbose})
+                let expr = case prog of
                         Left err -> error $ "Parse error: " ++ errorBundlePretty err
                         Right expr -> expr
                 when debug $ putStrLn $ prettyPrintProgram expr
-                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
+                potentiallyTimedOperation "Compilation" showTime (evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr))
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode
@@ -122,4 +136,4 @@ main = do
 
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
-    VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    potentiallyTimedOperation "VM" showTime $ VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
