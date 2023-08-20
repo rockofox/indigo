@@ -1,0 +1,77 @@
+cabal-version:      3.0
+name:               indigo
+-- PVP summary:     +-+------- breaking API changes
+--                  | | +----- non-breaking API additions
+--                  | | | +--- code changes with no API change
+version:            0.1.0.0
+license:            GPL-3.0-only
+license-file:       LICENSE
+author:             rockofox
+maintainer:         ofelix@pm.me
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+data-files:         **/*.prism
+data-dir:           share
+
+common warnings
+    -- ghc-options: -Wall -Wno-incomplete-uni-patterns -funfolding-use-threshold=16 -O2 -optc-O3
+    -- ghc-options: -Wall -Wno-incomplete-uni-patterns -O0 -fno-code
+    ghc-options: -Wall -Wno-incomplete-uni-patterns -O0
+
+library
+    import:           warnings
+    exposed-modules: , Parser
+                     , VM
+                     , BytecodeCompiler
+    other-modules: Paths_indigo
+    build-depends: base ^>=4.16.4.0,
+        containers,
+        text,
+        megaparsec,
+        parser-combinators,
+        unix,
+        mtl,
+        -- binaryen,
+        directory,
+        bytestring,
+        binary,
+        split
+    hs-source-dirs:   lib
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings,
+                        ImportQualifiedPost,
+                        DisambiguateRecordFields,
+                        DuplicateRecordFields,
+                        DeriveGeneric,
+                        BlockArguments
+    
+executable indigoc
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    build-depends:    base ^>=4.16.4.0,
+                      optparse-applicative,
+                      unix,
+                      megaparsec,
+                      mtl,
+                      text,
+                      bytestring,
+                      indigo
+    default-extensions: OverloadedStrings,
+                        ImportQualifiedPost,
+                        DisambiguateRecordFields,
+                        DuplicateRecordFields
+    default-language: Haskell2010
+test-suite spec
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   tests
+    build-depends:    base, hspec, hspec-contrib, QuickCheck, HUnit, indigo, generic-arbitrary, text
+    other-modules:
+        ParserSpec
+        BytecodeCompilerSpec
+    build-tool-depends: hspec-discover:hspec-discover == 2.*
+    default-language: Haskell2010
+    default-extensions: OverloadedStrings
+
+    -- https://github.com/typeable/generic-arbitrary/issues/17
+    ghc-options: -fconstraint-solver-iterations=100

@@ -106,7 +106,7 @@ main = do
                         Left err -> error $ "Parse error: " ++ errorBundlePretty err
                         Right expr -> expr
                 when debug $ putStrLn $ prettyPrintProgram expr
-                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.CompilerState expr [] [] [] 0)
+                evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

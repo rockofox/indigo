@@ -1,6 +1,7 @@
-module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..)) where
+-- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
+module BytecodeCompiler where
 
-import Control.Monad
+import Control.Monad (when, (>=>))
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Char8 qualified as BS
@@ -17,11 +18,12 @@ import Data.Maybe (fromJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Debug.Trace
-import Foreign hiding (And, void)
+import Debug.Trace (traceM)
+import Foreign ()
 import Foreign.C (CString, newCString, peekCStringLen)
 import Foreign.C.String (peekCString)
-import Foreign.C.Types
+import Foreign.C.Types ()
+import GHC.Generics (Generic)
 import Parser (CompilerFlags (CompilerFlags), fname, ftypes, parseProgram)
 import Parser qualified
 import Parser qualified as Parser.Type
@@ -50,7 +52,7 @@ data Function = Function
     , function :: [Instruction]
     , types :: [Parser.Type]
     }
-    deriving (Show)
+    deriving (Show, Generic)
 
 data CompilerState = CompilerState
     { program :: Parser.Program
@@ -59,8 +61,12 @@ data CompilerState = CompilerState
     , funcDecs :: [Parser.Expr]
     , structDecs :: [Parser.Expr]
     , lastLabel :: Int
+    , lets :: [(String, Parser.Type)]
     }
     deriving (Show)
+
+initCompilerState :: Parser.Program -> CompilerState
+initCompilerState prog = CompilerState prog [] [] [] 0 []
 
 allocId :: StateT CompilerState IO Int
 allocId = do
@@ -94,18 +100,24 @@ findAnyFunction name xs = do
 
 findFunction :: String -> [Function] -> [Parser.Type] -> Maybe Function
 findFunction name xs typess = do
-    -- traceM $ "findFunction: " ++ name ++ " " ++ show typess
     -- TODO: I don't like this function
     let candidates = filter (\y -> baseName y == name && funame y /= "main" && typesMatch y typess) xs
-    let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates
+    let candidates' = case filter (`typesMatchExactly` typess) candidates of
+            [] -> candidates
+            candidates'' -> candidates''
+    let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates'
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
-    case find (\y -> funame y == (name ++ "#" ++ show minId)) candidates of
+    -- traceM $ "Looked for " ++ name ++ " with types " ++ show typess ++ " and found " ++ show candidates'
+    case find (\y -> funame y == (name ++ "#" ++ show minId)) candidates' of
         Just x -> Just x
-        Nothing -> findAnyFunction name xs --  error $ "No function found: " ++ name ++ " " ++ show typess
+        Nothing -> findAnyFunction name xs
 
 typesMatch :: Function -> [Parser.Type] -> Bool
-typesMatch fun typess = all (uncurry (==)) (zip (types fun) typess)
+typesMatch fun typess = all (uncurry Parser.compareTypes) (zip (types fun) typess) && length typess <= length (types fun)
+
+typesMatchExactly :: Function -> [Parser.Type] -> Bool
+typesMatchExactly fun typess = all (uncurry (==)) (zip (types fun) typess) && length typess <= length (types fun)
 
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
@@ -157,6 +169,10 @@ typeOf (Parser.FuncCall name _) = do
                 ftypes
                 (find (\x -> fname x == name) funcDecs')
     return $ last a
+typeOf (Parser.Var name) = do
+    lets' <- gets lets
+    let a = maybe Parser.Any snd (find (\x -> fst x == name) lets')
+    return a
 typeOf x = return $ Parser.typeOf x
 
 constructFQName :: String -> [Parser.Expr] -> StateT CompilerState IO String
@@ -269,6 +285,7 @@ compileExpr (Parser.Var x) = do
         (Just f) -> compileExpr (Parser.FuncCall (funame f) [])
         Nothing -> return [LLoad x]
 compileExpr (Parser.Let name value) = do
+    typeOf value >>= \v -> modify (\s -> s{lets = (name, v) : lets s})
     value' <- compileExpr value
     return $ value' ++ [LStore name]
 compileExpr (Parser.Function a b) = mapM_ compileExpr a >> compileExpr b >> return []
@@ -367,7 +384,7 @@ runTestProgram = do
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
             putStrLn ""
-            xxx <- evalStateT (compileProgram program) (CompilerState program [] [] [] 0)
+            xxx <- evalStateT (compileProgram program) (initCompilerState program)
             -- print program
             putStrLn $ printAssembly xxx True
             let xxxPoint = locateLabel xxx "main"

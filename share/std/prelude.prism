@@ -31,7 +31,7 @@ foldr fun acc [] = acc
 foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
 
 sum :: List{Any} -> Int
-sum xs = foldl add, 0.0, xs
+sum xs = foldl `+`, 0.0, xs
 
 println :: Any -> IO
 println s = do

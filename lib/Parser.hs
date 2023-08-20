@@ -1,7 +1,6 @@
-{-# LANGUAGE InstanceSigs #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf) where
+module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf, compareTypes) where
 
 import Control.Monad.Combinators
     ( between
@@ -16,6 +15,7 @@ import Control.Monad.Combinators
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
 import Control.Monad.State hiding (state)
 import Data.Binary qualified
+import Data.Char (isUpper)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -28,6 +28,7 @@ import Text.Megaparsec
     , optional
     , registerParseError
     , runParserT
+    , satisfy
     , some
     , (<?>)
     )
@@ -127,9 +128,9 @@ data Type
     | Fn {args :: [Type], ret :: Type}
     | List Type
     | StructT String
-    deriving (Show, Generic)
+    deriving (Show, Eq, Generic)
 
-newtype Program = Program [Expr] deriving (Show, Generic)
+newtype Program = Program [Expr] deriving (Show, Eq, Generic)
 
 instance Data.Binary.Binary Type
 
@@ -137,26 +138,12 @@ instance Data.Binary.Binary Expr
 
 instance Data.Binary.Binary Program
 
-instance Eq Type where
-    Int == Int = True
-    Float == Float = True
-    Bool == Bool = True
-    String == String = True
-    IO == IO = True
-    Any == Any = True
-    None == None = True
-    Fn x y == Fn a b = x == a && y == b
-    Any == _ = True
-    _ == Any = True
-    List Any == List _ = True
-    List _ == List Any = True
-    List x == List y = x == y
-    StructT x == StructT y = x == y
-    _ == _ = False
-
--- x == y = error $ "Type checking for " ++ show x ++ " and " ++ show y ++ " not implemented"
-
--- _ == _ = False
+compareTypes :: Type -> Type -> Bool
+compareTypes (Fn x y) (Fn a b) = do
+    let argsMatch = all (uncurry compareTypes) $ zip x a
+    let retMatch = compareTypes y b
+    argsMatch && retMatch
+compareTypes x y = x == y || x == Any || y == Any
 
 typeOf :: Expr -> Parser.Type
 typeOf (IntLit _) = Int
@@ -193,7 +180,7 @@ typeOf (Discard x) = error "Cannot infer type of discard"
 typeOf (Import x y) = error "Cannot infer type of import"
 typeOf (Ref x) = error "Cannot infer type of ref"
 typeOf (Struct x y) = error "Cannot infer type of struct"
-typeOf (StructLit x y) = error "Cannot infer type of struct literal"
+typeOf (StructLit x y) = StructT x
 typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
 typeOf (Modulo x y) = error "Cannot infer type of modulo"
@@ -327,8 +314,9 @@ validType =
             symbol "List"
             curlyBrackets $ do
                 List <$> validType
-        -- <|> do TODO: REIMPLMENT
-        --     StructT <$> identifier
+        <|> do
+            lookAhead $ satisfy isUpper
+            StructT <$> identifier
         <?> "type"
 
 externLanguage :: Parser String
@@ -546,7 +534,7 @@ program = Program <$> between scn eof lines'
 var :: Parser Expr
 var = do
     state <- get
-    name <- identifier
+    name <- (extra <|> gravis)
     -- unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
     return $ Var name
 
@@ -595,7 +583,6 @@ term =
                 [0 ..]
                 [ placeholder
                 , parens expr
-                , typeLiteral
                 , FloatLit <$> try float
                 , IntLit <$> try integer
                 , StringLit <$> try stringLit
@@ -612,6 +599,7 @@ term =
                 , target
                 , struct
                 , try structLit
+                , typeLiteral
                 , array
                 , try internalFunction
                 , try discard
