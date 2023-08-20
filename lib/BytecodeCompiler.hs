@@ -45,6 +45,7 @@ import VM
     , runVM
     , runVMVM
     )
+import qualified Data.Vector as V
 
 data Function = Function
     { baseName :: String
@@ -386,6 +387,6 @@ runTestProgram = do
             putStrLn ""
             xxx <- evalStateT (compileProgram program) (initCompilerState program)
             -- print program
-            putStrLn $ printAssembly xxx True
+            putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
-            runVM $ (initVM xxx){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
+            runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}

@@ -7,6 +7,7 @@ import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
+import Data.Vector qualified as V
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import Options.Applicative
@@ -112,13 +113,13 @@ main = do
                 return $ VM.fromBytecode bytecode
     when emitBytecode $ do
         case output of
-            Just "-" -> B.putStr $ VM.toBytecode program
-            Just file -> B.writeFile file $ VM.toBytecode program
+            Just "-" -> B.putStr $ VM.toBytecode $ V.fromList program
+            Just file -> B.writeFile file $ VM.toBytecode $ V.fromList program
             Nothing -> error "No output file specified"
         exitSuccess
 
-    when debug $ putStrLn $ VM.printAssembly program False
+    when debug $ putStrLn $ VM.printAssembly (V.fromList program) False
 
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
-    VM.runVM $ (VM.initVM program){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}

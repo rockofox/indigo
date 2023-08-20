@@ -17,6 +17,7 @@ import Data.Text qualified
 import Debug.Trace (trace, traceM, traceShow, traceShowM)
 import GHC.Generics (Generic)
 import Data.List.Split (chunksOf)
+import Data.Vector qualified as V
 
 data Instruction
     = -- | Push a value onto the stack
@@ -189,7 +190,7 @@ data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 initVM :: Program -> VM
 initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}}
 
-type Program = [Instruction]
+type Program = V.Vector Instruction
 
 safeHead :: [a] -> a
 safeHead [] = error "Empty list"
@@ -253,15 +254,15 @@ runVMVM :: VM -> IO VM
 runVMVM vm = execStateT (run' (program vm)) vm
 
 locateLabels :: Program -> [(String, Int)]
-locateLabels program = [(x, n) | (Label x, n) <- zip program [0 ..]]
+locateLabels program = [(x, n) | (Label x, n) <- zip (V.toList program) [0 ..]] -- TODO: Might be inefficient
 
 showDebugInfo :: StateT VM IO String
-showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm !! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
+showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm V.! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
 
 run' :: Program -> StateT VM IO ()
 run' program = do
     vm <- get
-    let inst = program !! pc vm
+    let inst = program V.! pc vm
     put $ vm{program = program, labels = locateLabels program}
     when (not (null (breakpoints vm)) && pc vm `elem` breakpoints vm || -1 `elem` breakpoints vm) $ showDebugInfo >>= traceM
     runInstruction inst
@@ -456,32 +457,11 @@ runInstruction (PackMap n) = do
     stackPush $ DMap $ Data.Map.fromList $ map (\[DString x, y] -> (x, y)) $ chunksOf 2 elems
 runInstruction x = error $ show x ++ ": not implemented"
 
--- then
---     if start < 0
---         then stackPush $ DList $ take (abs start) $ reverse list
---         else stackPush $ DList $ drop start list
--- else stackPush $ DList $ take (end - start) $ drop start list
-
------
--- runInstruction x = error $ show x ++ ": not implemented"
-
-test :: Program
-test =
-    [ Push $ DInt 100
-    , Label "loop"
-    , Push $ DInt 1
-    , Sub
-    , DupN 2
-    , Builtin Print
-    , Jnz "loop"
-    , Exit
-    ]
-
 printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers = do
     if not showLineNumbers
         then concatMap printAssembly' program
-        else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] program
+        else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] (V.toList program)
   where
     printAssembly' :: Instruction -> String
     printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
@@ -513,7 +493,7 @@ printAssembly program showLineNumbers = do
                 (x : xs) -> "\ESC[0;34m" <> x <> " \ESC[0m " <> Data.Text.unwords xs
 
 toBytecode :: Program -> LazyByteString
-toBytecode = encode
+toBytecode = encode . V.toList
 
 fromBytecode :: LazyByteString -> [Instruction]
 fromBytecode = decode

@@ -70,18 +70,18 @@ println p = do
 end
 
 main => IO = do
-  # let n = 4000.0
-  # let rsum = estimate (map (`/`n), (range 1.0, n))
-  # let pi = 4.0 * rsum
-  # println pi
+  let n = 4000.0
+  let rsum = estimate (map (`/`n), (range 1.0, n))
+  let pi = 4.0 * rsum
+  println pi
   # let r = range 1.0, n
-  # println _/2
-  println (map (`/`2.0), (range 1.0, 10.0))
+  # # println _/2
+  # println (map (`/`2.0), (range 1.0, 10.0))
   # println something 2, 8
   # println something 2.0, 8.0
   # println examples.test2.bla 2, 4
-  let p = Point { x : 1, y : 2 }
-  println p
+  # let p = Point { x : 1, y : 2 }
+  # println p
   # println Point { x : 1, y : 2 }
   # println (sum [1.0,2.0,3.0])
   # println bla 1, 2

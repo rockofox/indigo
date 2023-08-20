@@ -24,7 +24,7 @@ library
                      , VM
                      , BytecodeCompiler
     other-modules: Paths_indigo
-    build-depends: base ^>=4.16.4.0,
+    build-depends: base,
         containers,
         text,
         megaparsec,
@@ -35,7 +35,8 @@ library
         directory,
         bytestring,
         binary,
-        split
+        split,
+        vector
     hs-source-dirs:   lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings,
@@ -48,14 +49,16 @@ library
 executable indigoc
     main-is:          Main.hs
     hs-source-dirs:   app
-    build-depends:    base ^>=4.16.4.0,
+    build-depends:    base,
                       optparse-applicative,
                       unix,
                       megaparsec,
                       mtl,
                       text,
                       bytestring,
-                      indigo
+                      indigo,
+                      vector
+
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
