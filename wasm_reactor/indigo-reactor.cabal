@@ -11,6 +11,7 @@ executable indigo-wasm-reactor
                       mtl,
                       text,
                       bytestring,
+                      vector,
                       indigo
     -- other-modules:    Parser, VM
     -- Language Extensions

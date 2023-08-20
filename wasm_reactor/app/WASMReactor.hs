@@ -38,6 +38,7 @@ import Parser qualified
 import Control.Monad
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Text.Megaparsec (errorBundlePretty)
+import Data.Vector qualified as V
 
 
 -- TODO: Put this stuff into a seperate file
@@ -48,11 +49,11 @@ runProgramRaw inputPtr inputLen = do
     case p of
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
-            xxx <- evalStateT (compileProgram program) (CompilerState program [] [] [] 0)
+            xxx <- evalStateT (compileProgram program) (initCompilerState program)
             -- print program
-            putStrLn $ printAssembly xxx True
+            putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
-            runVM $ (initVM xxx){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
+            runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
 
 runProgramRawBuffered :: Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
 runProgramRawBuffered inputPtr inputLen outputPtrPtr = do
@@ -61,9 +62,9 @@ runProgramRawBuffered inputPtr inputLen outputPtrPtr = do
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do
-            xxx <- evalStateT (compileProgram program) (CompilerState program [] [] [] 0)
+            xxx <- evalStateT (compileProgram program) (initCompilerState program)
             let xxxPoint = locateLabel xxx "main"
-            vm <- runVMVM $ (initVM xxx){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
+            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
             let output' = BS.pack $ output $ ioBuffer vm
             BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
                 outputPtr <- mallocBytes len
