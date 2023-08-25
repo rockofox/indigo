@@ -1,3 +1,4 @@
+# vi: ft=ruby
 # This tries to test all/most features of the language
 
 import * from examples.test2
@@ -31,28 +32,8 @@ call f = do
   println (f 10)
 end
 
-# Equation for the upper hemisphere of the unit circle
-circle :: Float -> Float
-circle x = sqrt (abs(1.0 - x**2.0))
 
-# Calculate the area of a right-handed Riemann rectangle
 
-area :: Float -> Float -> Float
-area x1 x2 = ((x2) - x1) * circle x2
-
-# Recursively add the areas of the Riemann rectangles
-estimate :: Any -> Float
-estimate (x:[]) = 0.0
-estimate (x:y:xs) = (area x, y) + estimate (y:xs)
-
-range :: Any -> Any -> List{Int}
-range a b = do
-  if a == b then do
-    []
-  else do
-    a : range (a + 1.0), b
-  end
-end
 
 struct Point = (x: Int, y: Int)
 
@@ -69,22 +50,20 @@ println p = do
   print p . x : " " : p . y : "\n"
 end
 
+ppp :: Int -> Int -> Int
+ppp x y = do
+  println x
+  println y
+  println "----"
+  x + y
+end
+
+mySum :: List{Float} -> Float
+mySum [] = 0.0
+mySum (x:xs) = x + mySum xs
+
 main => IO = do
-  let n = 4000.0
-  let rsum = estimate (map (`/`n), (range 1.0, n))
-  let pi = 4.0 * rsum
-  println pi
-  # let r = range 1.0, n
-  # # println _/2
-  # println (map (`/`2.0), (range 1.0, 10.0))
-  # println something 2, 8
-  # println something 2.0, 8.0
-  # println examples.test2.bla 2, 4
-  # let p = Point { x : 1, y : 2 }
-  # println p
-  # println Point { x : 1, y : 2 }
-  # println (sum [1.0,2.0,3.0])
-  # println bla 1, 2
-  # println bla 1, 2
-  # println "Hello World"
+  let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
+  println blalbl
+  # println (mySum [2.0,4.0,8.0])
 end

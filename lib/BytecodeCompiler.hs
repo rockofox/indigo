@@ -18,6 +18,7 @@ import Data.Maybe (fromJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Data.Vector qualified as V
 import Debug.Trace (traceM)
 import Foreign ()
 import Foreign.C (CString, newCString, peekCStringLen)
@@ -45,7 +46,6 @@ import VM
     , runVM
     , runVMVM
     )
-import qualified Data.Vector as V
 
 data Function = Function
     { baseName :: String

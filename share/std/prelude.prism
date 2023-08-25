@@ -1,3 +1,4 @@
+# vi: ft=ruby
 `+` :: Any -> Any -> Any
 `+` x y = x + y
 `-` :: Any -> Any -> Any
@@ -24,17 +25,34 @@ end
 
 foldl :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
 foldl fun acc [] = acc
-foldl fun acc (x:xs) = foldl fun, (fun acc, x), xs
+foldl fun acc (x:xs) = foldl (fun), (fun acc, x), xs
 
 foldr :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
 foldr fun acc [] = acc
 foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
 
-sum :: List{Any} -> Int
-sum xs = foldl `+`, 0.0, xs
+add x y = x + y
+
+sum :: List{Int} -> Int
+sum [] = 0
+sum (x:xs) = x + sum xs
+
+sum :: List{Float} -> Float
+sum [] = 0.0
+sum (x:xs) = x + sum xs
+
 
 println :: Any -> IO
 println s = do
   print s
   print "\n"
+end
+
+range :: Any -> Any -> List{Int}
+range a b = do
+  if a == b then do
+    []
+  else do
+    a : range (a + 1.0), b
+  end
 end

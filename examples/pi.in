@@ -1,0 +1,25 @@
+# vi: ft=ruby
+# Calculate Pi, badly
+
+# Equation for the upper hemisphere of the unit circle
+circle :: Float -> Float
+circle x = sqrt (abs(1.0 - x**2.0))
+
+# Calculate the area of a right-handed Riemann rectangle
+area :: Float -> Float -> Float
+area x1 x2 = ((x2) - x1) * circle x2
+
+# Recursively add the areas of the Riemann rectangles
+estimate :: Any -> Float
+estimate (x:[]) = 0.0
+estimate (x:y:xs) = (area x, y) + estimate (y:xs)
+
+pi :: Float -> Float
+pi n = do
+  let rsum = estimate (map (`/`n), (range 1.0, n))
+  4.0 * rsum
+end
+
+main => IO = do
+  println pi 4000.0
+end

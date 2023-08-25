@@ -69,13 +69,14 @@ test-suite spec
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     hs-source-dirs:   tests
-    build-depends:    base, hspec, hspec-contrib, QuickCheck, HUnit, indigo, generic-arbitrary, text
+    build-depends:    base, hspec, hspec-contrib, QuickCheck, HUnit, indigo, generic-arbitrary, text, vector, megaparsec, mtl
     other-modules:
         ParserSpec
         BytecodeCompilerSpec
+        FrontendSpec
     build-tool-depends: hspec-discover:hspec-discover == 2.*
     default-language: Haskell2010
-    default-extensions: OverloadedStrings
+    default-extensions: OverloadedStrings, ImportQualifiedPost
 
     -- https://github.com/typeable/generic-arbitrary/issues/17
     ghc-options: -fconstraint-solver-iterations=100
