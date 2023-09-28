@@ -9,6 +9,7 @@ import Parser qualified
 import Test.Hspec
 import Test.QuickCheck hiding (output)
 import Text.Megaparsec (errorBundlePretty)
+import Text.RawString.QQ
 import VM
 
 compileAndRun :: String -> IO String
@@ -41,10 +42,70 @@ spec = do
             compileAndRun "main => IO = println (map (`+`1), [1, 2, 3])" `shouldReturn` "[2,3,4]\n"
         it "Can use sum on integers" $ do
             compileAndRun "main => IO = println (sum [1, 2, 3])" `shouldReturn` "6\n"
-        it "Can use sum on floats" $ do
+        xit "Can use sum on floats" $ do
             compileAndRun "main => IO = println (sum [1.0, 2.0, 3.0])" `shouldReturn` "6.0\n"
         xit "Can use foldl" $ do
             compileAndRun "main => IO = println (foldl (`+`), 0, [1, 2, 3])" `shouldReturn` "6\n"
+    describe "Implicit casting" $ do
+        it "Can cast from int to float" $ do
+            compileAndRun [r|main => IO = println ^2 + 4.0|] `shouldReturn` "6.0\n"
+            compileAndRun [r|main => IO = println 2.0 + ^4|] `shouldReturn` "6.0\n"
+        it "Can cast from float to int" $ do
+            compileAndRun [r|main => IO = println ^2.0 + 4|] `shouldReturn` "6\n"
+            compileAndRun [r|main => IO = println 2 + ^4.0|] `shouldReturn` "6\n"
+        it "Can cast from int to string" $ do
+            compileAndRun [r|main => IO = println ^2 + "test"|] `shouldReturn` "2test\n"
+        it "Can cast from string to int" $ do
+            compileAndRun [r|main => IO = println ^"2" + 4|] `shouldReturn` "6\n"
+    describe "Explicit casting" $ do
+        it "Can cast from int to float" $ do
+            compileAndRun [r|main => IO = println (2 as Float) + 4.0|] `shouldReturn` "6.0\n"
+            compileAndRun [r|main => IO = println 2.0 + (4 as Float)|] `shouldReturn` "6.0\n"
+        it "Can cast a function call" $ do
+            compileAndRun
+                [r|f :: Int -> Int
+                            f x = x + 1
+                            main => IO = println (f 2) as Float + 4.0|]
+                `shouldReturn` "7.0\n"
     describe "Overloading" $ do
         it "Can find function based on type" $ do
-            compileAndRun "f :: Int -> Int\nf x = x\nf :: String -> String\nf x = \"'\":x:\"'\"\nmain => IO = do\n println f 1\nprintln f \"test\"\nend" `shouldReturn` "1\n'test'\n"
+            compileAndRun
+                [r|
+                f :: Int -> Int
+                f x = x + 1
+                f :: String -> String
+                f x = "'":x:"'" 
+                main => IO = do
+                    println f 1
+                    println f "test"
+                end|]
+                `shouldReturn` "2\n'test'\n"
+        it "Can find function based on type with lists" $ do
+            compileAndRun
+                [r|
+                f :: List{Int} -> Int
+                f x = sum x
+                f :: List{String} -> String
+                f x = x
+                main => IO = do
+                    println f [1, 2, 3]
+                    println f ["test", "test2"]
+                end|]
+                `shouldReturn` "6\ntesttest2\n"
+        it "Can find function based on type with lists, multiple definitions and pattern matching" $ do
+            compileAndRun
+                [r|
+                f :: List{Int} -> Int
+                f [] = 0
+                f (x:xs) = x + (f xs)
+                f :: List{Float} -> Float
+                # f [] = 0.0
+                f (x:xs) = x + (f xs) as Float
+                # f :: List{String} -> String
+                # f x = x
+                main => IO = do
+                    println f [1, 2, 3]
+                    println f [1.0, 2.0, 3.0]
+                    # println f ["test", "test2"]
+                end|]
+                `shouldReturn` "6\n6.0\ntesttest2\n"

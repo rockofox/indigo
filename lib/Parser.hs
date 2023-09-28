@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-module Parser (Expr (..), Program (..), Type (..), parseProgram, CompilerFlags (..), typeOf, compareTypes) where
+module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), typeOf, compareTypes) where
 
 import Control.Monad.Combinators
     ( between
@@ -13,7 +13,8 @@ import Control.Monad.Combinators
     , (<|>)
     )
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
-import Control.Monad.State hiding (state)
+import Control.Monad.State
+    ( evalState, MonadState(get, put), State )
 import Data.Binary qualified
 import Data.Char (isUpper)
 import Data.Text (Text, unpack)
@@ -40,7 +41,7 @@ import Text.Megaparsec.Char
     , space1
     )
 import Text.Megaparsec.Char.Lexer qualified as L
-import Text.Megaparsec.Debug
+import Text.Megaparsec.Debug ( dbg )
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -109,6 +110,8 @@ data Expr
     | Cast Expr Expr
     | TypeLit Type
     | Flexible Expr
+    | Trait {tname :: String, tmethods :: [Expr]}
+    | Impl {itrait :: String, ifor :: String, imethods :: [Expr]}
     | IOLit
     deriving
         ( Show
@@ -128,6 +131,7 @@ data Type
     | Fn {args :: [Type], ret :: Type}
     | List Type
     | StructT String
+    | Self
     deriving (Show, Eq, Generic)
 
 newtype Program = Program [Expr] deriving (Show, Eq, Generic)
@@ -314,6 +318,9 @@ validType =
             symbol "List"
             curlyBrackets $ do
                 List <$> validType
+        <|> do
+            symbol "Self"
+            return Self
         <|> do
             lookAhead $ satisfy isUpper
             StructT <$> identifier
@@ -525,6 +532,13 @@ parseProgram t cf = do
         Left err -> Left err
         Right program -> Right program
 
+parseFreeUnsafe :: Text -> Expr
+parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
+    Left err -> error $ show err
+    Right program -> case program of
+        Program [expr] -> expr
+        _ -> error "Program should only have one expression"
+
 lines' :: Parser [Expr]
 lines' = expr `sepEndBy` newline'
 
@@ -569,15 +583,39 @@ recover = withRecovery recover'
     recover' :: ParseError Text Void -> Parser Expr
     recover' err = do
         registerParseError err
-        return $ Placeholder
+        return Placeholder
 
 typeLiteral :: Parser Expr
 typeLiteral = do
     TypeLit <$> validType
 
+trait :: Parser Expr
+trait = do
+    symbol "trait"
+    name <- identifier
+    symbol "="
+    symbol "do"
+    newline'
+    methods <- funcDec `sepEndBy` newline'
+    symbol "end"
+    return $ Trait name methods
+
+impl :: Parser Expr
+impl = do
+    symbol "impl"
+    name <- identifier
+    symbol "for"
+    for <- identifier
+    symbol "="
+    symbol "do"
+    newline'
+    methods <- funcDef `sepEndBy` newline'
+    symbol "end"
+    return $ Impl name for methods
+
 term :: Parser Expr
 term =
-    choice $
+    choice
         ( (\(index, parser) -> verbose ("term " ++ show index) parser)
             <$> zip
                 [0 ..]
@@ -592,6 +630,8 @@ term =
                 , import_
                 , externDec
                 , doBlock
+                , impl
+                , trait
                 , try combinedFunc
                 , try funcDef
                 , try funcDec

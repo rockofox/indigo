@@ -1,4 +1,5 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
+{-# LANGUAGE LambdaCase #-}
 module BytecodeCompiler where
 
 import Control.Monad (when, (>=>))
@@ -19,7 +20,7 @@ import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
-import Debug.Trace (traceM)
+import Debug.Trace (traceM, traceShowM, trace, traceShow)
 import Foreign ()
 import Foreign.C (CString, newCString, peekCStringLen)
 import Foreign.C.String (peekCString)
@@ -63,11 +64,13 @@ data CompilerState = CompilerState
     , structDecs :: [Parser.Expr]
     , lastLabel :: Int
     , lets :: [(String, Parser.Type)]
+    , traits :: [Parser.Expr]
+    , impls :: [Parser.Expr]
     }
     deriving (Show)
 
 initCompilerState :: Parser.Program -> CompilerState
-initCompilerState prog = CompilerState prog [] [] [] 0 []
+initCompilerState prog = CompilerState prog [] [] [] 0 [] [] []
 
 allocId :: StateT CompilerState IO Int
 allocId = do
@@ -90,6 +93,12 @@ compileProgram (Parser.Program expr) = do
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude ++ functions' ++ freePart ++ [Exit]
 
+compileProgramBare :: Parser.Program -> StateT CompilerState IO [Instruction]
+compileProgramBare (Parser.Program expr) = do
+    freePart <- concatMapM compileExpr expr
+    functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
+    return $ functions' ++ freePart ++ [Exit]
+
 findAnyFunction :: String -> [Function] -> Maybe Function
 findAnyFunction name xs = do
     -- TODO: I don't like this function
@@ -109,7 +118,7 @@ findFunction name xs typess = do
     let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates'
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
-    -- traceM $ "Looked for " ++ name ++ " with types " ++ show typess ++ " and found " ++ show candidates'
+    -- traceM $ "Looked for " ++ name ++ " with types " ++ show typess ++ " and found " ++ show candidates' ++ "\n"
     case find (\y -> funame y == (name ++ "#" ++ show minId)) candidates' of
         Just x -> Just x
         Nothing -> findAnyFunction name xs
@@ -143,7 +152,7 @@ findSourceFile name = do
                             if e4
                                 then return $ "/usr/lib/indigo/" ++ name
                                 else error $ "Could not find file " ++ name
-
+ 
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.prism" >>= readFile
 
@@ -153,20 +162,24 @@ doBinOp x y op = do
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
     x' <- compileExpr x
     y' <- compileExpr y
+    cast <- case (x,y) of
+        (Parser.Flexible _, Parser.Flexible _) -> error "Double cast"
+        (Parser.Flexible _, _) -> return $ [Cast] ++ y'
+        (_, Parser.Flexible _) -> return $ [Swp, Cast] ++ x'
+        _ -> return []
     case (x, y) of
-        (_, Parser.FuncCall _ _) -> return (y' ++ x' ++ [Swp] ++ [op])
-        (Parser.FuncCall _ _, _) -> return (x' ++ y' ++ [op])
+        (_, Parser.FuncCall _ _) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
+        (Parser.FuncCall _ _, _) -> return (x' ++ y' ++ cast ++ [op])
         (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
-        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
+        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1] ---------------
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
-        _ -> return (x' ++ y' ++ [op])
-
+        _ -> return (x' ++ y' ++ cast ++ [op])
 typeOf :: Parser.Expr -> StateT CompilerState IO Parser.Type
 typeOf (Parser.FuncCall name _) = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
-                [Parser.Type.Unknown]
+                [Parser.Type.Unknown] 
                 ftypes
                 (find (\x -> fname x == name) funcDecs')
     return $ last a
@@ -209,7 +222,6 @@ compileExpr (Parser.FuncCall name args) = do
     argTypes <- mapM typeOf args
     functions' <- gets functions
     funcDecs' <- gets funcDecs
-
     let fun = case findFunction name functions' argTypes of
             (Just f) -> f
             Nothing -> Function{baseName = unmangleFunctionName name, funame = name, function = []}
@@ -245,7 +257,6 @@ compileExpr (Parser.FuncDef name args body) = do
     body' <- compileExpr body
     funcDecs' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
-
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs'
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     modify (\s -> s{functions = Function name funame function (ftypes funcDec) : tail (functions s)})
@@ -343,6 +354,8 @@ compileExpr (Parser.Import o from) = do
     mangleAST (Parser.Function fdef fdec) = Parser.Function (map mangleAST fdef) (mangleAST fdec)
     mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "." ++ name) args (mangleAST body)
     mangleAST x = x
+compileExpr (Parser.Trait name methods) = modify (\s -> s{traits = Parser.Trait name methods : traits s}) >> return []
+compileExpr (Parser.Impl name for methods) = modify (\s -> s{impls = Parser.Impl name for methods : impls s}) >> return []
 compileExpr x = error $ show x ++ " is not implemented"
 
 locateLabel :: [Instruction] -> String -> Int

@@ -1,11 +1,16 @@
 module BytecodeCompilerSpec (spec) where
 
 import BytecodeCompiler
+import Control.Monad.State (evalStateT)
+import Data.Text qualified
 import Parser
 import Test.Hspec
 import Test.QuickCheck
 import Test.QuickCheck.Arbitrary.Generic
-import qualified VM
+import Text.Megaparsec (errorBundlePretty)
+import Text.RawString.QQ (r)
+import VM (Action (..), Data (..), Instruction (..))
+import VM qualified
 
 instance Arbitrary Type where
     arbitrary = genericArbitrary
@@ -18,6 +23,7 @@ instance Arbitrary VM.Data where
 instance Arbitrary VM.Action where
     arbitrary = genericArbitrary
     shrink = genericShrink
+
 instance Arbitrary VM.Instruction where
     arbitrary = genericArbitrary
     shrink = genericShrink
@@ -26,16 +32,37 @@ instance Arbitrary BytecodeCompiler.Function where
     arbitrary = genericArbitrary
     shrink = genericShrink
 
+compile :: String -> IO [VM.Instruction]
+compile prog = do
+    let p = parseProgram (Data.Text.pack prog) Parser.CompilerFlags{verboseMode = False}
+    case p of
+        Left err -> error $ errorBundlePretty err
+        Right program -> do
+            evalStateT (compileProgramBare program) (initCompilerState program)
+
 spec :: Spec
 spec = do
+    describe "Addition" $ do
+        it "Should compile 2+4" $ do
+            compile [r|2+4|]
+                `shouldReturn` [Push $ DInt 2, Push $ DInt 4, VM.Add, Exit]
+    describe "Hello World" $ do
+        it "Should print Hello, world!" $ do
+            compile [r|main => IO = print "Hello, world!"|]
+                `shouldReturn` [Label "main", Push $ DString "Hello, world!", Builtin Print, Exit]
+    describe "Implicit casting" $ do
+        it "Should cast from int to float" $ do
+            compile [r|main => IO = print ^2 + 4.0|]
+                `shouldReturn` [Label "main", Meta "flex", Push 2, Push 4.0, VM.Cast, Push 4.0, VM.Add, Builtin Print, Exit]
+            compile [r|main => IO = print 2.0 + ^4|]
+                `shouldReturn` [Label "main", Push 2.0, Meta "flex", Push 4, Swp, VM.Cast, Push 2.0, VM.Add, Builtin Print, Exit]
     describe "typesMatch" $ do
         it "Should be true for exact matches" $
             property $
                 \t f ->
-                    typesMatch f {types = [t]} [t]
+                    typesMatch f{types = [t]} [t]
                         `shouldBe` True
         it "Should be true for exact matches with multiple types" $
-
             property $
                 \t1 t2 f ->
                     typesMatch f{types = [t1, t2]} [t1, t2]

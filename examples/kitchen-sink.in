@@ -63,7 +63,9 @@ mySum [] = 0.0
 mySum (x:xs) = x + mySum xs
 
 main => IO = do
-  let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
-  println blalbl
+  # let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
+  # println blalbl
   # println (mySum [2.0,4.0,8.0])
 end
+
+trait Foo = { show :: Any -> String }

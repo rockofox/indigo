@@ -41,7 +41,6 @@ sum :: List{Float} -> Float
 sum [] = 0.0
 sum (x:xs) = x + sum xs
 
-
 println :: Any -> IO
 println s = do
   print s

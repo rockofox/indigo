@@ -23,7 +23,7 @@ spec = do
         it "Should be false for non-exact matches (except for Any or Fn)" $
             property $ \t1 t2 ->
                 notElem Any [t1, t2]
-                && not (isFn t1 || isFn t2)
+                    && not (isFn t1 || isFn t2)
                     && t1
                     /= t2
                     ==> compareTypes t1 t2
@@ -40,8 +40,21 @@ spec = do
         it "StructT types should be equal if their fields are equal" $
             property $
                 \t -> compareTypes (StructT t) (StructT t) `shouldBe` True
-    describe "Parser" $ do
+    describe "Basic" $ do
         it "Should parse a simple program" $
             parseProgram "main => IO = print \"Hello, world!\"" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
                     (Program [Function{fdef = [FuncDef{fname = "main", fargs = [], fbody = FuncCall "print" [StringLit "Hello, world!"]}], fdec = FuncDec{fname = "main", ftypes = [IO]}}])
+    describe "Traits" $ do
+        it "Should parse a trait decleration" $
+            parseProgram "trait Show = do\nshow :: Self -> String\nend" CompilerFlags{verboseMode = False}
+                `shouldBe` Right
+                    (Program [Trait{tname = "Show", tmethods = [FuncDec{fname = "show", ftypes = [Self, String]}]}])
+        it "Should parse a trait declaration with multiple methods" $
+            parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" CompilerFlags{verboseMode = False}
+                `shouldBe` Right
+                    (Program [Trait{tname = "Show", tmethods = [FuncDec{fname = "show", ftypes = [Self, String]}, FuncDec{fname = "show2", ftypes = [Self, String]}]}])
+        it "Should parse a trait implementation" $
+            parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" CompilerFlags{verboseMode = False}
+                `shouldBe` Right
+                    (Program [Impl{itrait = "Show", ifor = "Point", imethods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
