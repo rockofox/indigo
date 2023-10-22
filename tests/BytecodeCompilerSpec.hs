@@ -46,6 +46,12 @@ spec = do
         it "Should compile 2+4" $ do
             compile [r|2+4|]
                 `shouldReturn` [Push $ DInt 2, Push $ DInt 4, VM.Add, Exit]
+        it "Should work properly with function calls" $ do
+            compile
+                [r|
+                f x = x + 1
+                main => IO = print (f 2) + 4|]
+                `shouldReturn` [Label "f#0", LStore "x", LLoad "x", Push 1, VM.Add, Ret, Label "main", Push 2, Call "f#0", Push 4, VM.Add, Builtin Print, Exit]
     describe "Hello World" $ do
         it "Should print Hello, world!" $ do
             compile [r|main => IO = print "Hello, world!"|]
@@ -56,6 +62,13 @@ spec = do
                 `shouldReturn` [Label "main", Meta "flex", Push 2, Push 4.0, VM.Cast, Push 4.0, VM.Add, Builtin Print, Exit]
             compile [r|main => IO = print 2.0 + ^4|]
                 `shouldReturn` [Label "main", Push 2.0, Meta "flex", Push 4, Swp, VM.Cast, Push 2.0, VM.Add, Builtin Print, Exit]
+    describe "Explicit casting" $ do
+        it "Can cast from int to float" $ do
+            compile [r|2 as Float|]
+                `shouldReturn` [Push 2, Push 0.0, VM.Cast, Exit]
+        it "Casts are compatible with binary operations" $ do
+            compile [r|(2 as Float) + 4.0|]
+                `shouldReturn` [Push 2, Push 0.0, VM.Cast, Push 4.0, VM.Add, Exit]
     describe "typesMatch" $ do
         it "Should be true for exact matches" $
             property $

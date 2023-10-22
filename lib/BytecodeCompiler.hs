@@ -1,29 +1,18 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
 {-# LANGUAGE LambdaCase #-}
+
 module BytecodeCompiler where
 
 import Control.Monad (when, (>=>))
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
-import Data.ByteString.Builder (toLazyByteString)
-import Data.ByteString.Char8 qualified as BS
-import Data.ByteString.Lazy (pack, toStrict)
-import Data.ByteString.Lazy qualified as BL
-import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.ByteString.Unsafe qualified as BU
-import Data.Char (ord)
 import Data.Functor ((<&>))
-import Data.IORef (readIORef)
 import Data.List (elemIndex, find, intercalate)
-import Data.Map qualified
 import Data.Maybe (fromJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
-import Debug.Trace (traceM, traceShowM, trace, traceShow)
 import Foreign ()
-import Foreign.C (CString, newCString, peekCStringLen)
-import Foreign.C.String (peekCString)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
 import Parser (CompilerFlags (CompilerFlags), fname, ftypes, parseProgram)
@@ -35,7 +24,6 @@ import Text.Megaparsec (errorBundlePretty)
 import VM
     ( Action (Print)
     , Data (..)
-    , IOMode (..)
     , Instruction (..)
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, pc)
@@ -45,7 +33,6 @@ import VM
     , output
     , printAssembly
     , runVM
-    , runVMVM
     )
 
 data Function = Function
@@ -90,6 +77,7 @@ compileProgram (Parser.Program expr) = do
                 Right (Parser.Program expr) -> expr
         concatMapM compileExpr expr
     freePart <- concatMapM compileExpr expr
+    createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude ++ functions' ++ freePart ++ [Exit]
 
@@ -152,7 +140,7 @@ findSourceFile name = do
                             if e4
                                 then return $ "/usr/lib/indigo/" ++ name
                                 else error $ "Could not find file " ++ name
- 
+
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.prism" >>= readFile
 
@@ -162,7 +150,7 @@ doBinOp x y op = do
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
     x' <- compileExpr x
     y' <- compileExpr y
-    cast <- case (x,y) of
+    cast <- case (x, y) of
         (Parser.Flexible _, Parser.Flexible _) -> error "Double cast"
         (Parser.Flexible _, _) -> return $ [Cast] ++ y'
         (_, Parser.Flexible _) -> return $ [Swp, Cast] ++ x'
@@ -174,12 +162,13 @@ doBinOp x y op = do
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1] ---------------
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ cast ++ [op])
+
 typeOf :: Parser.Expr -> StateT CompilerState IO Parser.Type
 typeOf (Parser.FuncCall name _) = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
-                [Parser.Type.Unknown] 
+                [Parser.Type.Unknown]
                 ftypes
                 (find (\x -> fname x == name) funcDecs')
     return $ last a
@@ -354,9 +343,43 @@ compileExpr (Parser.Import o from) = do
     mangleAST (Parser.Function fdef fdec) = Parser.Function (map mangleAST fdef) (mangleAST fdec)
     mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "." ++ name) args (mangleAST body)
     mangleAST x = x
-compileExpr (Parser.Trait name methods) = modify (\s -> s{traits = Parser.Trait name methods : traits s}) >> return []
-compileExpr (Parser.Impl name for methods) = modify (\s -> s{impls = Parser.Impl name for methods : impls s}) >> return []
+compileExpr (Parser.Trait name methods) = do
+    let methods' = map (\(Parser.FuncDec name' types) -> Parser.FuncDec (name') types) methods
+    modify (\s -> s{traits = Parser.Trait name methods : traits s})
+    mapM_ compileExpr methods'
+    return []
+compileExpr (Parser.Impl name for methods) = do
+    let methods' = map (\(Parser.FuncDef name' args body) -> Parser.FuncDef (name ++ "." ++ for ++ "::" ++ name') args body) methods
+    modify (\s -> s{impls = Parser.Impl name for methods : impls s})
+    mapM_ compileExpr methods'
+    return []
 compileExpr x = error $ show x ++ " is not implemented"
+
+createVirtualFunctions :: StateT CompilerState IO ()
+createVirtualFunctions = do
+    impls' <- gets impls
+    traits' <- gets traits
+    let traitsAssoc = map (\x -> (x, filter (\y -> Parser.itrait y == Parser.tname x) impls')) traits'
+    mapM_ compileTrait traitsAssoc
+  where
+    compileTrait :: (Parser.Expr, [Parser.Expr]) -> StateT CompilerState IO ()
+    compileTrait (trait, impl) = do
+        let methods = Parser.tmethods trait
+        let fors = map Parser.ifor impl
+        mapM_ (\method -> createBaseDef method trait fors) methods
+    createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT CompilerState IO ()
+    createBaseDef (Parser.FuncDec name typess) trait fors = do
+        let traitName = Parser.tname trait
+        let body =
+                [Label name]
+                    ++ replicate (length typess - 2) Pop
+                    ++ [ DupN (length fors)
+                       ]
+                    ++ concatMap (\for -> [TypeOf, Push $ DString for, Eq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
+                    ++ [Pop, Push $ DString ("`" ++ name ++ "` from trait `" ++ traitName ++ "` called for unimplemented type"), Panic]
+        modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess]})
+        return ()
+    createBaseDef _ _ _ = return ()
 
 locateLabel :: [Instruction] -> String -> Int
 locateLabel program label = do

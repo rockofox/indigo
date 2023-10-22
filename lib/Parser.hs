@@ -14,7 +14,10 @@ import Control.Monad.Combinators
     )
 import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
 import Control.Monad.State
-    ( evalState, MonadState(get, put), State )
+    ( MonadState (get, put)
+    , State
+    , evalState
+    )
 import Data.Binary qualified
 import Data.Char (isUpper)
 import Data.Text (Text, unpack)
@@ -41,7 +44,7 @@ import Text.Megaparsec.Char
     , space1
     )
 import Text.Megaparsec.Char.Lexer qualified as L
-import Text.Megaparsec.Debug ( dbg )
+import Text.Megaparsec.Debug (dbg)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -132,7 +135,21 @@ data Type
     | List Type
     | StructT String
     | Self
-    deriving (Show, Eq, Generic)
+    deriving (Eq, Generic)
+
+instance Show Type where
+    show Int = "Int"
+    show Float = "Float"
+    show Bool = "Bool"
+    show String = "String"
+    show IO = "IO"
+    show Any = "Any"
+    show None = "None"
+    show Unknown = "Unknown"
+    show (Fn args ret) = "Fn{" ++ show args ++ " -> " ++ show ret ++ "}"
+    show (List t) = "List{" ++ show t ++ "}"
+    show (StructT name) = name
+    show Self = "Self"
 
 newtype Program = Program [Expr] deriving (Show, Eq, Generic)
 
@@ -485,7 +502,7 @@ struct = do
     symbol "="
     fields <-
         parens $
-            sepBy1
+            sepBy
                 ( do
                     fieldName <- identifier <?> "field name"
                     symbol ":"
@@ -500,7 +517,7 @@ structLit = do
     name <- extra
     symbol "{"
     fields <-
-        sepBy1
+        sepBy
             ( do
                 fieldName <- identifier
                 symbol ":"

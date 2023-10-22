@@ -10,14 +10,14 @@ import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
+import Data.List.Split (chunksOf)
 import Data.Map qualified
 import Data.Map qualified as Data
 import Data.Maybe (fromMaybe)
 import Data.Text qualified
+import Data.Vector qualified as V
 import Debug.Trace (trace, traceM, traceShow, traceShowM)
 import GHC.Generics (Generic)
-import Data.List.Split (chunksOf)
-import Data.Vector qualified as V
 
 data Instruction
     = -- | Push a value onto the stack
@@ -102,6 +102,12 @@ data Instruction
       StackLength
     | -- | Casts a to the type of b
       Cast
+    | -- | Get the type of a
+      TypeOf
+    | -- | Panic with a message
+      Panic
+    | -- | Repeat the last instruction (n - 1) times
+      Repeat Int
     | -- | Comment, does nothing
       Comment String
     | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
@@ -329,7 +335,16 @@ runInstruction CallS = do
             stackPushN args
             runInstruction (Call x)
         _ -> error $ "Cannot call " ++ show d
-runInstruction (Jmp x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm}
+runInstruction (Jmp x) = do
+    labels <- gets labels
+    case lookup x labels of
+        Just (n :: Int) -> modify $ \vm -> vm{pc = n}
+        Nothing ->
+            -- Look for fuzzy matches (without #)
+            case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
+                [] -> error $ "Label not found: " ++ x
+                [(y, n)] -> modify $ \vm -> vm{pc = n}
+                xs -> error $ "Multiple labels found: " ++ show xs
 runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
@@ -455,7 +470,28 @@ runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe D
 runInstruction (PackMap n) = do
     elems <- stackPopN n
     stackPush $ DMap $ Data.Map.fromList $ map (\[DString x, y] -> (x, y)) $ chunksOf 2 elems
-runInstruction x = error $ show x ++ ": not implemented"
+runInstruction TypeOf =
+    stackPop >>= \case
+        DInt _ -> stackPush $ DString "Int"
+        DFloat _ -> stackPush $ DString "Float"
+        DString _ -> stackPush $ DString "String"
+        DBool _ -> stackPush $ DString "Bool"
+        DList _ -> stackPush $ DString "List"
+        DNone -> stackPush $ DString "None"
+        DChar _ -> stackPush $ DString "Char"
+        DFuncRef _ _ -> stackPush $ DString "FuncRef"
+        DMap m -> do
+            case Data.Map.lookup "__name" m of
+                Just (DString name) -> stackPush $ DString name
+                _ -> stackPush $ DString "Map"
+        _ -> error "Not implemented"
+runInstruction (Repeat n) = do
+    vm <- get
+    let inst = program vm V.! (pc vm - 1)
+    replicateM_ (n - 1) $ runInstruction inst
+runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
+
+-- runInstruction x = error $ show x ++ ": not implemented"
 
 printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers = do
