@@ -1,6 +1,0 @@
-Build profile: -w ghc-9.2.8 -O1
-In order, the following will be built (use -v for more details):
- - indigo-0.1.0.0 (lib) (file lib/BytecodeCompiler.hs changed)
- - indigo-0.1.0.0 (exe:indigoc) (dependency rebuilt)
-Preprocessing library for indigo-0.1.0.0..
-Building library for indigo-0.1.0.0..
