@@ -1,0 +1,3 @@
+examples/* linguist-vendored
+share/**   linguist-vendored
+*.in linguist-language=ruby
