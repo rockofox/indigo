@@ -1,20 +1,29 @@
 module Verifier where
 
 import AST
-    ( Expr(..) )
-import Control.Monad.State ( modify, evalState, gets, State )
+    ( Expr (..)
+    )
+import Control.Monad.State (State, evalState, gets, modify)
 import Data.List.NonEmpty qualified as NonEmpty
+import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Void (Void)
 import Text.Megaparsec (ErrorFancy (..), ParseError (..), ParseErrorBundle (..), PosState (..))
-import Text.Megaparsec.Pos ( defaultTabWidth, initialPos )
+import Text.Megaparsec.Pos (defaultTabWidth, initialPos)
+
+data VFn = VFn
+    { name :: String
+    , fpos :: Int
+    , scope :: Maybe String
+    }
+    deriving (Eq, Ord, Show)
 
 data VerifierState = VerifierState
     { frames :: [VerifierFrame]
-    , usedFunctions :: Set.Set (String, Int)
-    , definedFunctions :: Set.Set (String, Int)
-    , pos :: (Int, Int)
+    , usedFunctions :: Set.Set VFn
+    , definedFunctions :: Set.Set VFn
+    , vpos :: (Int, Int)
     }
     deriving (Show)
 
@@ -29,15 +38,17 @@ concatMapM f xs = concat <$> mapM f xs
 
 topFrame :: State VerifierState VerifierFrame
 topFrame = do
-    frames <- gets frames
-    return $ head frames
+    frames' <- gets frames
+    return $ head frames'
 
-preludeFunctions :: [(String, Int)]
+preludeFunctions :: [VFn]
 preludeFunctions =
-    [ ("print", 0)
-    , ("println", 0)]
+    [ VFn "print" 0 Nothing
+    , VFn "println" 0 Nothing
+    ]
+
 verifyProgram :: Text -> [(Expr, Int, Int)] -> Either (ParseErrorBundle Text Void) ()
-verifyProgram input exprs = evalState (verifyProgram' input exprs) VerifierState{frames = [VerifierFrame{fname = "__outside__", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, pos = (0, 0)}
+verifyProgram input exprs = evalState (verifyProgram' input exprs) VerifierState{frames = [VerifierFrame{fname = "__outside__", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, vpos = (0, 0)}
 
 verifyProgram' :: Text -> [(Expr, Int, Int)] -> State VerifierState (Either (ParseErrorBundle Text Void) ())
 verifyProgram' input exprs = do
@@ -59,7 +70,7 @@ verifyProgram' input exprs = do
   where
     pass1 :: [(Expr, Int, Int)] -> State VerifierState [ParseError Text Void]
     pass1 ((expr, start, end) : xs) = do
-        modify (\state -> state{pos = (start, end)})
+        modify (\state -> (state :: VerifierState){vpos = (start, end)})
         pass1Expr expr >>= \case
             Nothing -> pass1 xs
             Just err -> do
@@ -73,14 +84,20 @@ handleMultipleErrors (Nothing : xs) = handleMultipleErrors xs
 handleMultipleErrors (Just err : _) = Just err
 
 pass1Expr :: Expr -> State VerifierState (Maybe [Char])
-pass1Expr (Function fdec fdef) = do
-    pass1Expr fdef
-pass1Expr (FuncDef{fname = fname, fargs = fargs, fbody = fbody}) = do
-    let lets' = [name | Var name <- fargs]
-    modify (\state -> state{frames = VerifierFrame{fname = fname, lets = lets'} : frames state, definedFunctions = Set.insert (fname, fst (pos state)) (definedFunctions state)})
+pass1Expr (Function _ fdef') = do
+    pass1Expr fdef'
+pass1Expr (FuncDef{fname = fname', fargs = fargs', fbody = _}) = do
+    pos' <- gets vpos
+    let lets' = [name | Var name <- fargs']
+    let patterns = [name | ListPattern names <- fargs', Var name <- names]
+    let lets'' = lets' ++ patterns
+    let letFns = map (\x -> VFn x (fst pos') (Just fname')) lets''
+    modify (\state -> state{frames = VerifierFrame{fname = fname', lets = lets''} : frames state, definedFunctions = Set.insert (VFn fname' (fst (vpos state)) Nothing) (definedFunctions state)})
+    mapM_ (\x -> modify (\state -> state{definedFunctions = Set.insert x (definedFunctions state)})) letFns
+    -- modify (\state -> state{definedFunctions = Set.union (usedFunctions state) (Set.fromList letFns)})
     -- verifyExpr fbody
     return Nothing
-pass1Expr (DoBlock exprs) = do
+pass1Expr (DoBlock _) = do
     -- mapM verifyExpr exprs >>= \case
     --     [] -> return Nothing
     --     errors -> return $ head errors
@@ -102,8 +119,15 @@ pass1Expr (Add x y) = do
     y' <- pass1Expr y
     return $ handleMultipleErrors [x', y']
 pass1Expr (FuncCall name _) = do
-    pos <- gets pos
-    modify (\state -> state{usedFunctions = Set.insert (name, fst pos) (usedFunctions state)})
+    pos' <- gets vpos
+    frame' <- topFrame
+    let calledIn = Verifier.fname frame'
+    modify (\state -> state{usedFunctions = Set.insert (VFn name (fst pos') (Just calledIn)) (usedFunctions state)})
+    return Nothing
+pass1Expr (Impl _ _ imethods') = do
+    let imethods'' = [x | x@FuncDef{} <- imethods']
+    let imethods''' = map AST.fname imethods''
+    modify (\state -> state{definedFunctions = Set.union (Set.fromList [VFn name (fst (vpos state)) Nothing | name <- imethods''']) (definedFunctions state)})
     return Nothing
 pass1Expr _ = return Nothing
 
@@ -111,5 +135,6 @@ verifyFunctionUsage :: State VerifierState [ParseError Text Void]
 verifyFunctionUsage = do
     usedFunctions' <- gets usedFunctions
     definedFunctions' <- gets definedFunctions
-    let undefinedFunctions = filter (\(name, _) -> not $ any (\(name',_) -> name == name') definedFunctions') (Set.toList usedFunctions')
-    return $ map (\(name, pos) -> FancyError pos (Set.singleton (ErrorFail $ "Function " ++ name ++ " not defined")) ) undefinedFunctions
+    let undefinedFunctions = filter (\(VFn name _ scope') -> not $ any (\(VFn name' _ scope'') -> name == name' && (scope' == scope'' || isNothing scope'')) definedFunctions') (Set.toList usedFunctions')
+    error $ show usedFunctions' ++ "\n\n" ++ show definedFunctions' ++ "\n\n" ++ show undefinedFunctions
+    return $ map (\(VFn name pos' _) -> FancyError pos' (Set.singleton (ErrorFail $ "Function " ++ name ++ " not defined"))) undefinedFunctions
