@@ -1,6 +1,3 @@
-# vi: ft=ruby
-# This tries to test all/most features of the language
-
 import * from examples.test2
 
 printPairs :: List{Int} -> IO
@@ -32,9 +29,6 @@ call f = do
   println (f 10)
 end
 
-
-
-
 struct Point = (x: Int, y: Int)
 
 bla x y = x + y
@@ -62,10 +56,27 @@ mySum :: List{Float} -> Float
 mySum [] = 0.0
 mySum (x:xs) = x + mySum xs
 
+
+struct Animal = ()
+
+trait Animal = do
+  makeNoise :: Self -> IO
+end
+
+impl Animal for Dog = do
+  makeNoise self = println "Woof"
+end
+
+impl Animal for Cat = do
+  makeNoise self = println "Meow"
+end
+
 main => IO = do
   # let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
   # println blalbl
   # println (mySum [2.0,4.0,8.0])
+  let x = 10
+  println "Hello World"
+  makeNoise (Dog {})
+  makeNoise (Cat {})
 end
-
-trait Foo = { show :: Any -> String }
