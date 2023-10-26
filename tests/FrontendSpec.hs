@@ -107,6 +107,18 @@ spec = do
                     println f ["test", "test2"]
                 end|]
                 `shouldReturn` "6\ntesttest2\n"
+    describe "Structs" $ do
+        xit "Can access fields" $ do
+            compileAndRun [r|
+                struct Dog = (name: String)
+                struct Cat = (name: String)
+
+                main => IO = do
+                    let bello = Dog { name : "Bello" }
+                    let mauzi = Cat { name : "Mauzi" }
+                    println bello!name
+                    println mauzi!name
+                end|] `shouldReturn` "Bello\nMauzi\n"
     describe "Traits" $ do
         it "Can use a trait" $ do
             compileAndRun

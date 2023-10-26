@@ -1,6 +1,4 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
-{-# LANGUAGE LambdaCase #-}
-
 module BytecodeCompiler where
 
 import Control.Monad (when, (>=>))

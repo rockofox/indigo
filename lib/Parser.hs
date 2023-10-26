@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), typeOf, compareTypes) where
+module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, parseAndVerify, CompilerFlags (..), typeOf, compareTypes) where
 
+import AST
 import Control.Monad.Combinators
     ( between
     , choice
@@ -17,17 +18,25 @@ import Control.Monad.State
     ( MonadState (get, put)
     , State
     , evalState
+    , modify
+    , runState
     )
 import Data.Binary qualified
 import Data.Char (isUpper)
-import Data.Text (Text, unpack)
+import Data.List.NonEmpty qualified as NonEmpty
+import Data.Set qualified as Set
+import Data.Text (Text, drop, take, takeWhile, unpack)
 import Data.Void (Void)
+import Debug.Trace (traceM, traceShowM)
 import GHC.Generics (Generic)
 import Text.Megaparsec
-    ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
-    , ParseError
-    , ParseErrorBundle
+    ( ErrorItem (Tokens)
+    , MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
+    , ParseError (..)
+    , ParseErrorBundle (..)
     , ParsecT
+    , PosState (..)
+    , getOffset
     , oneOf
     , optional
     , registerParseError
@@ -45,6 +54,8 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
+import Text.Megaparsec.Pos
+import Verifier (verifyProgram)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -57,107 +68,13 @@ data ParserState = ParserState
     { validFunctions :: [String]
     , validLets :: [String]
     , compilerFlags :: CompilerFlags
+    , verifierTree :: [(Expr, Int, Int)]
     }
     deriving
         ( Show
         )
 
 type Parser = ParsecT Void Text (State ParserState)
-
-data Expr
-    = Var String
-    | BoolLit Bool
-    | IntLit Integer
-    | StringLit String
-    | FloatLit Float
-    | If Expr Expr Expr
-    | Let String Expr
-    | FuncDef {fname :: String, fargs :: [Expr], fbody :: Expr}
-    | FuncCall String [Expr]
-    | FuncDec {fname :: String, ftypes :: [Type]}
-    | Function {fdef :: [Expr], fdec :: Expr}
-    | DoBlock [Expr]
-    | ExternDec String String [Type]
-    | Add Expr Expr
-    | Sub Expr Expr
-    | Mul Expr Expr
-    | Div Expr Expr
-    | Eq Expr Expr
-    | Neq Expr Expr
-    | Lt Expr Expr
-    | Gt Expr Expr
-    | Le Expr Expr
-    | Ge Expr Expr
-    | And Expr Expr
-    | Or Expr Expr
-    | Not Expr
-    | UnaryMinus Expr
-    | Placeholder
-    | InternalFunction {fname :: String, ifargs :: [Expr]}
-    | Discard Expr
-    | Import [String] String
-    | Ref Expr
-    | Struct {sname :: String, sfields :: [(String, Type)]}
-    | StructLit String [(String, Expr)]
-    | StructAccess Expr Expr
-    | ListLit [Expr]
-    | ListPattern [Expr]
-    | ListConcat Expr Expr
-    | ArrayAccess Expr Expr
-    | Modulo Expr Expr
-    | Power Expr Expr
-    | Target String Expr
-    | Then Expr Expr
-    | Bind Expr Expr
-    | Lambda [Expr] Expr
-    | Cast Expr Expr
-    | TypeLit Type
-    | Flexible Expr
-    | Trait {tname :: String, tmethods :: [Expr]}
-    | Impl {itrait :: String, ifor :: String, imethods :: [Expr]}
-    | IOLit
-    deriving
-        ( Show
-        , Generic
-        , Eq
-        )
-
-data Type
-    = Int
-    | Float
-    | Bool
-    | String
-    | IO
-    | Any
-    | None
-    | Unknown
-    | Fn {args :: [Type], ret :: Type}
-    | List Type
-    | StructT String
-    | Self
-    deriving (Eq, Generic)
-
-instance Show Type where
-    show Int = "Int"
-    show Float = "Float"
-    show Bool = "Bool"
-    show String = "String"
-    show IO = "IO"
-    show Any = "Any"
-    show None = "None"
-    show Unknown = "Unknown"
-    show (Fn args ret) = "Fn{" ++ show args ++ " -> " ++ show ret ++ "}"
-    show (List t) = "List{" ++ show t ++ "}"
-    show (StructT name) = name
-    show Self = "Self"
-
-newtype Program = Program [Expr] deriving (Show, Eq, Generic)
-
-instance Data.Binary.Binary Type
-
-instance Data.Binary.Binary Expr
-
-instance Data.Binary.Binary Program
 
 compareTypes :: Type -> Type -> Bool
 compareTypes (Fn x y) (Fn a b) = do
@@ -166,7 +83,7 @@ compareTypes (Fn x y) (Fn a b) = do
     argsMatch && retMatch
 compareTypes x y = x == y || x == Any || y == Any
 
-typeOf :: Expr -> Parser.Type
+typeOf :: Expr -> AST.Type
 typeOf (IntLit _) = Int
 typeOf (FloatLit _) = Float
 typeOf (BoolLit _) = Bool
@@ -302,7 +219,12 @@ extra = do
             else return x
 
 expr :: Parser Expr
-expr = makeExprParser term binOpTable
+expr = do
+    start <- getOffset
+    ex <- makeExprParser term binOpTable
+    end <- getOffset
+    modify (\state -> state{verifierTree = (ex, start, end) : verifierTree state})
+    return ex
 
 validType :: Parser Type
 validType =
@@ -544,10 +466,24 @@ parseProgram' = runParserT program ""
 
 parseProgram :: Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
 parseProgram t cf = do
-    let result = evalState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
+    let (result, _) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
     case result of
         Left err -> Left err
         Right program -> Right program
+
+parseAndVerify :: String -> Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
+parseAndVerify name t cf = do
+    let (result, state) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
+    case result of
+        Left err -> Left err
+        Right program -> do
+            case verifyProgram t (verifierTree state) of
+                Left err -> Left err
+                Right _ -> Right program
+
+-- Left eee
+
+-- Right program
 
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
@@ -631,40 +567,36 @@ impl = do
     return $ Impl name for methods
 
 term :: Parser Expr
-term =
+term = do
     choice
-        ( (\(index, parser) -> verbose ("term " ++ show index) parser)
-            <$> zip
-                [0 ..]
-                [ placeholder
-                , parens expr
-                , FloatLit <$> try float
-                , IntLit <$> try integer
-                , StringLit <$> try stringLit
-                , symbol "True" >> return (BoolLit True)
-                , symbol "False" >> return (BoolLit False)
-                , letExpr
-                , import_
-                , externDec
-                , doBlock
-                , impl
-                , trait
-                , try combinedFunc
-                , try funcDef
-                , try funcDec
-                , try lambda
-                , target
-                , struct
-                , try structLit
-                , typeLiteral
-                , array
-                , try internalFunction
-                , try discard
-                , try funcCall
-                , try arrayAccess
-                , ifExpr
-                , var
-                -- , try listPattern
-                -- , ref
-                ]
-        )
+        [ placeholder
+        , parens expr
+        , FloatLit <$> try float
+        , IntLit <$> try integer
+        , StringLit <$> try stringLit
+        , symbol "True" >> return (BoolLit True)
+        , symbol "False" >> return (BoolLit False)
+        , letExpr
+        , import_
+        , externDec
+        , doBlock
+        , impl
+        , trait
+        , try combinedFunc
+        , try funcDef
+        , try funcDec
+        , try lambda
+        , target
+        , struct
+        , try structLit
+        , typeLiteral
+        , array
+        , try internalFunction
+        , try discard
+        , try funcCall
+        , try arrayAccess
+        , ifExpr
+        , var
+        -- , try listPattern
+        -- , ref
+        ]

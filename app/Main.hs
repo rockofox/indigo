@@ -3,7 +3,7 @@ module Main where
 import BytecodeCompiler qualified
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO)
-import Control.Monad.State (evalStateT)
+import Control.Monad.State (StateT (runStateT), evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
@@ -17,6 +17,7 @@ import Parser
     ( CompilerFlags (CompilerFlags, verboseMode)
     , Expr (DoBlock, FuncDef)
     , Program (..)
+    , parseAndVerify
     , parseProgram
     )
 import System.Exit (exitSuccess)
@@ -98,9 +99,9 @@ potentiallyTimedOperation :: MonadIO m => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = do
     if showTime then timeItNamed msg action else action
 
-parse :: String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) Program)
-parse input compilerFlags = do
-    return $ parseProgram (T.pack input) CompilerFlags{verboseMode = False}
+parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) Program)
+parse name input compilerFlags = do
+    return $ parseAndVerify name (T.pack input) CompilerFlags{verboseMode = False}
 
 main :: IO ()
 main = do
@@ -116,7 +117,7 @@ main = do
         if not runBytecode
             then do
                 i <- inputFile input
-                prog <- potentiallyTimedOperation "Parsing" showTime (parse i CompilerFlags{verboseMode = verbose})
+                prog <- potentiallyTimedOperation "Parsing" showTime (parse (show input) i CompilerFlags{verboseMode = verbose})
                 let expr = case prog of
                         Left err -> error $ "Parse error: " ++ errorBundlePretty err
                         Right expr -> expr

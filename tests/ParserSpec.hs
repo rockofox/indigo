@@ -45,6 +45,11 @@ spec = do
             parseProgram "main => IO = print \"Hello, world!\"" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
                     (Program [Function{fdef = [FuncDef{fname = "main", fargs = [], fbody = FuncCall "print" [StringLit "Hello, world!"]}], fdec = FuncDec{fname = "main", ftypes = [IO]}}])
+    describe "Struct" $ do
+        xit "Member access" $ do
+            parseProgram "bello!name" CompilerFlags{verboseMode = False}
+                `shouldBe` Right
+                    (Program [StructAccess (StructLit "bello" []) (Var "name")])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" CompilerFlags{verboseMode = False}
