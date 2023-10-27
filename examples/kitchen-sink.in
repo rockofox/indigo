@@ -54,7 +54,7 @@ end
 
 mySum :: List{Float} -> Float
 mySum [] = 0.0
-mySum (x:xs) = x + mySum xs
+mySum (x:xs) = z + mySum xs
 
 
 struct Animal = ()

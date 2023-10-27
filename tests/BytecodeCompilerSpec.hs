@@ -86,9 +86,9 @@ spec = do
                     Any
                         `notElem` [t1, t2]
                         && t1
-                        /= t2
+                            /= t2
                         ==> typesMatch f{types = [t1, t2]} [t2, t1]
-                        `shouldBe` False
+                            `shouldBe` False
         it "Should be true for Any" $
             property $
                 \t f ->

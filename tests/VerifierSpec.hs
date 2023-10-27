@@ -17,6 +17,6 @@ spec :: Spec
 spec = do
     describe "verifyProgram" $ do
         it "Should fail on undefined variables" $ do
-            verifyProgram [r|f x y = x + z|] [(FuncDef "f" [Var "x", Var "y"] (Add (Var "x") (Var "z")), 0, 0), (Add (Var "x") (Var "z"), 0, 0)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Variable z not defined in this scope")
+            verifyProgram "test.in" [r|f x y = x + z|] [(FuncDef "f" [Var "x", Var "y"] (Add (Var "x") (Var "z")), 0, 0), (Add (Var "x") (Var "z"), 0, 0)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Variable z not defined in this scope")
         it "Should fail on undefined functions" $ do
-            verifyProgram [r|main => IO = x 2|] [(FuncDef "main" [] (FuncCall "x" [IntLit 2]), 0, 0), (FuncCall "x" [IntLit 2], 0, 0)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Function x not defined")
+            verifyProgram "test.in" [r|main => IO = x 2|] [(FuncDef "main" [] (FuncCall "x" [IntLit 2]), 0, 0), (FuncCall "x" [IntLit 2], 0, 0)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Function x not defined")

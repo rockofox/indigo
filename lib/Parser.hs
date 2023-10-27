@@ -1,11 +1,12 @@
-{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 {-# HLINT ignore "Use newtype instead of data" #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, parseAndVerify, CompilerFlags (..), typeOf, compareTypes) where
 
 import AST
+import Control.Monad qualified
 import Control.Monad.Combinators
     ( between
     , choice
@@ -27,8 +28,7 @@ import Data.Char (isUpper)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
 import Text.Megaparsec
-    (
-     MonadParsec (eof, lookAhead, takeWhile1P, try, withRecovery)
+    ( MonadParsec (eof, lookAhead, takeWhile1P, try, withRecovery)
     , ParseError (..)
     , ParseErrorBundle (..)
     , ParsecT
@@ -51,7 +51,6 @@ import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
 import Verifier (verifyProgram)
-import qualified Control.Monad
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -103,12 +102,12 @@ typeOf (FuncCall _ _) = error "Cannot infer type of function call"
 typeOf Placeholder = None
 typeOf (Var _) = Any
 typeOf (Let _ _) = error "Cannot infer type of let"
-typeOf (If {}) = error "Cannot infer type of if"
-typeOf (FuncDef {}) = error "Cannot infer type of function definition"
+typeOf (If{}) = error "Cannot infer type of if"
+typeOf (FuncDef{}) = error "Cannot infer type of function definition"
 typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
 typeOf (Function _ _) = error "Cannot infer type of modern function"
 typeOf (DoBlock _) = error "Cannot infer type of do block"
-typeOf (ExternDec {}) = error "Cannot infer type of extern declaration"
+typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
 typeOf (InternalFunction _ _) = error "Cannot infer type of internal function"
 typeOf (Discard _) = error "Cannot infer type of discard"
 typeOf (Import _ _) = error "Cannot infer type of import"
@@ -513,7 +512,7 @@ lambda = do
     symbol "->"
     Lambda args <$> expr
 
-verbose :: Show a => String -> Parser a -> Parser a
+verbose :: (Show a) => String -> Parser a -> Parser a
 verbose str parser = do
     state <- get
     let shouldBeVerbose = verboseMode $ compilerFlags state
@@ -555,35 +554,36 @@ impl = do
     return $ Impl name for methods
 
 term :: Parser Expr
-term = choice
-    [ placeholder
-    , parens expr
-    , FloatLit <$> try float
-    , IntLit <$> try integer
-    , StringLit <$> try stringLit
-    , symbol "True" >> return (BoolLit True)
-    , symbol "False" >> return (BoolLit False)
-    , letExpr
-    , import_
-    , externDec
-    , doBlock
-    , impl
-    , Parser.trait
-    , try combinedFunc
-    , try funcDef
-    , try funcDec
-    , try lambda
-    , target
-    , struct
-    , try structLit
-    , typeLiteral
-    , array
-    , try internalFunction
-    , try discard
-    , try funcCall
-    , try arrayAccess
-    , ifExpr
-    , var
-    -- , try listPattern
-    -- , ref
-    ]
+term =
+    choice
+        [ placeholder
+        , parens expr
+        , FloatLit <$> try float
+        , IntLit <$> try integer
+        , StringLit <$> try stringLit
+        , symbol "True" >> return (BoolLit True)
+        , symbol "False" >> return (BoolLit False)
+        , letExpr
+        , import_
+        , externDec
+        , doBlock
+        , impl
+        , Parser.trait
+        , try combinedFunc
+        , try funcDef
+        , try funcDec
+        , try lambda
+        , target
+        , struct
+        , try structLit
+        , typeLiteral
+        , array
+        , try internalFunction
+        , try discard
+        , try funcCall
+        , try arrayAccess
+        , ifExpr
+        , var
+        -- , try listPattern
+        -- , ref
+        ]

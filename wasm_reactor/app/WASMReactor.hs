@@ -3,6 +3,8 @@
 module WASMReactor (runProgramRaw, runProgramRawBuffered, mallocPtr, mallocBytes, free_) where
 
 import BytecodeCompiler
+import Control.Monad
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy (pack, toStrict)
@@ -12,6 +14,7 @@ import Data.ByteString.Unsafe qualified as BU
 import Data.Char (ord)
 import Data.IORef (readIORef)
 import Data.Text qualified
+import Data.Vector qualified as V
 import Foreign
     ( Ptr
     , Storable (poke)
@@ -24,6 +27,8 @@ import Foreign.C (CString, newCString, peekCStringLen)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar)
 import Parser (CompilerFlags (CompilerFlags), parseProgram)
+import Parser qualified
+import Text.Megaparsec (errorBundlePretty)
 import VM
     ( IOBuffer (output)
     , IOMode (VMBuffer)
@@ -34,12 +39,6 @@ import VM
     , runVM
     , runVMVM
     )
-import Parser qualified
-import Control.Monad
-import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
-import Text.Megaparsec (errorBundlePretty)
-import Data.Vector qualified as V
-
 
 -- TODO: Put this stuff into a seperate file
 runProgramRaw :: Ptr CChar -> Int -> IO ()

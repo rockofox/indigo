@@ -6,7 +6,7 @@ import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State (StateT (runStateT), evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
-import Data.Maybe (fromMaybe, fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void qualified
@@ -95,7 +95,7 @@ inputFileBinary input = case input of
     Just file -> B.readFile file
     Nothing -> error "No input file specified"
 
-potentiallyTimedOperation :: MonadIO m => String -> Bool -> m a -> m a
+potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = do
     if showTime then timeItNamed msg action else action
 

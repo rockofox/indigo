@@ -22,13 +22,14 @@ spec = do
             property $
                 \t -> compareTypes t t `shouldBe` True
         it "Should be false for non-exact matches (except for Any or Fn)" $
-            property $ \t1 t2 ->
-                notElem Any [t1, t2]
-                    && not (isFn t1 || isFn t2)
-                    && t1
-                    /= t2
-                    ==> compareTypes t1 t2
-                    `shouldBe` False
+            property $
+                \t1 t2 ->
+                    notElem Any [t1, t2]
+                        && not (isFn t1 || isFn t2)
+                        && t1
+                            /= t2
+                        ==> compareTypes t1 t2
+                            `shouldBe` False
         it "Any type should be a subtype of Any" $
             property $
                 \t -> compareTypes t Any `shouldBe` True
