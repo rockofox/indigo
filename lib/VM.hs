@@ -2,9 +2,8 @@
 
 module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
-import Control.Exception (SomeException, catch, throw)
 import Control.Monad
-import Control.Monad.RWS
+import Control.Monad.RWS hiding (local)
 import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
@@ -15,7 +14,7 @@ import Data.Map qualified as Data
 import Data.Maybe (fromMaybe)
 import Data.Text qualified
 import Data.Vector qualified as V
-import Debug.Trace (trace, traceM, traceShow, traceShowM)
+import Debug.Trace
 import GHC.Generics (Generic)
 
 data Instruction
@@ -205,10 +204,6 @@ tailOrNothing :: [a] -> Maybe [a]
 tailOrNothing [] = Nothing
 tailOrNothing (_ : xs) = Just xs
 
-headOrEmpty :: [a] -> [a]
-headOrEmpty [] = []
-headOrEmpty (x : _) = [x]
-
 headOrError :: String -> [a] -> a
 headOrError err [] = error err
 headOrError _ (x : _) = x
@@ -266,14 +261,14 @@ showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm
 
 run' :: Program -> StateT VM IO ()
 run' program = do
-    vm <- get
-    let inst = program V.! pc vm
-    put $ vm{program = program, labels = locateLabels program}
-    when (not (null (breakpoints vm)) && pc vm `elem` breakpoints vm || -1 `elem` breakpoints vm) $ showDebugInfo >>= traceM
+    pc <- gets pc
+    breakpoints <- gets breakpoints
+    let inst = program V.! pc
+    modify $ \vm -> vm{program = program, labels = locateLabels program}
+    when (not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints) $ showDebugInfo >>= traceM
     runInstruction inst
-    vm <- get
-    put $ vm{pc = pc vm + 1}
-    when (running vm) $ run' program
+    modify $ \vm -> vm{pc = vm.pc + 1}
+    gets running >>= flip when (run' program)
 
 instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
@@ -288,6 +283,12 @@ instance Num Data where
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
     (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
     fromInteger = DInt . fromInteger
+    abs (DInt x) = DInt $ abs x
+    abs (DFloat x) = DFloat $ abs x
+    abs x = error $ "Cannot take absolute value of " ++ show x
+    signum (DInt x) = DInt $ signum x
+    signum (DFloat x) = DFloat $ signum x
+    signum x = error $ "Cannot take signum of " ++ show x
 
 instance Fractional Data where
     (/) (DInt x) (DInt y) = DInt $ x `div` y
@@ -299,6 +300,19 @@ instance Floating Data where
     (**) (DInt x) (DInt y) = DInt $ x ^ y
     (**) (DFloat x) (DFloat y) = DFloat $ x ** y
     (**) x y = error $ "Cannot raise " ++ show x ++ " to the power of " ++ show y
+    pi = DFloat pi
+    exp = error "exp not implemented"
+    log = error "log not implemented"
+    sin = error "sin not implemented"
+    cos = error "cos not implemented"
+    asin = error "asin not implemented"
+    acos = error "acos not implemented"
+    atan = error "atan not implemented"
+    sinh = error "sinh not implemented"
+    cosh = error "cosh not implemented"
+    asinh = error "asinh not implemented"
+    acosh = error "acosh not implemented"
+    atanh = error "atanh not implemented"
 
 runInstruction :: Instruction -> StateT VM IO ()
 -- Basic stack operations
@@ -314,8 +328,8 @@ runInstruction Div = stackPopN 2 >>= \[y, x] -> stackPush $ x / y
 runInstruction Pow = stackPopN 2 >>= \[y, x] -> stackPush $ x ** y
 runInstruction Abs =
     stackPop >>= \x -> stackPush $ case x of
-        DInt x -> DInt $ abs x
-        DFloat x -> DFloat $ abs x
+        DInt num -> DInt $ abs num
+        DFloat num -> DFloat $ abs num
         _ -> error $ "Cannot take absolute value of " ++ show x
 -- runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
 runInstruction Mod = error "Mod not implemented"
@@ -342,7 +356,7 @@ runInstruction (Jmp x) = do
             -- Look for fuzzy matches (without #)
             case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
                 [] -> error $ "Label not found: " ++ x
-                [(y, n)] -> modify $ \vm -> vm{pc = n}
+                [(_, n)] -> modify $ \vm -> vm{pc = n}
                 xs -> error $ "Multiple labels found: " ++ show xs
 runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)
@@ -372,8 +386,7 @@ runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
 runInstruction Store = stackPop >>= \d -> get >>= \vm -> put $ vm{memory = d : memory vm, stack = DInt (length (memory vm)) : stack vm}
 -- Locals
 runInstruction (LStore name) = do
-    vm <- get
-    let localsc = locals $ safeHead $ callStack vm
+    localsc <- fmap (locals . safeHead) (gets callStack)
     let local = lookup name localsc
     case local of
         Just _ -> do
@@ -394,26 +407,17 @@ runInstruction (Concat 0) = stackPush $ DList []
 runInstruction (Concat n) =
     -- TODO: make this more efficient, it's yucky
     stackPopN n >>= \x -> do
-        -- let lists = [x | DList x <- x]
-        -- let strings = [x | DString x <- x]
-        -- case x of
-        -- (DList _ : _) -> stackPush $ DList $ concat (reverse lists)
-        -- (DString _ : _) -> stackPush $ DString $ concat (reverse strings)
-        -- x -> stackPush $ DList x
-        stackPush $ DList $ concatMap (\case DList x -> x; DString x -> (map DChar x); x -> [x]) x
-        stackPeek >>= \case DList x -> when (all (\case DChar _ -> True; _ -> False) x) $ stackPop >>= \d -> stackPush $ DString $ map (\(DChar x) -> x) x; _ -> return ()
--- stackPush $ DList x
--- when (any (\case DString _ -> True; _ -> False) x) $ stackPop >>= \d -> stackPush $ DString $ show d
+        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> (map DChar string); el -> [el]) x
+        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
 runInstruction Index = stackPopN 2 >>= \(DInt i : DList l : _) -> stackPush $ l !! i
--- runInstruction Slice = stackPopN 3 >>= \(DInt i : DInt j : DList l : _) -> stackPush $ DList $ take (j - i) $ drop i l
 runInstruction Slice = do
     start <- stackPop
     end <- stackPop
     DList list <- stackPop
     stackPush $ case (end, start) of
-        (DInt start, DInt end) -> DList $ slice start (Just end) list
-        (DInt start, DNone) -> DList $ slice start Nothing list
-        (DNone, DInt end) -> DList $ slice 0 (Just end) list
+        (DInt start', DInt end') -> DList $ slice start' (Just end') list
+        (DInt start', DNone) -> DList $ slice start' Nothing list
+        (DNone, DInt end') -> DList $ slice 0 (Just end') list
         (DNone, DNone) -> DList $ slice 0 Nothing list
         _ -> error "Invalid slice"
   where
@@ -443,7 +447,7 @@ runInstruction Cast = do
             DList _ -> DList [DInt x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum x
-            x -> error $ "Cast for type not implemented: " ++ show x
+            type' -> error $ "Cast for type not implemented: " ++ show type'
         (DFloat x) -> stackPush $ case to of
             DInt _ -> DInt $ round x
             DFloat _ -> DFloat x
@@ -452,7 +456,7 @@ runInstruction Cast = do
             DList _ -> DList [DFloat x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum $ round x
-            x -> error $ "Cast for type not implemented: " ++ show x
+            type' -> error $ "Cast for type not implemented: " ++ show type'
         (DString x) -> stackPush $ case to of
             DInt _ -> DInt $ read x
             DFloat _ -> DFloat $ read x
@@ -461,7 +465,7 @@ runInstruction Cast = do
             DList _ -> DList [DString x]
             DNone -> DNone
             DChar _ -> DChar $ head x
-            x -> error $ "Cast for type not implemented: " ++ show x
+            type' -> error $ "Cast for type not implemented: " ++ show type'
         x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
@@ -483,7 +487,6 @@ runInstruction TypeOf =
             case Data.Map.lookup "__name" m of
                 Just (DString name) -> stackPush $ DString name
                 _ -> stackPush $ DString "Map"
-        _ -> error "Not implemented"
 runInstruction (Repeat n) = do
     vm <- get
     let inst = program vm V.! (pc vm - 1)

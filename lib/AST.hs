@@ -1,6 +1,7 @@
 module AST where
+
+import Data.Binary qualified
 import GHC.Generics (Generic)
-import qualified Data.Binary
 
 data Expr
     = Var String
@@ -10,10 +11,10 @@ data Expr
     | FloatLit Float
     | If Expr Expr Expr
     | Let String Expr
-    | FuncDef {fname :: String, fargs :: [Expr], fbody :: Expr}
+    | FuncDef {name :: String, args :: [Expr], body :: Expr}
     | FuncCall String [Expr]
-    | FuncDec {fname :: String, ftypes :: [Type]}
-    | Function {fdef :: [Expr], fdec :: Expr}
+    | FuncDec {name :: String, types :: [Type]}
+    | Function {def :: [Expr], dec :: Expr}
     | DoBlock [Expr]
     | ExternDec String String [Type]
     | Add Expr Expr
@@ -31,11 +32,11 @@ data Expr
     | Not Expr
     | UnaryMinus Expr
     | Placeholder
-    | InternalFunction {fname :: String, ifargs :: [Expr]}
+    | InternalFunction {name :: String, args :: [Expr]}
     | Discard Expr
     | Import [String] String
     | Ref Expr
-    | Struct {sname :: String, sfields :: [(String, Type)]}
+    | Struct {name :: String, fields :: [(String, Type)]}
     | StructLit String [(String, Expr)]
     | StructAccess Expr Expr
     | ListLit [Expr]
@@ -51,8 +52,8 @@ data Expr
     | Cast Expr Expr
     | TypeLit Type
     | Flexible Expr
-    | Trait {tname :: String, tmethods :: [Expr]}
-    | Impl {itrait :: String, ifor :: String, imethods :: [Expr]}
+    | Trait {name :: String, methods :: [Expr]}
+    | Impl {trait :: String, for :: String, methods :: [Expr]}
     | IOLit
     deriving
         ( Show
@@ -75,7 +76,6 @@ data Type
     | Self
     deriving (Eq, Generic)
 
-
 instance Show Type where
     show Int = "Int"
     show Float = "Float"
@@ -85,13 +85,12 @@ instance Show Type where
     show Any = "Any"
     show None = "None"
     show Unknown = "Unknown"
-    show (Fn args ret) = "Fn{" ++ show args ++ " -> " ++ show ret ++ "}"
+    show (Fn fnArgs fnRet) = "Fn{" ++ show fnArgs ++ " -> " ++ show fnRet ++ "}"
     show (List t) = "List{" ++ show t ++ "}"
-    show (StructT name) = name
+    show (StructT structName) = structName
     show Self = "Self"
 
 newtype Program = Program [Expr] deriving (Show, Eq, Generic)
-
 
 instance Data.Binary.Binary Type
 

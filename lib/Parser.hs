@@ -1,4 +1,7 @@
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, parseAndVerify, CompilerFlags (..), typeOf, compareTypes) where
 
@@ -17,25 +20,18 @@ import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeE
 import Control.Monad.State
     ( MonadState (get, put)
     , State
-    , evalState
     , modify
     , runState
     )
-import Data.Binary qualified
 import Data.Char (isUpper)
-import Data.List.NonEmpty qualified as NonEmpty
-import Data.Set qualified as Set
-import Data.Text (Text, drop, take, takeWhile, unpack)
+import Data.Text (Text, unpack)
 import Data.Void (Void)
-import Debug.Trace (traceM, traceShowM)
-import GHC.Generics (Generic)
 import Text.Megaparsec
-    ( ErrorItem (Tokens)
-    , MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
+    (
+     MonadParsec (eof, lookAhead, takeWhile1P, try, withRecovery)
     , ParseError (..)
     , ParseErrorBundle (..)
     , ParsecT
-    , PosState (..)
     , getOffset
     , oneOf
     , optional
@@ -54,8 +50,8 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
-import Text.Megaparsec.Pos
 import Verifier (verifyProgram)
+import qualified Control.Monad
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -88,44 +84,43 @@ typeOf (IntLit _) = Int
 typeOf (FloatLit _) = Float
 typeOf (BoolLit _) = Bool
 typeOf (StringLit _) = String
-typeOf (Add x y) = typeOf x
-typeOf (Sub x y) = typeOf x
-typeOf (Mul x y) = typeOf x
-typeOf (Div x y) = typeOf x
-typeOf (Power x y) = typeOf x
+typeOf (Add x _) = typeOf x
+typeOf (Sub x _) = typeOf x
+typeOf (Mul x _) = typeOf x
+typeOf (Div x _) = typeOf x
+typeOf (Power x _) = typeOf x
 typeOf (UnaryMinus x) = typeOf x
-typeOf (Eq x y) = Bool
-typeOf (Neq x y) = Bool
-typeOf (Lt x y) = Bool
-typeOf (Gt x y) = Bool
-typeOf (Le x y) = Bool
-typeOf (Ge x y) = Bool
-typeOf (And x y) = Bool
-typeOf (Or x y) = Bool
-typeOf (Not x) = Bool
+typeOf (Eq _ _) = Bool
+typeOf (Neq _ _) = Bool
+typeOf (Lt _ _) = Bool
+typeOf (Gt _ _) = Bool
+typeOf (Le _ _) = Bool
+typeOf (Ge _ _) = Bool
+typeOf (And _ _) = Bool
+typeOf (Or _ _) = Bool
+typeOf (Not _) = Bool
 typeOf (FuncCall _ _) = error "Cannot infer type of function call"
 typeOf Placeholder = None
-typeOf (Var x) = Any
-typeOf (Let x y) = error "Cannot infer type of let"
-typeOf (If x y z) = error "Cannot infer type of if"
-typeOf (FuncDef x y z) = error "Cannot infer type of function definition"
-typeOf (FuncDec x y) = error "Cannot infer type of function declaration"
-typeOf (Function x y) = error "Cannot infer type of modern function"
-typeOf (DoBlock x) = error "Cannot infer type of do block"
-typeOf (ExternDec x y z) = error "Cannot infer type of extern declaration"
-typeOf (InternalFunction x y) = error "Cannot infer type of internal function"
-typeOf (Discard x) = error "Cannot infer type of discard"
-typeOf (Import x y) = error "Cannot infer type of import"
-typeOf (Ref x) = error "Cannot infer type of ref"
-typeOf (Struct x y) = error "Cannot infer type of struct"
-typeOf (StructLit x y) = StructT x
+typeOf (Var _) = Any
+typeOf (Let _ _) = error "Cannot infer type of let"
+typeOf (If {}) = error "Cannot infer type of if"
+typeOf (FuncDef {}) = error "Cannot infer type of function definition"
+typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
+typeOf (Function _ _) = error "Cannot infer type of modern function"
+typeOf (DoBlock _) = error "Cannot infer type of do block"
+typeOf (ExternDec {}) = error "Cannot infer type of extern declaration"
+typeOf (InternalFunction _ _) = error "Cannot infer type of internal function"
+typeOf (Discard _) = error "Cannot infer type of discard"
+typeOf (Import _ _) = error "Cannot infer type of import"
+typeOf (Ref _) = error "Cannot infer type of ref"
+typeOf (Struct _ _) = error "Cannot infer type of struct"
+typeOf (StructLit x _) = StructT x
 typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
-typeOf (ArrayAccess x y) = error "Cannot infer type of array access"
-typeOf (Modulo x y) = error "Cannot infer type of modulo"
-typeOf (Target x y) = error "Cannot infer type of target"
-typeOf (StructLit name _) = StructT name
-typeOf (IOLit) = IO
-typeOf x = Unknown
+typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
+typeOf (Modulo _ _) = error "Cannot infer type of modulo"
+typeOf (Target _ _) = error "Cannot infer type of target"
+typeOf IOLit = IO
+typeOf _ = Unknown
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
@@ -167,7 +162,7 @@ lineComment = L.skipLineComment "#"
 blockComment = L.skipBlockComment "/*" "*/"
 
 sc :: Parser ()
-sc = L.space (takeWhile1P Nothing f >> return ()) lineComment blockComment
+sc = L.space (Control.Monad.void (takeWhile1P Nothing f)) lineComment blockComment
   where
     f x = x == ' ' || x == '\t'
 
@@ -255,8 +250,7 @@ validType =
                 return Fn{args = args, ret = ret}
         <|> do
             symbol "List"
-            curlyBrackets $ do
-                List <$> validType
+            curlyBrackets $ List <$> validType
         <|> do
             symbol "Self"
             return Self
@@ -324,9 +318,7 @@ gravis = do
 
 funcCall :: Parser Expr
 funcCall = do
-    state <- get
     name <- (extra <|> gravis) <?> "function name"
-    -- unless (name `elem` validFunctions state) $ fail $ "function " ++ name ++ " is not defined"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     return $ FuncCall name args
 
@@ -396,7 +388,7 @@ combinedFunc = do
     -- put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
 
     body <- recover expr <?> "function body"
-    return $ Function [(FuncDef name args body)] (FuncDec name (argTypes ++ [returnType]))
+    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [returnType]))
 
 discard :: Parser Expr
 discard = do
@@ -469,17 +461,17 @@ parseProgram t cf = do
     let (result, _) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
     case result of
         Left err -> Left err
-        Right program -> Right program
+        Right program' -> Right program'
 
 parseAndVerify :: String -> Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
 parseAndVerify name t cf = do
     let (result, state) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
     case result of
         Left err -> Left err
-        Right program -> do
-            case verifyProgram t (verifierTree state) of
+        Right program' -> do
+            case verifyProgram name t (verifierTree state) of
                 Left err -> Left err
-                Right _ -> Right program
+                Right _ -> Right program'
 
 -- Left eee
 
@@ -488,8 +480,8 @@ parseAndVerify name t cf = do
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
     Left err -> error $ show err
-    Right program -> case program of
-        Program [expr] -> expr
+    Right program' -> case program' of
+        Program [exprs] -> exprs
         _ -> error "Program should only have one expression"
 
 lines' :: Parser [Expr]
@@ -500,16 +492,13 @@ program = Program <$> between scn eof lines'
 
 var :: Parser Expr
 var = do
-    state <- get
-    name <- (extra <|> gravis)
-    -- unless (name `elem` validLets state) $ fail $ "variable " ++ name ++ " is not defined. State: " ++ show state
-    return $ Var name
+    Var <$> (extra <|> gravis)
 
 target :: Parser Expr
 target = do
     symbol "__target"
-    target <- (symbol "wasm" <|> symbol "c") <?> "target"
-    Target (unpack target) <$> expr
+    target' <- (symbol "wasm" <|> symbol "c") <?> "target"
+    Target (unpack target') <$> expr
 
 listPattern :: Parser Expr
 listPattern = do
@@ -539,8 +528,7 @@ recover = withRecovery recover'
         return Placeholder
 
 typeLiteral :: Parser Expr
-typeLiteral = do
-    TypeLit <$> validType
+typeLiteral = TypeLit <$> validType
 
 trait :: Parser Expr
 trait = do
@@ -567,36 +555,35 @@ impl = do
     return $ Impl name for methods
 
 term :: Parser Expr
-term = do
-    choice
-        [ placeholder
-        , parens expr
-        , FloatLit <$> try float
-        , IntLit <$> try integer
-        , StringLit <$> try stringLit
-        , symbol "True" >> return (BoolLit True)
-        , symbol "False" >> return (BoolLit False)
-        , letExpr
-        , import_
-        , externDec
-        , doBlock
-        , impl
-        , trait
-        , try combinedFunc
-        , try funcDef
-        , try funcDec
-        , try lambda
-        , target
-        , struct
-        , try structLit
-        , typeLiteral
-        , array
-        , try internalFunction
-        , try discard
-        , try funcCall
-        , try arrayAccess
-        , ifExpr
-        , var
-        -- , try listPattern
-        -- , ref
-        ]
+term = choice
+    [ placeholder
+    , parens expr
+    , FloatLit <$> try float
+    , IntLit <$> try integer
+    , StringLit <$> try stringLit
+    , symbol "True" >> return (BoolLit True)
+    , symbol "False" >> return (BoolLit False)
+    , letExpr
+    , import_
+    , externDec
+    , doBlock
+    , impl
+    , Parser.trait
+    , try combinedFunc
+    , try funcDef
+    , try funcDec
+    , try lambda
+    , target
+    , struct
+    , try structLit
+    , typeLiteral
+    , array
+    , try internalFunction
+    , try discard
+    , try funcCall
+    , try arrayAccess
+    , ifExpr
+    , var
+    -- , try listPattern
+    -- , ref
+    ]

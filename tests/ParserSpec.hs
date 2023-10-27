@@ -1,5 +1,6 @@
 module ParserSpec (spec) where
 
+import AST
 import GHC.Generics
 import Parser
 import Test.Hspec
@@ -11,7 +12,7 @@ instance Arbitrary Type where
     shrink = genericShrink
 
 isFn :: Type -> Bool
-isFn (Parser.Fn _ _) = True
+isFn (AST.Fn _ _) = True
 isFn _ = False
 
 spec :: Spec
@@ -33,7 +34,7 @@ spec = do
                 \t -> compareTypes t Any `shouldBe` True
         it "Fn any any should be a subtype of Fn Any Any" $
             property $
-                \t -> compareTypes (Parser.Fn [t] Any) (Parser.Fn [Any] Any) `shouldBe` True
+                \t -> compareTypes (AST.Fn [t] Any) (AST.Fn [Any] Any) `shouldBe` True
         it "List types should be equal if their element types are equal" $
             property $
                 \t -> compareTypes (List t) (List t) `shouldBe` True
@@ -44,7 +45,7 @@ spec = do
         it "Should parse a simple program" $
             parseProgram "main => IO = print \"Hello, world!\"" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Function{fdef = [FuncDef{fname = "main", fargs = [], fbody = FuncCall "print" [StringLit "Hello, world!"]}], fdec = FuncDec{fname = "main", ftypes = [IO]}}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"]}], dec = FuncDec{name = "main", types = [IO]}}])
     describe "Struct" $ do
         xit "Member access" $ do
             parseProgram "bello!name" CompilerFlags{verboseMode = False}
@@ -54,12 +55,12 @@ spec = do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Trait{tname = "Show", tmethods = [FuncDec{fname = "show", ftypes = [Self, String]}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}]}])
         it "Should parse a trait declaration with multiple methods" $
             parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Trait{tname = "Show", tmethods = [FuncDec{fname = "show", ftypes = [Self, String]}, FuncDec{fname = "show2", ftypes = [Self, String]}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}, FuncDec{name = "show2", types = [Self, String]}]}])
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Impl{itrait = "Show", ifor = "Point", imethods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
+                    (Program [Impl{trait = "Show", for = "Point", methods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])

@@ -6,7 +6,7 @@ import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.State (StateT (runStateT), evalStateT)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, fromJust)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void qualified
@@ -117,7 +117,7 @@ main = do
         if not runBytecode
             then do
                 i <- inputFile input
-                prog <- potentiallyTimedOperation "Parsing" showTime (parse (show input) i CompilerFlags{verboseMode = verbose})
+                prog <- potentiallyTimedOperation "Parsing" showTime (parse (fromJust input) i CompilerFlags{verboseMode = verbose})
                 let expr = case prog of
                         Left err -> error $ "Parse error: " ++ errorBundlePretty err
                         Right expr -> expr

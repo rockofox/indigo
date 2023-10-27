@@ -48,7 +48,10 @@ library
                         DuplicateRecordFields,
                         DeriveGeneric,
                         BlockArguments,
-                        LambdaCase
+                        LambdaCase,
+                        OverloadedRecordDot,
+                        RecordWildCards,
+                        NamedFieldPuns
     
 executable indigoc
     main-is:          Main.hs
@@ -81,7 +84,7 @@ test-suite spec
         VerifierSpec
     build-tool-depends: hspec-discover:hspec-discover == 2.*
     default-language: Haskell2010
-    default-extensions: OverloadedStrings, ImportQualifiedPost, QuasiQuotes
+    default-extensions: OverloadedStrings, ImportQualifiedPost, QuasiQuotes, DisambiguateRecordFields, DuplicateRecordFields, OverloadedRecordDot
 
     -- https://github.com/typeable/generic-arbitrary/issues/17
     ghc-options: -fconstraint-solver-iterations=100

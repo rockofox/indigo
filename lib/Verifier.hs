@@ -28,7 +28,7 @@ data VerifierState = VerifierState
     deriving (Show)
 
 data VerifierFrame = VerifierFrame
-    { fname :: String
+    { name :: String
     , lets :: [String]
     }
     deriving (Show)
@@ -47,16 +47,16 @@ preludeFunctions =
     , VFn "println" 0 Nothing
     ]
 
-verifyProgram :: Text -> [(Expr, Int, Int)] -> Either (ParseErrorBundle Text Void) ()
-verifyProgram input exprs = evalState (verifyProgram' input exprs) VerifierState{frames = [VerifierFrame{fname = "__outside__", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, vpos = (0, 0)}
+verifyProgram :: String -> Text -> [(Expr, Int, Int)] -> Either (ParseErrorBundle Text Void) ()
+verifyProgram name input exprs = evalState (verifyProgram' name input exprs) VerifierState{frames = [VerifierFrame{name = "__outside__", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, vpos = (0, 0)}
 
-verifyProgram' :: Text -> [(Expr, Int, Int)] -> State VerifierState (Either (ParseErrorBundle Text Void) ())
-verifyProgram' input exprs = do
+verifyProgram' :: String -> Text -> [(Expr, Int, Int)] -> State VerifierState (Either (ParseErrorBundle Text Void) ())
+verifyProgram' name input exprs = do
     let initialState =
             PosState
                 { pstateInput = input
                 , pstateOffset = 0
-                , pstateSourcePos = initialPos ""
+                , pstateSourcePos = initialPos name
                 , pstateTabWidth = defaultTabWidth
                 , pstateLinePrefix = ""
                 }
@@ -86,48 +86,48 @@ handleMultipleErrors (Just err : _) = Just err
 pass1Expr :: Expr -> State VerifierState (Maybe [Char])
 pass1Expr (Function _ fdef') = do
     pass1Expr fdef'
-pass1Expr (FuncDef{fname = fname', fargs = fargs', fbody = _}) = do
+pass1Expr (FuncDef{name = name', args = args', body = _}) = do
     pos' <- gets vpos
-    let lets' = [name | Var name <- fargs']
-    let patterns = [name | ListPattern names <- fargs', Var name <- names]
+    let lets' = [varName | Var varName <- args']
+    let patterns = [varName | ListPattern names <- args', Var varName <- names]
     let lets'' = lets' ++ patterns
-    let letFns = map (\x -> VFn x (fst pos') (Just fname')) lets''
-    modify (\state -> state{frames = VerifierFrame{fname = fname', lets = lets''} : frames state, definedFunctions = Set.insert (VFn fname' (fst (vpos state)) Nothing) (definedFunctions state)})
+    let letFns = map (\x -> VFn x (fst pos') (Just name')) lets''
+    modify (\state -> state{frames = VerifierFrame{name = name', lets = lets''} : frames state, definedFunctions = Set.insert (VFn name' (fst (vpos state)) Nothing) (definedFunctions state)})
     mapM_ (\x -> modify (\state -> state{definedFunctions = Set.insert x (definedFunctions state)})) letFns
     -- modify (\state -> state{definedFunctions = Set.union (usedFunctions state) (Set.fromList letFns)})
-    -- verifyExpr fbody
+    -- verifyExpr body
     return Nothing
 pass1Expr (DoBlock _) = do
     -- mapM verifyExpr exprs >>= \case
     --     [] -> return Nothing
     --     errors -> return $ head errors
     return Nothing
-pass1Expr (Let name _) = do
+pass1Expr (Let letName _) = do
     frame <- topFrame
-    if name `elem` lets frame
-        then return $ Just $ "Variable " ++ name ++ " already defined in this scope"
+    if letName `elem` lets frame
+        then return $ Just $ "Variable " ++ letName ++ " already defined in this scope"
         else do
-            modify (\state -> state{frames = frame{lets = name : lets frame} : tail (frames state)})
+            modify (\state -> state{frames = frame{lets = letName : lets frame} : tail (frames state)})
             return Nothing
-pass1Expr (Var name) = do
+pass1Expr (Var varName) = do
     frame <- topFrame
-    if name `elem` lets frame
+    if varName `elem` lets frame
         then return Nothing
-        else return $ Just $ "Variable " ++ name ++ " not defined in this scope"
+        else return $ Just $ "Variable " ++ varName ++ " not defined in this scope"
 pass1Expr (Add x y) = do
     x' <- pass1Expr x
     y' <- pass1Expr y
     return $ handleMultipleErrors [x', y']
-pass1Expr (FuncCall name _) = do
+pass1Expr (FuncCall name' _) = do
     pos' <- gets vpos
     frame' <- topFrame
-    let calledIn = Verifier.fname frame'
-    modify (\state -> state{usedFunctions = Set.insert (VFn name (fst pos') (Just calledIn)) (usedFunctions state)})
+    let calledIn = frame'.name
+    modify (\state -> state{usedFunctions = Set.insert (VFn name' (fst pos') (Just calledIn)) (usedFunctions state)})
     return Nothing
-pass1Expr (Impl _ _ imethods') = do
-    let imethods'' = [x | x@FuncDef{} <- imethods']
-    let imethods''' = map AST.fname imethods''
-    modify (\state -> state{definedFunctions = Set.union (Set.fromList [VFn name (fst (vpos state)) Nothing | name <- imethods''']) (definedFunctions state)})
+pass1Expr (Impl _ _ methods') = do
+    let methods'' = [x | x@FuncDef{} <- methods']
+    let methods''' = map AST.name methods''
+    modify (\state -> state{definedFunctions = Set.union (Set.fromList [VFn methodName (fst (vpos state)) Nothing | methodName <- methods''']) (definedFunctions state)})
     return Nothing
 pass1Expr _ = return Nothing
 
@@ -135,6 +135,5 @@ verifyFunctionUsage :: State VerifierState [ParseError Text Void]
 verifyFunctionUsage = do
     usedFunctions' <- gets usedFunctions
     definedFunctions' <- gets definedFunctions
-    let undefinedFunctions = filter (\(VFn name _ scope') -> not $ any (\(VFn name' _ scope'') -> name == name' && (scope' == scope'' || isNothing scope'')) definedFunctions') (Set.toList usedFunctions')
-    error $ show usedFunctions' ++ "\n\n" ++ show definedFunctions' ++ "\n\n" ++ show undefinedFunctions
-    return $ map (\(VFn name pos' _) -> FancyError pos' (Set.singleton (ErrorFail $ "Function " ++ name ++ " not defined"))) undefinedFunctions
+    let undefinedFunctions = filter (\(VFn vfnName _ scope') -> not $ any (\(VFn name' _ scope'') -> vfnName == name' && (scope' == scope'' || isNothing scope'')) definedFunctions') (Set.toList usedFunctions')
+    return $ map (\(VFn vfnName pos' _) -> FancyError pos' (Set.singleton (ErrorFail $ "Function " ++ vfnName ++ " not defined"))) undefinedFunctions
