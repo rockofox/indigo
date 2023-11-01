@@ -1,10 +1,2 @@
-# cradle:
-#   cabal:
-#     - path: "./app"
-#       component: "exe:indigo"
-#     - path: "./lib"
-#       component: "lib:indigo-lib"
-#     - path: "./test"
-#       component: "test:tests"
 cradle:
     cabal:

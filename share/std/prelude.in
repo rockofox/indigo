@@ -1,4 +1,3 @@
-# vi: ft=ruby
 `+` :: Any -> Any -> Any
 `+` x y = x + y
 `-` :: Any -> Any -> Any

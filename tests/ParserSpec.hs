@@ -48,8 +48,8 @@ spec = do
                 `shouldBe` Right
                     (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"]}], dec = FuncDec{name = "main", types = [IO]}}])
     describe "Struct" $ do
-        xit "Member access" $ do
-            parseProgram "bello!name" CompilerFlags{verboseMode = False}
+        it "Member access" $ do
+            parseProgram "bello{}.name" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
                     (Program [StructAccess (StructLit "bello" []) (Var "name")])
     describe "Traits" $ do

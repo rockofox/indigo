@@ -41,7 +41,7 @@ something x y = x * y
 
 println :: Point -> IO
 println p = do
-  print p . x : " " : p . y : "\n"
+  print p.x : " " : p.y : "\n"
 end
 
 ppp :: Int -> Int -> Int
@@ -54,7 +54,7 @@ end
 
 mySum :: List{Float} -> Float
 mySum [] = 0.0
-mySum (x:xs) = z + mySum xs
+mySum (x:xs) = x + mySum xs
 
 
 struct Animal = ()

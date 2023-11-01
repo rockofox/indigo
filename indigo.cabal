@@ -10,7 +10,7 @@ author:             rockofox
 maintainer:         ofelix@pm.me
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
-data-files:         **/*.prism
+data-files:         **/*.in
 data-dir:           share
 
 common warnings

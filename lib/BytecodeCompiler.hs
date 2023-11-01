@@ -129,7 +129,7 @@ findSourceFile fileName = do
                                 else error $ "Could not find file " ++ fileName
 
 preludeFile :: IO String
-preludeFile = findSourceFile "std/prelude.prism" >>= readFile
+preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
 doBinOp x y op = do
@@ -325,9 +325,9 @@ compileExpr (Parser.Import o from) = do
     concatMapM compileExpr (map mangleAST expr)
   where
     mangleAST :: Parser.Expr -> Parser.Expr
-    mangleAST (Parser.FuncDec name types) = Parser.FuncDec (from ++ "." ++ name) types
+    mangleAST (Parser.FuncDec name types) = Parser.FuncDec (from ++ "::" ++ name) types
     mangleAST (Parser.Function fdef dec) = Parser.Function (map mangleAST fdef) (mangleAST dec)
-    mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "." ++ name) args (mangleAST body)
+    mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "::" ++ name) args (mangleAST body)
     mangleAST x = x
 compileExpr (Parser.Trait name methods) = do
     let methods' = map (\(Parser.FuncDec name' types) -> Parser.FuncDec name' types) methods

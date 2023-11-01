@@ -63,63 +63,13 @@ data ParserState = ParserState
     { validFunctions :: [String]
     , validLets :: [String]
     , compilerFlags :: CompilerFlags
-    , verifierTree :: [(Expr, Int, Int)]
+    , verifierTree :: [PosExpr]
     }
     deriving
         ( Show
         )
 
 type Parser = ParsecT Void Text (State ParserState)
-
-compareTypes :: Type -> Type -> Bool
-compareTypes (Fn x y) (Fn a b) = do
-    let argsMatch = all (uncurry compareTypes) $ zip x a
-    let retMatch = compareTypes y b
-    argsMatch && retMatch
-compareTypes x y = x == y || x == Any || y == Any
-
-typeOf :: Expr -> AST.Type
-typeOf (IntLit _) = Int
-typeOf (FloatLit _) = Float
-typeOf (BoolLit _) = Bool
-typeOf (StringLit _) = String
-typeOf (Add x _) = typeOf x
-typeOf (Sub x _) = typeOf x
-typeOf (Mul x _) = typeOf x
-typeOf (Div x _) = typeOf x
-typeOf (Power x _) = typeOf x
-typeOf (UnaryMinus x) = typeOf x
-typeOf (Eq _ _) = Bool
-typeOf (Neq _ _) = Bool
-typeOf (Lt _ _) = Bool
-typeOf (Gt _ _) = Bool
-typeOf (Le _ _) = Bool
-typeOf (Ge _ _) = Bool
-typeOf (And _ _) = Bool
-typeOf (Or _ _) = Bool
-typeOf (Not _) = Bool
-typeOf (FuncCall _ _) = error "Cannot infer type of function call"
-typeOf Placeholder = None
-typeOf (Var _) = Any
-typeOf (Let _ _) = error "Cannot infer type of let"
-typeOf (If{}) = error "Cannot infer type of if"
-typeOf (FuncDef{}) = error "Cannot infer type of function definition"
-typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
-typeOf (Function _ _) = error "Cannot infer type of modern function"
-typeOf (DoBlock _) = error "Cannot infer type of do block"
-typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
-typeOf (InternalFunction _ _) = error "Cannot infer type of internal function"
-typeOf (Discard _) = error "Cannot infer type of discard"
-typeOf (Import _ _) = error "Cannot infer type of import"
-typeOf (Ref _) = error "Cannot infer type of ref"
-typeOf (Struct _ _) = error "Cannot infer type of struct"
-typeOf (StructLit x _) = StructT x
-typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
-typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
-typeOf (Modulo _ _) = error "Cannot infer type of modulo"
-typeOf (Target _ _) = error "Cannot infer type of target"
-typeOf IOLit = IO
-typeOf _ = Unknown
 
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
@@ -206,7 +156,7 @@ extra = do
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
         else return name
   where
-    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '.')
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_')
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -217,7 +167,7 @@ expr = do
     start <- getOffset
     ex <- makeExprParser term binOpTable
     end <- getOffset
-    modify (\state -> state{verifierTree = (ex, start, end) : verifierTree state})
+    modify (\state -> state{verifierTree = PosExpr (ex, start, end) : verifierTree state})
     return ex
 
 validType :: Parser Type
@@ -399,7 +349,8 @@ import_ = do
     symbol "import"
     objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",")
     symbol "from"
-    Import objects <$> extra
+    from <- many (alphaNumChar <|> char '.') <?> "import path"
+    return $ Import objects from
 
 array :: Parser Expr
 array = do
