@@ -19,7 +19,7 @@ fact n = do
 end
 
 addOne :: Int -> Int
-addOne n = n + 1.0
+addOne n = n + 1
 
 add :: Int -> Int -> Int
 add x y = x + y
@@ -57,7 +57,9 @@ mySum [] = 0.0
 mySum (x:xs) = x + mySum xs
 
 
-struct Animal = ()
+struct Animal = (name: String)
+
+struct Bla = (num: Int)
 
 trait Animal = do
   makeNoise :: Self -> IO
@@ -71,12 +73,27 @@ impl Animal for Cat = do
   makeNoise self = println "Meow"
 end
 
+doing x = do
+  let testL = 123
+  x + testL
+end
+
+
+
 main => IO = do
   # let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
   # println blalbl
   # println (mySum [2.0,4.0,8.0])
-  let x = 10
-  println "Hello World"
-  makeNoise (Dog {})
-  makeNoise (Cat {})
+  let blaa = 10
+  # let bello = Dog { name: "Bello" }
+  # let minka = Cat { name: "Minka" }
+  # println "Hello World"
+  # makeNoise minka
+  # makeNoise bello
+  # println name bello
+  # println name minka
+  # println map name, [bello, minka] # TODO: This should work, fix partial function finding
+  # println map addOne, [1,2,3,4,5]
+  println map (\a -> a + blaa), [1,2,3,4,5]
+  # println testL
 end

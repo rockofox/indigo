@@ -11,6 +11,7 @@ import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import Debug.Trace
 import Foreign ()
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -37,14 +38,22 @@ data CompilerState = CompilerState
     , funcDecs :: [Parser.Expr]
     , structDecs :: [Parser.Expr]
     , lastLabel :: Int
-    , lets :: [(String, Parser.Type)]
+    , lets :: [Let]
     , traits :: [Parser.Expr]
     , impls :: [Parser.Expr]
+    , currentContext :: String
+    }
+    deriving (Show)
+
+data Let = Let
+    { name :: String
+    , vtype :: Parser.Type
+    , context :: String
     }
     deriving (Show)
 
 initCompilerState :: Parser.Program -> CompilerState
-initCompilerState prog = CompilerState prog [] [] [] 0 [] [] []
+initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] ""
 
 allocId :: StateT CompilerState IO Int
 allocId = do
@@ -59,14 +68,14 @@ compileProgram :: Parser.Program -> StateT CompilerState IO [Instruction]
 compileProgram (Parser.Program expr) = do
     prelude <- do
         i <- liftIO preludeFile
-        let rootExpr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
-                Left err -> error $ "Parse error: " ++ errorBundlePretty err
-                Right (Parser.Program progExpr) -> progExpr
-        concatMapM compileExpr rootExpr
+        case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Right (Parser.Program progExpr) -> return progExpr
+    prelude' <- concatMapM compileExpr prelude
     freePart <- concatMapM compileExpr expr
     createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ prelude ++ functions' ++ freePart ++ [Exit]
+    return $ prelude' ++ functions' ++ freePart ++ [Exit]
 
 compileProgramBare :: Parser.Program -> StateT CompilerState IO [Instruction]
 compileProgramBare (Parser.Program expr) = do
@@ -78,6 +87,7 @@ findAnyFunction :: String -> [Function] -> Maybe Function
 findAnyFunction funcName xs = do
     -- TODO: I don't like this function
     let candidates = filter (\y -> baseName y == funcName && funame y /= "main") xs
+    -- when (funcName == "name") $ error $ show (map baseName xs)
     let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
@@ -99,10 +109,10 @@ findFunction funcName xs typess = do
         Nothing -> findAnyFunction funcName xs
 
 typesMatch :: Function -> [Parser.Type] -> Bool
-typesMatch fun typess = all (uncurry Parser.compareTypes) (zip (fun.types) typess) && length typess <= length (fun.types)
+typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess) && length typess <= length fun.types
 
 typesMatchExactly :: Function -> [Parser.Type] -> Bool
-typesMatchExactly fun typess = all (uncurry (==)) (zip (fun.types) typess) && length typess <= length (fun.types)
+typesMatchExactly fun typess = all (uncurry (==)) (zip fun.types typess) && length typess <= length fun.types
 
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
@@ -161,7 +171,7 @@ typeOf (Parser.FuncCall funcName _) = do
     return $ last a
 typeOf (Parser.Var varName) = do
     lets' <- gets lets
-    let a = maybe Parser.Any snd (find (\x -> fst x == varName) lets')
+    let a = maybe Parser.Any vtype (find (\x -> x.name == varName) lets')
     return a
 typeOf x = return $ Parser.typeOf x
 
@@ -172,6 +182,12 @@ constructFQName funcName args = mapM (typeOf >=> return . show) args <&> \x -> f
 constructFQName' :: String -> [Parser.Type] -> StateT CompilerState IO String
 constructFQName' "main" _ = return "main"
 constructFQName' funcName args = return $ funcName ++ ":" ++ intercalate "," (map show args)
+
+implsFor :: String -> StateT CompilerState IO [String]
+implsFor structName = do
+    impls' <- gets impls
+    let impls'' = filter (\x -> Parser.for x == structName) impls'
+    return $ map Parser.trait impls''
 
 compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
 compileExpr (Parser.Add x y) = doBinOp x y Add
@@ -202,6 +218,7 @@ compileExpr (Parser.FuncCall funcName args) = do
             (Just f) -> f
             Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
     let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
+
     case funcDec of
         (Just fd) -> do
             if length args == length (Parser.types fd) - 1
@@ -223,18 +240,20 @@ compileExpr fd@(Parser.FuncDec _ _) = do
     return [] -- Function declarations are only used for compilation
 compileExpr (Parser.FuncDef name args body) = do
     -- let argTypes = map Parser.typeOf args
+    modify (\s -> s{currentContext = name})
     funcDecs' <- gets funcDecs
     when (isNothing $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
-    modify (\s -> s{functions = Function name funame [] [] : functions s})
+    -- modify (\s -> s{functions = Function name funame [] [] : functions s})
 
     body' <- compileExpr body
     funcDecs'' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs''
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
-    modify (\s -> s{functions = Function name funame function (funcDec.types) : tail (functions s)})
+    -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
+    modify (\s -> s{functions = Function name funame function funcDec.types : functions s})
     return [] -- Function definitions get appended at the last stage of compilation
   where
     compileParameter :: Parser.Expr -> String -> StateT CompilerState IO [Instruction]
@@ -267,12 +286,15 @@ compileExpr (Parser.FuncDef name args body) = do
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
 compileExpr (Parser.Var x) = do
     functions' <- gets functions
-    let fun = findAnyFunction x functions'
+    -- let fun = findFunction x functions' [Parser.Any]
+    let fun = find (\y -> last (splitOn "::" (T.pack $ baseName y)) == T.pack x && funame y /= "main") functions'
+    -- when (x == "name") $ error $ show (map (\y -> last (splitOn "::" (T.pack $ baseName y))) functions')
     case fun of
         (Just f) -> compileExpr (Parser.FuncCall (funame f) [])
         Nothing -> return [LLoad x]
 compileExpr (Parser.Let name value) = do
-    typeOf value >>= \v -> modify (\s -> s{lets = (name, v) : lets s})
+    curCon <- gets currentContext
+    typeOf value >>= \v -> modify (\s -> s{lets = Let{name, vtype = v, context = curCon} : lets s})
     value' <- compileExpr value
     return $ value' ++ [LStore name]
 compileExpr (Parser.Function a b) = mapM_ compileExpr a >> compileExpr b >> return []
@@ -304,14 +326,25 @@ compileExpr (Parser.TypeLit x) = case x of
     Parser.Bool -> return [Push $ DBool False]
     _ -> error $ show x ++ " is not implemented"
 compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
-compileExpr st@(Parser.Struct _ _) = do
+compileExpr st@(Parser.Struct _ fields) = do
     modify (\s -> s{structDecs = st : structDecs s})
+    mapM_ createFieldTrait fields
     return []
+  where
+    createFieldTrait :: (String, Parser.Type) -> StateT CompilerState IO ()
+    createFieldTrait (name, _) = do
+        let traitName = "__field_" ++ name
+        let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any]}]
+        let impl = Parser.Impl traitName (Parser.name st) [Parser.FuncDef{name = name, args = [Parser.Var "self"], body = Parser.StructAccess (Parser.Var "self") (Parser.Var name)}]
+        _ <- compileExpr trait
+        _ <- compileExpr impl
+        return ()
 compileExpr (Parser.StructLit name fields) = do
     fields' <- concatMapM compileExpr (map snd fields)
     let names = map (DString . fst) fields
     let instructions = zip names fields' >>= \(name', field) -> [Push name', field]
-    return $ reverse instructions ++ [Push $ DString name, Push $ DString "__name", PackMap $ length instructions + 2]
+    implsForStruct <- implsFor name
+    return $ reverse instructions ++ [Push $ DString name, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length instructions + 4]
 compileExpr (Parser.StructAccess struct (Parser.Var field)) = do
     struct' <- compileExpr struct
     return $ struct' ++ [Access field]
@@ -339,6 +372,17 @@ compileExpr (Parser.Impl name for methods) = do
     modify (\s -> s{impls = Parser.Impl name for methods : impls s})
     mapM_ compileExpr methods'
     return []
+compileExpr (Parser.Lambda args body) = do
+    fId <- allocId
+    currentContext' <- gets currentContext
+    lets' <- gets lets
+    let name = ":lambda" ++ show fId
+    let letsOfCurrentContext = filter (\x -> context x == currentContext') lets'
+    let argsAndLets = args ++ map (\x -> Parser.Var x.name) letsOfCurrentContext
+    let ldec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
+    let ldef = Parser.FuncDef name argsAndLets body
+    mapM_ compileExpr [ldec, ldef]
+    return $ map (\x -> LLoad x.name) letsOfCurrentContext ++ [PushPf name (length letsOfCurrentContext)]
 compileExpr x = error $ show x ++ " is not implemented"
 
 createVirtualFunctions :: StateT CompilerState IO ()
@@ -361,8 +405,9 @@ createVirtualFunctions = do
                     ++ replicate (length typess - 2) Pop
                     ++ [ DupN (length fors)
                        ]
-                    ++ concatMap (\for -> [TypeOf, Push $ DString for, Eq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
-                    ++ [Pop, Push $ DString ("`" ++ name ++ "` from trait `" ++ traitName ++ "` called for unimplemented type"), Panic]
+                    -- ++ concatMap (\for -> [TypeOf, Dup, LStore "calledType", Push $ DString for, Eq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
+                    ++ concatMap (\for -> [Dup, TypeOf, LStore "calledType", Push $ DTypeQuery for, TypeEq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
+                    ++ [Pop, LLoad "calledType", Push $ DString ("`" ++ name ++ "` from trait `" ++ traitName ++ "` called for unimplemented type "), Concat 2, Panic]
         modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess]})
         return ()
     createBaseDef _ _ _ = return ()
@@ -373,42 +418,3 @@ locateLabel program label = do
     case x of
         Just x' -> x'
         Nothing -> error $ "Label " ++ label ++ " not found"
-
-runTestProgram :: IO ()
-runTestProgram = do
-    let p =
-            parseProgram
-                ( Data.Text.pack
-                    ( unlines
-                        [ "println :: String -> IO"
-                        , "println x = do"
-                        , "    print x"
-                        , "    print \"\\n\""
-                        , "end"
-                        , "sayHi :: IO"
-                        , "sayHi name = do"
-                        , "    print \"Hi, \""
-                        , "    print name"
-                        , "    print \"!\""
-                        , "end"
-                        , "main => IO = do"
-                        , -- , "    let name = \"Rocko\""
-                          -- , "    sayHi name"
-                          --   "   sayHi \"Rocko\""
-                          "   let numbers = [1, 2, 3, 4, 5]"
-                        , "   println (\"Hello\") : (\" \") : (\"World\")"
-                        , "   println numbers"
-                        , "end"
-                        ]
-                    )
-                )
-                Parser.CompilerFlags{verboseMode = False}
-    case p of
-        Left err -> putStrLn $ errorBundlePretty err
-        Right program -> do
-            putStrLn ""
-            xxx <- evalStateT (compileProgram program) (initCompilerState program)
-            -- print program
-            putStrLn $ printAssembly (V.fromList xxx) True
-            let xxxPoint = locateLabel xxx "main"
-            runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}

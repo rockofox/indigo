@@ -7,15 +7,18 @@ import AST
     , typeOf
     , typesMatch
     )
-import Control.Monad.State (State, evalState, gets, modify)
+import Control.Monad.State.Lazy
 import Data.List (find)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text.Lazy qualified as T
 import Data.Void (Void)
+import Debug.Trace
 import Text.Megaparsec (ErrorFancy (..), ParseError (..), ParseErrorBundle (..), PosState (..))
 import Text.Megaparsec.Pos (defaultTabWidth, initialPos)
+import Text.Pretty.Simple
 
 data VFn = VFn
     { name :: String
@@ -29,12 +32,15 @@ data VerifierState = VerifierState
     { frames :: [VerifierFrame]
     , usedFunctions :: Set.Set VFn
     , definedFunctions :: Set.Set VFn
+    , usedVars :: Set.Set VVar
     , vpos :: (Int, Int)
     , program :: [PosExpr]
     }
     deriving (Show)
 
 newtype VLet = VLet (String, Type) deriving (Show)
+
+newtype VVar = VVar (String, String, Type, (Int, Int)) deriving (Show, Eq, Ord)
 
 data VerifierFrame = VerifierFrame
     { name :: String
@@ -55,10 +61,11 @@ preludeFunctions =
     -- TODO: Import prelude instead
     [ VFn "print" 0 Nothing [Any, IO]
     , VFn "println" 0 Nothing [Any, IO]
+    , VFn "map" 0 Nothing [Fn [Any] Any, List Any, List Any]
     ]
 
 verifyProgram :: String -> Text -> [PosExpr] -> Either (ParseErrorBundle Text Void) ()
-verifyProgram name input exprs = evalState (verifyProgram' name input exprs) VerifierState{frames = [VerifierFrame{name = "__outside__", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, vpos = (0, 0), program = exprs}
+verifyProgram name input exprs = evalState (verifyProgram' name input exprs) VerifierState{frames = [VerifierFrame{name = "__outside", lets = []}], usedFunctions = Set.empty, definedFunctions = Set.fromList preludeFunctions, vpos = (0, 0), program = exprs, usedVars = Set.empty}
 
 verifyProgram' :: String -> Text -> [PosExpr] -> State VerifierState (Either (ParseErrorBundle Text Void) ())
 verifyProgram' name input exprs = do
@@ -71,10 +78,14 @@ verifyProgram' name input exprs = do
                 , pstateLinePrefix = ""
                 }
     -- error $ T.unpack $ pShow exprs
-    _ <- pass1 (filter (\(PosExpr (expr, _, _)) -> case expr of FuncDec{} -> True; _ -> False) exprs)
-    errors2 <- pass1 (filter (\(PosExpr (expr, _, _)) -> case expr of FuncDec{} -> False; _ -> True) exprs)
+    -- error $ show exprs
+    -- _ <- pass1 (filter (\(PosExpr (expr, _, _)) -> case expr of Let{} -> True; _ -> False) exprs)
+    _ <- pass1 (filter (\(PosExpr (expr, _, _)) -> case expr of FuncDef{} -> False; Function{} -> False; FuncDec{} -> True; Let{} -> False; Var{} -> True; _ -> False) exprs)
+    errors2 <- pass1 (filter (\(PosExpr (expr, _, _)) -> case expr of FuncDec{} -> False; Let{} -> True; Var{} -> True; _ -> True) exprs) -- TODO: `verifyVariableUsage`
     errors3 <- verifyFunctionUsage
-    let errors = errors2 ++ errors3
+    -- errors4 <- verifyVarsUsage
+    let errors4 = [] -- TODO: disabled while implementing lambdas
+    let errors = errors2 ++ errors3 ++ errors4
     if null errors
         then return $ Right ()
         else return $ Left $ ParseErrorBundle{bundleErrors = NonEmpty.fromList errors, bundlePosState = initialState}
@@ -89,12 +100,12 @@ verifyProgram' name input exprs = do
                 return $ FancyError start (Set.singleton (ErrorFail err)) : errors
     pass1 _ = return []
 
-handleMultipleErrors :: [Maybe [Char]] -> Maybe [Char]
+handleMultipleErrors :: [Maybe String] -> Maybe String
 handleMultipleErrors [] = Nothing
 handleMultipleErrors (Nothing : xs) = handleMultipleErrors xs
 handleMultipleErrors (Just err : _) = Just err
 
-pass1Expr :: Expr -> State VerifierState (Maybe [Char])
+pass1Expr :: Expr -> State VerifierState (Maybe String)
 pass1Expr (FuncDef{name = name', args = args', body = _}) = do
     pos' <- gets vpos
     definedFunctions' <- gets definedFunctions
@@ -116,7 +127,8 @@ pass1Expr (FuncDef{name = name', args = args', body = _}) = do
     processArgs (Var varName : xs) (argType : ys) = (varName, argType) : processArgs xs ys
     processArgs (ListPattern lNames : xs) (List argType : ys) = handleListPattern (ListPattern lNames) argType ++ processArgs xs ys
     processArgs (ListLit [] : _) _ = []
-    processArgs e t = error $ "Invalid function definition: " ++ show e ++ " " ++ show t
+    processArgs _ _ = []
+    -- processArgs e t = error $ "Invalid function definition: " ++ show e ++ " " ++ show t
 
     handleListPattern :: Expr -> Type -> [(String, Type)]
     handleListPattern (ListPattern names) ttype = zip names'' (replicate (length names'') ttype) ++ [(rest, List ttype)]
@@ -133,8 +145,15 @@ pass1Expr (Function fdef fdec) = do
     mapM_ pass1Expr fdef
     _ <- pass1Expr fdec
     return Nothing
-pass1Expr (DoBlock _) = do
+pass1Expr (Struct name fields) = do
+    mapM_ createFieldFunction fields
     return Nothing
+  where
+    createFieldFunction :: (String, Type) -> State VerifierState ()
+    createFieldFunction (name', ttype) = do
+        pos' <- gets vpos
+        modify (\state -> state{definedFunctions = Set.insert (VFn{name = name', fpos = fst pos', scope = Nothing, args = [StructT name, ttype]}) (definedFunctions state)})
+pass1Expr (DoBlock _) = return Nothing
 pass1Expr (Let letName letVal) = do
     frame <- topFrame
     if letName `elem` map (\(VLet (x, _)) -> x) (lets frame)
@@ -144,13 +163,16 @@ pass1Expr (Let letName letVal) = do
             return Nothing
 pass1Expr (Var varName) = do
     frame <- topFrame
-    if varName `elem` map (\(VLet (x, _)) -> x) (lets frame)
-        then return Nothing
-        else return $ Just $ "Variable " ++ varName ++ " not defined in this scope"
+    modify (\state -> state{usedVars = Set.insert (VVar (varName, frame.name, Unknown, vpos state)) (usedVars state)})
+    return Nothing
 pass1Expr (Add x y) = do
     x' <- pass1Expr x
     y' <- pass1Expr y
     return $ handleMultipleErrors [x', y']
+-- TODO: other binops
+pass1Expr (ListLit elems) = do
+    -- TODO
+    return Nothing
 pass1Expr (FuncCall name' args') = do
     pos' <- gets vpos
     frame' <- topFrame
@@ -183,7 +205,7 @@ verifyFunctionUsage = do
     definedFunctions' <- gets definedFunctions
     let undefinedFunctions = filter (\(VFn vfnName _ scope' _) -> not $ any (\(VFn name' _ scope'' _) -> vfnName == name' && (scope' == scope'' || isNothing scope'')) definedFunctions') (Set.toList usedFunctions')
     let usedAndDefined = filter (\(VFn vfnName _ _ _) -> any (\(VFn name' _ _ _) -> vfnName == name') definedFunctions') (Set.toList usedFunctions')
-    let wrongTypesFunctions = filter (\(VFn vfnName _ _ callArgs) -> not $ any (\(VFn name' _ _ fnArgs) -> {- trace (show args' ++ "," ++ show args'')  -} vfnName == name' && typesMatch callArgs (init fnArgs)) definedFunctions') usedAndDefined
+    let wrongTypesFunctions = filter (\(VFn vfnName _ _ callArgs) -> not $ any (\(VFn name' _ _ fnArgs) -> {- trace (show args' ++ "," ++ show args'')  -} vfnName == name' && typesMatch callArgs (init fnArgs) || length callArgs /= length (init fnArgs)) definedFunctions') usedAndDefined
     let notDefinedErrors = map (\(VFn vfnName pos' _ _) -> FancyError pos' (Set.singleton (ErrorFail $ "Function " ++ vfnName ++ " not defined"))) undefinedFunctions
     let wrongTypesErrors = map (\(VFn vfnName pos' _ _) -> FancyError pos' (Set.singleton (ErrorFail $ "Function " ++ vfnName ++ " called with wrong types. Expected " ++ show (init (findVFnArgs vfnName definedFunctions')) ++ ", got " ++ show (findVFnArgs vfnName usedFunctions')))) wrongTypesFunctions -- TODO: Make sure it shosw correct types (maybe it needs `init`)
     return $ notDefinedErrors ++ wrongTypesErrors
@@ -192,3 +214,12 @@ verifyFunctionUsage = do
     findVFnArgs name' fns = case find (\(VFn name'' _ _ _) -> name' == name'') fns of
         Just (VFn _ _ _ args') -> args'
         Nothing -> []
+
+verifyVarsUsage :: State VerifierState [ParseError Text Void]
+verifyVarsUsage = do
+    usedVars' <- gets usedVars
+    frames' <- gets frames
+    definedFunctions' <- gets definedFunctions
+    let notDefinedVars = filter (\(VVar (varName, scope', _, pos')) -> not $ any (\(VerifierFrame _ lets') -> any (\(VLet (letName, _)) -> varName == letName) lets') frames' || isJust (find (\VFn{name = vfnName} -> vfnName == varName) definedFunctions')) (Set.toList usedVars')
+    let notDefinedErrors = map (\(VVar (varName, _, _, pos')) -> FancyError (fst pos') (Set.singleton (ErrorFail $ "Variable " ++ varName ++ " not defined in this scope"))) notDefinedVars
+    return notDefinedErrors

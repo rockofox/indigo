@@ -121,6 +121,38 @@ spec = do
                     println mauzi.name
                 end|]
                 `shouldReturn` "Bello\nMauzi\n"
+        it "Can be passed via functions" $ do
+            compileAndRun
+                [r|
+                struct Dog = (name: String)
+                struct Cat = (name: String)
+
+                getName :: Dog -> String
+                getName self = self.name
+
+                getName :: Cat -> String
+                getName self = self.name
+
+                main => IO = do
+                    let bello = Dog { name : "Bello" }
+                    let mauzi = Cat { name : "Mauzi" }
+                    println (getName bello)
+                    println (getName mauzi)
+                end|]
+                `shouldReturn` "Bello\nMauzi\n"
+        it "Can access fields via automatically generated functions" $ do
+            compileAndRun
+                [r|
+                struct Dog = (name: String)
+                struct Cat = (name: String)
+
+                main => IO = do
+                    let bello = Dog { name : "Bello" }
+                    let mauzi = Cat { name : "Mauzi" }
+                    println name bello
+                    println name mauzi
+                end|]
+                `shouldReturn` "Bello\nMauzi\n"
     describe "Traits" $ do
         it "Can use a trait" $ do
             compileAndRun

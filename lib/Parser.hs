@@ -28,7 +28,7 @@ import Data.Char (isUpper)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
 import Text.Megaparsec
-    ( MonadParsec (eof, lookAhead, takeWhile1P, try, withRecovery)
+    ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
     , ParseError (..)
     , ParseErrorBundle (..)
     , ParsecT
@@ -41,6 +41,7 @@ import Text.Megaparsec
     , some
     , (<?>)
     )
+import Text.Megaparsec.Byte (string)
 import Text.Megaparsec.Char
     ( alphaNumChar
     , char
@@ -127,8 +128,11 @@ lexeme = L.lexeme sc
 symbol :: Text -> Parser Text
 symbol = L.symbol sc
 
+keyword :: Text -> Parser ()
+keyword w = (lexeme . try) (string w *> notFollowedBy alphaNumChar)
+
 rws :: [String]
-rws = ["if", "then", "else", "while", "do", "end", "true", "false", "not", "and", "or", "discard", "let", "as"]
+rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as"]
 
 identifier :: Parser String
 identifier = do
@@ -173,76 +177,43 @@ expr = do
 validType :: Parser Type
 validType =
     do
-        symbol "Int"
+        keyword "Int"
         return Int
         <|> do
-            symbol "Float"
+            keyword "Float"
             return Float
         <|> do
-            symbol "Bool"
+            keyword "Bool"
             return Bool
         <|> do
-            symbol "String"
+            keyword "String"
             return String
         <|> do
-            symbol "IO"
+            keyword "IO"
             return IO
         <|> do
-            symbol "Any"
+            keyword "Any"
             return Any
         <|> do
-            symbol "Fn"
+            keyword "Fn"
             curlyBrackets $ do
                 args <- sepBy validType (symbol "->")
                 symbol "=>"
                 ret <- validType
                 return Fn{args = args, ret = ret}
         <|> do
-            symbol "List"
+            keyword "List"
             curlyBrackets $ List <$> validType
         <|> do
-            symbol "Self"
+            keyword "Self"
             return Self
         <|> do
             lookAhead $ satisfy isUpper
             StructT <$> identifier
         <?> "type"
 
-externLanguage :: Parser String
-externLanguage =
-    do
-        symbol "wasi_unstable"
-        return "wasi_unstable"
-        <|> do
-            symbol "js"
-            return "js"
-        <|> do
-            symbol "jsrev"
-            return "jsrev"
-        <|> do
-            symbol "c"
-            return "c"
-        <|> do
-            symbol "runtime"
-            return "runtime"
-        <?> "language"
-
 stringLit :: Parser String
 stringLit = lexeme $ char '\"' *> manyTill L.charLiteral (char '\"')
-
-externDec :: Parser Expr
-externDec = do
-    symbol "extern"
-    lang <- externLanguage
-    name <- extra
-    symbol "::"
-    args <- sepBy validType (symbol "->")
-    symbol "=>"
-    ret <- validType
-    state <- get
-    put state{validFunctions = name : validFunctions state}
-
-    return $ ExternDec lang name (args ++ [ret])
 
 funcDec :: Parser Expr
 funcDec = do
@@ -271,25 +242,9 @@ funcCall = do
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     return $ FuncCall name args
 
-internalFunctionName :: Parser String
-internalFunctionName =
-    do
-        symbol "__wasm_i32_store"
-        return "__wasm_i32_store"
-        <|> do
-            symbol "__wasm_i32_load"
-            return "__wasm_i32_load"
-        <?> "internal function name"
-
-internalFunction :: Parser Expr
-internalFunction = do
-    name <- internalFunctionName
-    args <- sepBy1 expr (symbol ",") <?> "function arguments"
-    return $ InternalFunction name args
-
 letExpr :: Parser Expr
 letExpr = do
-    symbol "let"
+    keyword "let"
     name <- identifier
     symbol "="
     value <- recover expr
@@ -299,13 +254,13 @@ letExpr = do
 
 ifExpr :: Parser Expr
 ifExpr = do
-    symbol "if"
+    keyword "if"
     cond <- expr
-    symbol "then"
+    keyword "then"
     optional newline'
     thenExpr <- expr
     optional newline'
-    symbol "else"
+    keyword "else"
     optional newline'
     elseExpr <- expr
     optional newline'
@@ -313,10 +268,10 @@ ifExpr = do
 
 doBlock :: Parser Expr
 doBlock = do
-    symbol "do"
+    keyword "do"
     newline'
     exprs <- lines'
-    symbol "end" <|> lookAhead (symbol "else")
+    keyword "end" <|> lookAhead (keyword "else")
     return $ DoBlock exprs
 
 combinedFunc :: Parser Expr
@@ -339,16 +294,11 @@ combinedFunc = do
     body <- recover expr <?> "function body"
     return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [returnType]))
 
-discard :: Parser Expr
-discard = do
-    symbol "discard"
-    Discard <$> expr
-
 import_ :: Parser Expr
 import_ = do
-    symbol "import"
+    keyword "import"
     objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",")
-    symbol "from"
+    keyword "from"
     from <- many (alphaNumChar <|> char '.') <?> "import path"
     return $ Import objects from
 
@@ -361,20 +311,25 @@ array = do
 
 struct :: Parser Expr
 struct = do
-    symbol "struct"
+    keyword "struct"
     name <- extra
     symbol "="
-    fields <-
-        parens $
-            sepBy
-                ( do
-                    fieldName <- identifier <?> "field name"
-                    symbol ":"
-                    fieldType <- validType <?> "field type"
-                    return (fieldName, fieldType)
-                )
-                (symbol "," <* optional newline')
+    -- traceShowM $ "Parsing struct " ++ show name
+    -- fields <-
+    --     parens (
+    --         sepBy
+    --             structField
+    --             (symbol "," <* optional newline')
+    --             )
+    fields <- parens $ structField `sepBy` symbol ","
+    -- traceShowM $ "Parsed struct " ++ show fields
     return $ Struct name fields
+  where
+    structField = do
+        fieldName <- identifier <?> "field name"
+        symbol ":"
+        fieldType <- validType <?> "field type"
+        return (fieldName, fieldType)
 
 structLit :: Parser Expr
 structLit = do
@@ -423,10 +378,6 @@ parseAndVerify name t cf = do
                 Left err -> Left err
                 Right _ -> Right program'
 
--- Left eee
-
--- Right program
-
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
     Left err -> error $ show err
@@ -441,8 +392,7 @@ program :: Parser Program
 program = Program <$> between scn eof lines'
 
 var :: Parser Expr
-var = do
-    Var <$> (extra <|> gravis)
+var = Var <$> (extra <|> gravis)
 
 target :: Parser Expr
 target = do
@@ -515,8 +465,8 @@ term =
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
         , letExpr
+        , struct
         , import_
-        , externDec
         , doBlock
         , impl
         , Parser.trait
@@ -524,17 +474,11 @@ term =
         , try funcDef
         , try funcDec
         , try lambda
-        , target
-        , struct
         , try structLit
         , typeLiteral
         , array
-        , try internalFunction
-        , try discard
         , try funcCall
         , try arrayAccess
         , ifExpr
         , var
-        -- , try listPattern
-        -- , ref
         ]

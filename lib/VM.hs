@@ -11,7 +11,7 @@ import Data.Function ((&))
 import Data.List.Split (chunksOf)
 import Data.Map qualified
 import Data.Map qualified as Data
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text qualified
 import Data.Vector qualified as V
 import Debug.Trace
@@ -114,6 +114,8 @@ data Instruction
       Access String
     | -- | Pack map
       PackMap Int
+    | -- | Compares two types and pushes T if they are compatible, F otherwise
+      TypeEq
     | -- | Exit the program
       Exit
     deriving (Show, Eq, Generic)
@@ -130,6 +132,7 @@ data Data
     | DChar Char
     | DFuncRef String [Data]
     | DMap (Data.Map String Data)
+    | DTypeQuery String
     deriving (Generic)
 
 instance Binary Instruction
@@ -148,6 +151,7 @@ instance Show Data where
     show (DChar x) = show x
     show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
     show (DMap x) = show x
+    show (DTypeQuery x) = "TypeQuery " ++ x
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -314,10 +318,25 @@ instance Floating Data where
     acosh = error "acosh not implemented"
     atanh = error "atanh not implemented"
 
+findLabelFuzzy :: String -> StateT VM IO (String, Int)
+findLabelFuzzy x = do
+    labels <- gets labels
+    case lookup x labels of
+        Just (n :: Int) -> return (x, n)
+        Nothing ->
+            -- Look for fuzzy matches (without #)
+            case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
+                [] -> error $ "Label not found: " ++ x
+                [(n, l)] -> return (n, l)
+                xs -> error $ "Multiple labels found: " ++ show xs
+
 runInstruction :: Instruction -> StateT VM IO ()
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
-runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
+-- runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
+runInstruction (PushPf name nArgs) = do
+    (label, _) <- findLabelFuzzy name
+    stackPopN nArgs >>= \args -> stackPush $ DFuncRef label args
 runInstruction Pop = void stackPop
 runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
@@ -342,22 +361,15 @@ runInstruction (Builtin Print) = do
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
-runInstruction CallS = do
+runInstruction CallS =
     stackPop >>= \d -> case d of
         DFuncRef x args -> do
             stackPushN args
-            runInstruction (Call x)
+            runInstruction $ Call x
         _ -> error $ "Cannot call " ++ show d
 runInstruction (Jmp x) = do
-    labels <- gets labels
-    case lookup x labels of
-        Just (n :: Int) -> modify $ \vm -> vm{pc = n}
-        Nothing ->
-            -- Look for fuzzy matches (without #)
-            case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
-                [] -> error $ "Label not found: " ++ x
-                [(_, n)] -> modify $ \vm -> vm{pc = n}
-                xs -> error $ "Multiple labels found: " ++ show xs
+    (_, n) <- findLabelFuzzy x
+    modify $ \vm -> vm{pc = n}
 runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
@@ -431,7 +443,7 @@ runInstruction Slice = do
         end' = case maybeEnd of
             Just end -> if end > 0 then min end len else max 0 (len + end)
             Nothing -> len
-runInstruction Length = do
+runInstruction Length =
     stackLen >>= \case
         0 -> stackPush $ DInt (-1)
         _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; _ -> error "Invalid type for length"
@@ -487,16 +499,44 @@ runInstruction TypeOf =
             case Data.Map.lookup "__name" m of
                 Just (DString name) -> stackPush $ DString name
                 _ -> stackPush $ DString "Map"
+        DTypeQuery s -> stackPush $ DString $ "TypeQuery{" ++ s ++ "}"
 runInstruction (Repeat n) = do
     vm <- get
     let inst = program vm V.! (pc vm - 1)
     replicateM_ (n - 1) $ runInstruction inst
+runInstruction TypeEq =
+    stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of
+        (DInt _, DInt _) -> True
+        (DFloat _, DFloat _) -> True
+        (DString _, DString _) -> True
+        (DBool _, DBool _) -> True
+        (DList _, DList _) -> True
+        (DNone, DNone) -> True
+        (DChar _, DChar _) -> True
+        (DFuncRef _ _, DFuncRef _ _) -> True
+        (DMap a, DMap b) -> do
+            not (isJust (Data.Map.lookup "__name" a) && isJust (Data.Map.lookup "__name" b)) || (Data.Map.lookup "__name" a == Data.Map.lookup "__name" b)
+        (DMap m, DTypeQuery tq) -> do
+            let name = Data.Map.lookup "__name" m
+            let traits = Data.Map.lookup "__traits" m
+            case (name, traits) of
+                (Just (DString n), Just (DList ts)) -> n == tq || DString tq `elem` ts
+                _ -> False
+        (DInt _, DTypeQuery s) -> s == "Int"
+        (DFloat _, DTypeQuery s) -> s == "Float"
+        (DString _, DTypeQuery s) -> s == "String"
+        (DBool _, DTypeQuery s) -> s == "Bool"
+        (DList _, DTypeQuery s) -> s == "List"
+        (DNone, DTypeQuery s) -> s == "None"
+        (DChar _, DTypeQuery s) -> s == "Char"
+        (DFuncRef _ _, DTypeQuery s) -> s == "FuncRef"
+        _ -> False
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 -- runInstruction x = error $ show x ++ ": not implemented"
 
 printAssembly :: Program -> Bool -> String
-printAssembly program showLineNumbers = do
+printAssembly program showLineNumbers =
     if not showLineNumbers
         then concatMap printAssembly' program
         else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] (V.toList program)
