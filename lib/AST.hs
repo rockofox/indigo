@@ -4,7 +4,7 @@ import Data.Binary qualified
 import GHC.Generics (Generic)
 
 data Expr
-    = Var String
+    = Var String Position
     | BoolLit Bool
     | IntLit Integer
     | StringLit String
@@ -12,7 +12,7 @@ data Expr
     | If Expr Expr Expr
     | Let String Expr
     | FuncDef {name :: String, args :: [Expr], body :: Expr}
-    | FuncCall String [Expr]
+    | FuncCall String [Expr] Position
     | FuncDec {name :: String, types :: [Type]}
     | Function {def :: [Expr], dec :: Expr}
     | DoBlock [Expr]
@@ -61,7 +61,21 @@ data Expr
         , Eq
         )
 
-newtype PosExpr = PosExpr (Expr, Int, Int) deriving (Show)
+newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
+
+zeroPosition :: Position
+zeroPosition = Position (0, 0)
+
+position :: Int -> Int -> Position
+position start end = Position (start, end)
+
+anyPosition :: Position
+anyPosition = Position (-1, -1)
+
+instance Eq Position where
+    (Position (start1, end1)) == Position (-1, -1) = start1 >= 0 && end1 >= 0
+    (Position (-1, -1)) == (Position (start2, end2)) = start2 >= 0 && end2 >= 0
+    (Position (start1, end1)) == (Position (start2, end2)) = start1 == start2 && end1 == end2
 
 data Type
     = Int
@@ -100,11 +114,16 @@ instance Data.Binary.Binary Expr
 
 instance Data.Binary.Binary Program
 
+instance Data.Binary.Binary Position
+
 compareTypes :: Type -> Type -> Bool
 compareTypes (Fn x y) (Fn a b) = do
     let argsMatch = all (uncurry compareTypes) $ zip x a
     let retMatch = compareTypes y b
     argsMatch && retMatch
+compareTypes Self Self = True
+compareTypes Self StructT{} = True
+compareTypes StructT{} Self = True
 compareTypes x y = x == y || x == Any || y == Any
 
 typeOf :: Expr -> AST.Type
@@ -127,9 +146,9 @@ typeOf (Ge _ _) = Bool
 typeOf (And _ _) = Bool
 typeOf (Or _ _) = Bool
 typeOf (Not _) = Bool
-typeOf (FuncCall _ _) = error "Cannot infer type of function call"
+typeOf (FuncCall _ _ zeroPosition) = error "Cannot infer type of function call"
 typeOf Placeholder = None
-typeOf (Var _) = Unknown -- error "Cannot infer type of variable"
+typeOf (Var{}) = Unknown -- error "Cannot infer type of variable"
 typeOf (Let _ _) = error "Cannot infer type of let"
 typeOf (If{}) = error "Cannot infer type of if"
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
@@ -149,7 +168,7 @@ typeOf (Modulo _ _) = error "Cannot infer type of modulo"
 typeOf (Target _ _) = error "Cannot infer type of target"
 typeOf IOLit = IO
 typeOf (ListConcat{}) = List Any
-typeOf (ListPattern _) = error "Cannot infer type of list pattern"
+typeOf (ListPattern _) = List Any
 typeOf (StructAccess s _) = typeOf s
 typeOf (Then _ _) = error "Cannot infer type of then"
 typeOf (Bind _ _) = error "Cannot infer type of bind"

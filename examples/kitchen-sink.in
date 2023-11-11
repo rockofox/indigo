@@ -31,6 +31,7 @@ end
 
 struct Point = (x: Int, y: Int)
 
+bla :: Int -> Int -> Int
 bla x y = x + y
 
 something :: Int -> Int -> Int
@@ -73,11 +74,16 @@ impl Animal for Cat = do
   makeNoise self = println "Meow"
 end
 
+doing :: Int -> Int
 doing x = do
   let testL = 123
   x + testL
 end
 
+beAnimal :: Animal -> IO
+beAnimal a = do
+  makeNoise a
+end
 
 
 main => IO = do
@@ -85,8 +91,8 @@ main => IO = do
   # println blalbl
   # println (mySum [2.0,4.0,8.0])
   let blaa = 10
-  # let bello = Dog { name: "Bello" }
-  # let minka = Cat { name: "Minka" }
+  let bello = Dog { name: "Bello" }
+  let minka = Cat { name: "Minka" }
   # println "Hello World"
   # makeNoise minka
   # makeNoise bello
@@ -94,6 +100,8 @@ main => IO = do
   # println name minka
   # println map name, [bello, minka] # TODO: This should work, fix partial function finding
   # println map addOne, [1,2,3,4,5]
-  println map (\a -> a + blaa), [1,2,3,4,5]
+  # println map (\a -> a + blaa), [1,2,3,4,5]
   # println testL
+  beAnimal bello
+  beAnimal minka
 end

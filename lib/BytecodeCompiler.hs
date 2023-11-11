@@ -1,6 +1,7 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
 module BytecodeCompiler where
 
+import AST (zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
@@ -20,6 +21,7 @@ import Parser qualified
 import Paths_indigo qualified
 import System.Directory (doesFileExist)
 import Text.Megaparsec (errorBundlePretty)
+import Util
 import VM
 import Prelude hiding (lex)
 
@@ -60,9 +62,6 @@ allocId = do
     s <- gets lastLabel
     modify (\s' -> s'{lastLabel = s + 1})
     return s
-
-concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
-concatMapM f xs = concat <$> mapM f xs
 
 compileProgram :: Parser.Program -> StateT CompilerState IO [Instruction]
 compileProgram (Parser.Program expr) = do
@@ -153,15 +152,15 @@ doBinOp x y op = do
         (_, Parser.Flexible _) -> return $ [Swp, Cast] ++ x'
         _ -> return []
     case (x, y) of
-        (_, Parser.FuncCall _ _) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
-        (Parser.FuncCall _ _, _) -> return (x' ++ y' ++ cast ++ [op])
+        (_, Parser.FuncCall _ _ zeroPosition) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
+        (Parser.FuncCall _ _ zeroPosition, _) -> return (x' ++ y' ++ cast ++ [op])
         (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1] ---------------
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ cast ++ [op])
 
 typeOf :: Parser.Expr -> StateT CompilerState IO Parser.Type
-typeOf (Parser.FuncCall funcName _) = do
+typeOf (Parser.FuncCall funcName _ zeroPosition) = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
@@ -169,7 +168,7 @@ typeOf (Parser.FuncCall funcName _) = do
                 Parser.types
                 (find (\x -> x.name == funcName) funcDecs')
     return $ last a
-typeOf (Parser.Var varName) = do
+typeOf (Parser.Var varName _) = do
     lets' <- gets lets
     let a = maybe Parser.Any vtype (find (\x -> x.name == varName) lets')
     return a
@@ -206,11 +205,11 @@ compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromI
 compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
 compileExpr Parser.Placeholder = return []
-compileExpr (Parser.FuncCall "print" [x]) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
-compileExpr (Parser.FuncCall "abs" [x]) = compileExpr x >>= \x' -> return (x' ++ [Abs])
-compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
-compileExpr (Parser.FuncCall "sqrt" [x]) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
-compileExpr (Parser.FuncCall funcName args) = do
+compileExpr (Parser.FuncCall "print" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
+compileExpr (Parser.FuncCall "abs" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Abs])
+compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
+compileExpr (Parser.FuncCall "sqrt" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
+compileExpr (Parser.FuncCall funcName args _) = do
     argTypes <- mapM typeOf args
     functions' <- gets functions
     funcDecs' <- gets funcDecs
@@ -257,7 +256,7 @@ compileExpr (Parser.FuncDef name args body) = do
     return [] -- Function definitions get appended at the last stage of compilation
   where
     compileParameter :: Parser.Expr -> String -> StateT CompilerState IO [Instruction]
-    compileParameter (Parser.Var varName) _ = return [LStore varName]
+    compileParameter (Parser.Var varName _) _ = return [LStore varName]
     compileParameter lex@(Parser.ListLit l) funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
         if null l
@@ -284,13 +283,13 @@ compileExpr (Parser.FuncDef name args body) = do
                 return $ lengthCheck ++ concat xToY ++ rest
     compileParameter Parser.Placeholder _ = return []
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
-compileExpr (Parser.Var x) = do
+compileExpr (Parser.Var x _) = do
     functions' <- gets functions
     -- let fun = findFunction x functions' [Parser.Any]
     let fun = find (\y -> last (splitOn "::" (T.pack $ baseName y)) == T.pack x && funame y /= "main") functions'
     -- when (x == "name") $ error $ show (map (\y -> last (splitOn "::" (T.pack $ baseName y))) functions')
     case fun of
-        (Just f) -> compileExpr (Parser.FuncCall (funame f) [])
+        (Just f) -> compileExpr (Parser.FuncCall (funame f) [] zeroPosition)
         Nothing -> return [LLoad x]
 compileExpr (Parser.Let name value) = do
     curCon <- gets currentContext
@@ -335,7 +334,7 @@ compileExpr st@(Parser.Struct _ fields) = do
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
         let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any]}]
-        let impl = Parser.Impl traitName (Parser.name st) [Parser.FuncDef{name = name, args = [Parser.Var "self"], body = Parser.StructAccess (Parser.Var "self") (Parser.Var name)}]
+        let impl = Parser.Impl traitName (Parser.name st) [Parser.FuncDef{name = name, args = [Parser.Var "self" zeroPosition], body = Parser.StructAccess (Parser.Var "self" zeroPosition) (Parser.Var name zeroPosition)}]
         _ <- compileExpr trait
         _ <- compileExpr impl
         return ()
@@ -345,7 +344,7 @@ compileExpr (Parser.StructLit name fields) = do
     let instructions = zip names fields' >>= \(name', field) -> [Push name', field]
     implsForStruct <- implsFor name
     return $ reverse instructions ++ [Push $ DString name, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length instructions + 4]
-compileExpr (Parser.StructAccess struct (Parser.Var field)) = do
+compileExpr (Parser.StructAccess struct (Parser.Var field _)) = do
     struct' <- compileExpr struct
     return $ struct' ++ [Access field]
 compileExpr (Parser.Import o from) = do
@@ -378,7 +377,7 @@ compileExpr (Parser.Lambda args body) = do
     lets' <- gets lets
     let name = ":lambda" ++ show fId
     let letsOfCurrentContext = filter (\x -> context x == currentContext') lets'
-    let argsAndLets = args ++ map (\x -> Parser.Var x.name) letsOfCurrentContext
+    let argsAndLets = args ++ map (\x -> Parser.Var x.name zeroPosition) letsOfCurrentContext
     let ldec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
     let ldef = Parser.FuncDef name argsAndLets body
     mapM_ compileExpr [ldec, ldef]

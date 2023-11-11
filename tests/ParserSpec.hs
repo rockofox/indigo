@@ -21,11 +21,12 @@ spec = do
         it "Should be true for exact matches" $
             property $
                 \t -> compareTypes t t `shouldBe` True
-        it "Should be false for non-exact matches (except for Any or Fn)" $
+        it "Should be false for non-exact matches (except for Any or Fn or Self)" $
             property $
                 \t1 t2 ->
                     notElem Any [t1, t2]
                         && not (isFn t1 || isFn t2)
+                        && notElem Self [t1, t2]
                         && t1
                             /= t2
                         ==> compareTypes t1 t2
@@ -46,12 +47,12 @@ spec = do
         it "Should parse a simple program" $
             parseProgram "main => IO = print \"Hello, world!\"" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"]}], dec = FuncDec{name = "main", types = [IO]}}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [IO]}}])
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [StructAccess (StructLit "bello" []) (Var "name")])
+                    (Program [StructAccess (StructLit "bello" []) (Var "name" anyPosition)])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" CompilerFlags{verboseMode = False}
@@ -64,4 +65,14 @@ spec = do
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Impl{trait = "Show", for = "Point", methods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
+                    -- (Program [Impl{trait = "Show", for = "Point", methods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
+                    ( Program
+                        [ Impl
+                            { trait = "Show"
+                            , for = "Point"
+                            , methods =
+                                [ FuncDef{name = "show", args = [Var "point" anyPosition], body = parseFreeUnsafe "\"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""}
+                                ]
+                            }
+                        ]
+                    )

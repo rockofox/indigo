@@ -25,6 +25,7 @@ library
                      , BytecodeCompiler
                      , AST
                      , Verifier
+                     , Util
     other-modules: Paths_indigo
     build-depends: base,
         containers,
@@ -39,7 +40,8 @@ library
         binary,
         split,
         vector,
-        pretty-simple
+        pretty-simple,
+        monad-loops
     hs-source-dirs:   lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings,

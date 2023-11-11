@@ -64,7 +64,6 @@ data ParserState = ParserState
     { validFunctions :: [String]
     , validLets :: [String]
     , compilerFlags :: CompilerFlags
-    , verifierTree :: [PosExpr]
     }
     deriving
         ( Show
@@ -168,11 +167,7 @@ extra = do
 
 expr :: Parser Expr
 expr = do
-    start <- getOffset
-    ex <- makeExprParser term binOpTable
-    end <- getOffset
-    modify (\state -> state{verifierTree = PosExpr (ex, start, end) : verifierTree state})
-    return ex
+    makeExprParser term binOpTable
 
 validType :: Parser Type
 validType =
@@ -238,9 +233,11 @@ gravis = do
 
 funcCall :: Parser Expr
 funcCall = do
+    start <- getOffset
     name <- (extra <|> gravis) <?> "function name"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
-    return $ FuncCall name args
+    end <- getOffset
+    return $ FuncCall name args (Position (start, end))
 
 letExpr :: Parser Expr
 letExpr = do
@@ -283,14 +280,10 @@ combinedFunc = do
             symbol ":"
             argType <- validType <?> "function argument type"
             optional $ symbol "->"
-            return (Var arg, argType) <?> "function arguments"
+            return (Var arg (Position (0, 0)), argType) <?> "function arguments"
     symbol "=>"
     returnType <- validType <?> "return type"
     symbol "="
-
-    -- state <- get
-    -- put state{validFunctions = name : validFunctions state ++ [name | (name, x@(Fn _ _)) <- zip args argTypes], validLets = args}
-
     body <- recover expr <?> "function body"
     return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [returnType]))
 
@@ -314,15 +307,7 @@ struct = do
     keyword "struct"
     name <- extra
     symbol "="
-    -- traceShowM $ "Parsing struct " ++ show name
-    -- fields <-
-    --     parens (
-    --         sepBy
-    --             structField
-    --             (symbol "," <* optional newline')
-    --             )
     fields <- parens $ structField `sepBy` symbol ","
-    -- traceShowM $ "Parsed struct " ++ show fields
     return $ Struct name fields
   where
     structField = do
@@ -363,27 +348,42 @@ parseProgram' = runParserT program ""
 
 parseProgram :: Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
 parseProgram t cf = do
-    let (result, _) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
+    let (result, _) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
     case result of
         Left err -> Left err
         Right program' -> Right program'
 
 parseAndVerify :: String -> Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
 parseAndVerify name t cf = do
-    let (result, state) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = [], verifierTree = []})
+    let (result, state) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
     case result of
         Left err -> Left err
         Right program' -> do
-            case verifyProgram name t (verifierTree state) of
+            let (Program exprs) = program'
+            let verifierResult = verifyProgram name t exprs
+            case verifierResult of
                 Left err -> Left err
                 Right _ -> Right program'
+
+-- case verifyProgram name t (verifierTree state) of
+--     Left err -> Left err
+--     Right _ -> Right program'
 
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
     Left err -> error $ show err
     Right program' -> case program' of
-        Program [exprs] -> exprs
+        Program [exprs] -> replacePositionWithAnyPosition exprs
         _ -> error "Program should only have one expression"
+  where
+    replacePositionWithAnyPosition :: Expr -> Expr
+    replacePositionWithAnyPosition (FuncCall a b _) = FuncCall a (map replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Var a _) = Var a anyPosition
+    replacePositionWithAnyPosition fd@FuncDef{body} = fd{body = replacePositionWithAnyPosition body}
+    replacePositionWithAnyPosition (DoBlock a) = DoBlock $ map replacePositionWithAnyPosition a
+    replacePositionWithAnyPosition (ListConcat a b) = ListConcat (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b)
+    replacePositionWithAnyPosition (StructAccess a b) = StructAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b)
+    replacePositionWithAnyPosition x = x
 
 lines' :: Parser [Expr]
 lines' = expr `sepEndBy` newline'
@@ -392,7 +392,10 @@ program :: Parser Program
 program = Program <$> between scn eof lines'
 
 var :: Parser Expr
-var = Var <$> (extra <|> gravis)
+var = do
+    start' <- getOffset
+    name <- extra <|> gravis
+    Var name . position start' <$> getOffset
 
 target :: Parser Expr
 target = do
@@ -402,7 +405,6 @@ target = do
 
 listPattern :: Parser Expr
 listPattern = do
-    -- elements <- sepBy1 (identifier <|> (symbol "_" >> return "")) (symbol ":")
     elements <- sepBy1 (var <|> placeholder <|> array) (symbol ":")
     return $ ListPattern elements
 

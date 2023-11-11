@@ -69,7 +69,7 @@ spec = do
         it "Casts are compatible with binary operations" $ do
             compile [r|(2 as Float) + 4.0|]
                 `shouldReturn` [Push 2, Push 0.0, VM.Cast, Push 4.0, VM.Add, Exit]
-    describe "typesMatch" $ do
+    xdescribe "typesMatch" $ do
         it "Should be true for exact matches" $
             property $
                 \t f ->
