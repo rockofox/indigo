@@ -99,7 +99,7 @@ potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = do
     if showTime then timeItNamed msg action else action
 
-parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) Program)
+-- parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) (Program))
 parse name input compilerFlags = do
     return $ parseAndVerify name (T.pack input) CompilerFlags{verboseMode = False}
 

@@ -1,5 +1,7 @@
 module AST where
 
+import Control.Monad (liftM)
+import Data.Bifunctor (second)
 import Data.Binary qualified
 import GHC.Generics (Generic)
 
@@ -32,7 +34,6 @@ data Expr
     | Not Expr
     | UnaryMinus Expr
     | Placeholder
-    | InternalFunction {name :: String, args :: [Expr]}
     | Discard Expr
     | Import [String] String
     | Ref Expr
@@ -47,7 +48,7 @@ data Expr
     | Power Expr Expr
     | Target String Expr
     | Then Expr Expr
-    | Bind Expr Expr
+    | Pipeline Expr Expr
     | Lambda [Expr] Expr
     | Cast Expr Expr
     | TypeLit Type
@@ -60,6 +61,58 @@ data Expr
         , Generic
         , Eq
         )
+
+children :: Expr -> [Expr]
+children (Add a b) = [a, b]
+children (Sub a b) = [a, b]
+children (Mul a b) = [a, b]
+children (Div a b) = [a, b]
+children (Eq a b) = [a, b]
+children (Neq a b) = [a, b]
+children (Lt a b) = [a, b]
+children (Gt a b) = [a, b]
+children (Le a b) = [a, b]
+children (Ge a b) = [a, b]
+children (And a b) = [a, b]
+children (Or a b) = [a, b]
+children (Not a) = [a]
+children (UnaryMinus a) = [a]
+children (If a b c) = [a, b, c]
+children (Let _ a) = [a]
+children (FuncDef _ _ a) = [a]
+children (FuncCall _ a _) = a
+children (Function a b) = a ++ [b]
+children (DoBlock a) = a
+children (ExternDec{}) = []
+children Placeholder = []
+children (Var _ _) = []
+children (BoolLit _) = []
+children (IntLit _) = []
+children (StringLit _) = []
+children (FloatLit _) = []
+children (Discard a) = [a]
+children (Import _ _) = []
+children (Ref a) = [a]
+children (Struct _ _) = []
+children (StructLit _ a) = map snd a
+children (StructAccess a b) = [a, b]
+children (ListLit a) = a
+children (ListPattern a) = a
+children (ListConcat a b) = [a, b]
+children (ArrayAccess a b) = [a, b]
+children (Modulo a b) = [a, b]
+children (Power a b) = [a, b]
+children (Target _ a) = [a]
+children (Then a b) = [a, b]
+children (Pipeline a b) = [a, b]
+children (Lambda _ a) = [a]
+children (Cast a b) = [a, b]
+children (TypeLit _) = []
+children (Flexible a) = [a]
+children (Trait _ a) = a
+children (Impl _ _ a) = a
+children IOLit = []
+children (FuncDec _ _) = []
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -124,9 +177,10 @@ compareTypes (Fn x y) (Fn a b) = do
 compareTypes Self Self = True
 compareTypes Self StructT{} = True
 compareTypes StructT{} Self = True
+compareTypes (List x) (List y) = compareTypes x y
 compareTypes x y = x == y || x == Any || y == Any
 
-typeOf :: Expr -> AST.Type
+typeOf :: Expr -> Type
 typeOf (IntLit _) = Int
 typeOf (FloatLit _) = Float
 typeOf (BoolLit _) = Bool
@@ -146,7 +200,7 @@ typeOf (Ge _ _) = Bool
 typeOf (And _ _) = Bool
 typeOf (Or _ _) = Bool
 typeOf (Not _) = Bool
-typeOf (FuncCall _ _ zeroPosition) = error "Cannot infer type of function call"
+typeOf (FuncCall{}) = error "Cannot infer type of function call"
 typeOf Placeholder = None
 typeOf (Var{}) = Unknown -- error "Cannot infer type of variable"
 typeOf (Let _ _) = error "Cannot infer type of let"
@@ -156,7 +210,6 @@ typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
 typeOf (Function _ _) = error "Cannot infer type of modern function"
 typeOf (DoBlock _) = error "Cannot infer type of do block"
 typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
-typeOf (InternalFunction _ _) = error "Cannot infer type of internal function"
 typeOf (Discard _) = error "Cannot infer type of discard"
 typeOf (Import _ _) = error "Cannot infer type of import"
 typeOf (Ref _) = error "Cannot infer type of ref"
@@ -170,8 +223,7 @@ typeOf IOLit = IO
 typeOf (ListConcat{}) = List Any
 typeOf (ListPattern _) = List Any
 typeOf (StructAccess s _) = typeOf s
-typeOf (Then _ _) = error "Cannot infer type of then"
-typeOf (Bind _ _) = error "Cannot infer type of bind"
+typeOf (Pipeline _ b) = typeOf b
 typeOf (Lambda _ _) = Fn [] Unknown
 typeOf (Cast _ to) = typeOf to
 typeOf (TypeLit x) = x

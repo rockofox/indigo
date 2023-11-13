@@ -17,6 +17,6 @@ spec :: Spec
 spec = do
     describe "verifyProgram" $ do
         it "Should fail on undefined variables" $ do
-            verifyProgram "test.in" [r|f x y = x + z|] [FuncDec "f" [Int, Int, Int], FuncDef "f" [Var "x" zeroPosition, Var "y" zeroPosition] (Add (Var "x" zeroPosition) (Var "z" zeroPosition))] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Could not find variable z")
+            verifyProgram "test.in" [r|f x y = x + z|] [FuncDec "f" [Int, Int, Int], FuncDef "f" [Var "x" zeroPosition, Var "y" zeroPosition] (Add (Var "x" zeroPosition) (Var "z" zeroPosition))] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Could not find relevant binding for z")
         it "Should fail on undefined functions" $ do
-            verifyProgram "test.in" [r|main => IO = x 2|] [FuncDec "main" [IO], FuncDef "main" [] (FuncCall "x" [IntLit 2] zeroPosition)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Could not find function x")
+            verifyProgram "test.in" [r|let main => IO = x 2|] [FuncDec "main" [IO], FuncDef "main" [] (FuncCall "x" [IntLit 2] zeroPosition)] `shouldFailWith` errFancy 0 (fancy $ ErrorFail "Could not find relevant binding for x")

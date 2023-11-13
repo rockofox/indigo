@@ -1,4 +1,4 @@
-module FrontendSpec (spec) where
+module IntegrationSpec (spec) where
 
 import BytecodeCompiler
     ( compileProgram
@@ -41,46 +41,46 @@ compileAndRun prog = do
 spec = do
     describe "Hello World" $ do
         it "Should print Hello, world!" $ do
-            compileAndRun "main => IO = println \"Hello, world!\"" `shouldReturn` "Hello, world!\n"
+            compileAndRun "let main => IO = println \"Hello, world!\"" `shouldReturn` "Hello, world!\n"
     describe "println" $ do
         it "Can print any string" $ do
-            property $ \s -> compileAndRun ("main => IO = println " ++ show s) `shouldReturn` (s ++ "\n")
+            property $ \s -> compileAndRun ("let main => IO = println " ++ show s) `shouldReturn` (s ++ "\n")
     describe "Pattern matching" $ do
         it "Can return the first element of a list" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:xs) = x\nmain => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
+            compileAndRun "t :: List{Int} -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
         it "Can return the first two" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = x + y\nmain => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
+            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
         it "Can return the excess" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = xs\nmain => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
+            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
     describe "Prelude" $ do
         it "Can use map" $ do
-            compileAndRun "main => IO = println (map (`+`1), [1, 2, 3])" `shouldReturn` "[2,3,4]\n"
+            compileAndRun "let main => IO = println (map (`+`1), [1, 2, 3])" `shouldReturn` "[2,3,4]\n"
         it "Can use sum on integers" $ do
-            compileAndRun "main => IO = println (sum [1, 2, 3])" `shouldReturn` "6\n"
+            compileAndRun "let main => IO = println (sum [1, 2, 3])" `shouldReturn` "6\n"
         xit "Can use sum on floats" $ do
-            compileAndRun "main => IO = println (sum [1.0, 2.0, 3.0])" `shouldReturn` "6.0\n"
+            compileAndRun "let main => IO = println (sum [1.0, 2.0, 3.0])" `shouldReturn` "6.0\n"
         xit "Can use foldl" $ do
-            compileAndRun "main => IO = println (foldl (`+`), 0, [1, 2, 3])" `shouldReturn` "6\n"
+            compileAndRun "let main => IO = println (foldl (`+`), 0, [1, 2, 3])" `shouldReturn` "6\n"
     describe "Implicit casting" $ do
         it "Can cast from int to float" $ do
-            compileAndRun [r|main => IO = println ^2 + 4.0|] `shouldReturn` "6.0\n"
-            compileAndRun [r|main => IO = println 2.0 + ^4|] `shouldReturn` "6.0\n"
+            compileAndRun [r|let main => IO = println ^2 + 4.0|] `shouldReturn` "6.0\n"
+            compileAndRun [r|let main => IO = println 2.0 + ^4|] `shouldReturn` "6.0\n"
         it "Can cast from float to int" $ do
-            compileAndRun [r|main => IO = println ^2.0 + 4|] `shouldReturn` "6\n"
-            compileAndRun [r|main => IO = println 2 + ^4.0|] `shouldReturn` "6\n"
+            compileAndRun [r|let main => IO = println ^2.0 + 4|] `shouldReturn` "6\n"
+            compileAndRun [r|let main => IO = println 2 + ^4.0|] `shouldReturn` "6\n"
         it "Can cast from int to string" $ do
-            compileAndRun [r|main => IO = println ^2 + "test"|] `shouldReturn` "2test\n"
+            compileAndRun [r|let main => IO = println ^2 + "test"|] `shouldReturn` "2test\n"
         it "Can cast from string to int" $ do
-            compileAndRun [r|main => IO = println ^"2" + 4|] `shouldReturn` "6\n"
+            compileAndRun [r|let main => IO = println ^"2" + 4|] `shouldReturn` "6\n"
     describe "Explicit casting" $ do
         it "Can cast from int to float" $ do
-            compileAndRun [r|main => IO = println (2 as Float) + 4.0|] `shouldReturn` "6.0\n"
-            compileAndRun [r|main => IO = println 2.0 + (4 as Float)|] `shouldReturn` "6.0\n"
+            compileAndRun [r|let main => IO = println (2 as Float) + 4.0|] `shouldReturn` "6.0\n"
+            compileAndRun [r|let main => IO = println 2.0 + (4 as Float)|] `shouldReturn` "6.0\n"
         it "Can cast a function call" $ do
             compileAndRun
                 [r|f :: Int -> Int
                             f x = x + 1
-                            main => IO = println ((f 2) as Float) + 4.0|]
+                            let main => IO = println ((f 2) as Float) + 4.0|]
                 `shouldReturn` "7.0\n"
     describe "Overloading" $ do
         it "Can find function based on type" $ do
@@ -90,7 +90,7 @@ spec = do
                 f x = x + 1
                 f :: String -> String
                 f x = "'":x:"'" 
-                main => IO = do
+                let main => IO = do
                     println f 1
                     println f "test"
                 end|]
@@ -102,7 +102,7 @@ spec = do
                 f x = sum x
                 f :: List{String} -> String
                 f x = x
-                main => IO = do
+                let main => IO = do
                     println f [1, 2, 3]
                     println f ["test", "test2"]
                 end|]
@@ -114,7 +114,7 @@ spec = do
                 struct Dog = (name: String)
                 struct Cat = (name: String)
 
-                main => IO = do
+                let main => IO = do
                     let bello = Dog { name : "Bello" }
                     let mauzi = Cat { name : "Mauzi" }
                     println bello.name
@@ -133,7 +133,7 @@ spec = do
                 getName :: Cat -> String
                 getName self = self.name
 
-                main => IO = do
+                let main => IO = do
                     let bello = Dog { name : "Bello" }
                     let mauzi = Cat { name : "Mauzi" }
                     println (getName bello)
@@ -146,7 +146,7 @@ spec = do
                 struct Dog = (name: String)
                 struct Cat = (name: String)
 
-                main => IO = do
+                let main => IO = do
                     let bello = Dog { name : "Bello" }
                     let mauzi = Cat { name : "Mauzi" }
                     println name bello
@@ -169,7 +169,7 @@ spec = do
                         makeNoise self = println "Meow"
                     end
 
-                    main => IO = do
+                    let main => IO = do
                         makeNoise (Dog {})
                         makeNoise (Cat {})
                     end
@@ -187,7 +187,7 @@ spec = do
 --         f (x:xs) = x + ((f xs) as Float)
 --         # f :: List{String} -> String
 --         # f x = x
---         main => IO = do
+--         let main => IO = do
 --             println f [1, 2, 3]
 --             println f [1.0, 2.0, 3.0]
 --             # println f ["test", "test2"]

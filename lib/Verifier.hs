@@ -112,7 +112,7 @@ verifyMultiple = concatMapM verifyExpr
 verifyExpr :: Expr -> State VerifierState [ParseError s e]
 verifyExpr (FuncDef name args body) = do
     -- TODO: Position
-    currentFrame' <- currentFrame
+    -- currentFrame' <- currentFrame
     -- modify (\state -> state { frames = currentFrame' { bindings = Set.insert (VBinding { name = name, args = map typeOf args, ttype = Any }) (bindings (head (frames state))) } : tail (frames state) })
     b <- findMatchingBinding name
     case b of
@@ -121,6 +121,8 @@ verifyExpr (FuncDef name args body) = do
             let argsAsBindings = concatMap argToBindings argsAndTypes
             -- let argsAsBindings = concatMap (\case { Var name' _ -> [VBinding { name = name', args = [], ttype = Any }]; l@ListPattern{} -> listPatternToBindings l; _ -> [] }) args
             modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty}) : frames state})
+            -- Add the function itself to the frame
+            modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = map typeOf args, ttype = Any}) (bindings (head (frames state))), ttypes = Map.empty}) : tail (frames state)})
             bodyErrors <- verifyExpr body
             modify (\state -> state{frames = tail (frames state)})
             return bodyErrors
@@ -152,7 +154,8 @@ verifyExpr (Let name expr) = do
     verifyExpr expr
 verifyExpr (Var name (Position (start, _))) = do
     matchingBinding <- findMatchingBinding name
-    return [FancyError start (Set.singleton (ErrorFail $ "Could not find variable " ++ name)) | isNothing matchingBinding]
+    return [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding]
+verifyExpr (StructAccess _ _) = return [] -- TODO
 verifyExpr (Impl trait for _) = do
     rootFrame <- head . frames <$> get
     modify (\state -> state{frames = rootFrame{ttypes = Map.alter (\case Just (VType{implements = impls}) -> Just (VType{implements = trait : impls}); Nothing -> Just (VType{implements = [trait]})) for (ttypes rootFrame)} : tail (frames state)})
@@ -165,12 +168,10 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     matchingBinding <- findMatchingBinding name
     eArgs <- concatMapM verifyExpr args
     argumentTypes <- mapM typeOf' args
-    fta <- functionTypesAcceptable argumentTypes (fromJust matchingBinding).args
+    fta <- case matchingBinding of
+        Just binding -> functionTypesAcceptable argumentTypes binding.args
+        Nothing -> return False
     let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
-    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find function " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes
-verifyExpr (Add x y) = do
-    -- TODO: Binops, see traversable
-    x' <- verifyExpr x
-    y' <- verifyExpr y
-    return $ x' ++ y'
-verifyExpr _ = return []
+    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes
+verifyExpr x = do
+    concatMapM verifyExpr (children x)

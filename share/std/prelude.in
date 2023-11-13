@@ -7,7 +7,7 @@
 `/` :: Any -> Any -> Any
 `/` x y = x / y
 
-flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
+let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 
 map :: Fn{Any => Any} -> List{Any} -> List{Any}
 map fun [] = []

@@ -33,7 +33,7 @@ data Function = Function
     }
     deriving (Show, Generic)
 
-data CompilerState = CompilerState
+data CompilerState a = CompilerState
     { program :: Parser.Program
     , -- , functions :: [(String, String, [Instruction])]
       functions :: [Function]
@@ -54,16 +54,16 @@ data Let = Let
     }
     deriving (Show)
 
-initCompilerState :: Parser.Program -> CompilerState
+initCompilerState :: Parser.Program -> CompilerState a
 initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] ""
 
-allocId :: StateT CompilerState IO Int
+allocId :: StateT (CompilerState a) IO Int
 allocId = do
     s <- gets lastLabel
     modify (\s' -> s'{lastLabel = s + 1})
     return s
 
-compileProgram :: Parser.Program -> StateT CompilerState IO [Instruction]
+compileProgram :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgram (Parser.Program expr) = do
     prelude <- do
         i <- liftIO preludeFile
@@ -76,7 +76,7 @@ compileProgram (Parser.Program expr) = do
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude' ++ functions' ++ freePart ++ [Exit]
 
-compileProgramBare :: Parser.Program -> StateT CompilerState IO [Instruction]
+compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgramBare (Parser.Program expr) = do
     freePart <- concatMapM compileExpr expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
@@ -140,7 +140,7 @@ findSourceFile fileName = do
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
-doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT CompilerState IO [Instruction]
+doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y op = do
     functions' <- gets functions
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
@@ -159,7 +159,7 @@ doBinOp x y op = do
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ cast ++ [op])
 
-typeOf :: Parser.Expr -> StateT CompilerState IO Parser.Type
+typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
 typeOf (Parser.FuncCall funcName _ zeroPosition) = do
     funcDecs' <- gets funcDecs
     let a =
@@ -174,21 +174,21 @@ typeOf (Parser.Var varName _) = do
     return a
 typeOf x = return $ Parser.typeOf x
 
-constructFQName :: String -> [Parser.Expr] -> StateT CompilerState IO String
+constructFQName :: String -> [Parser.Expr] -> StateT (CompilerState a) IO String
 constructFQName "main" _ = return "main"
 constructFQName funcName args = mapM (typeOf >=> return . show) args <&> \x -> funcName ++ ":" ++ intercalate "," x
 
-constructFQName' :: String -> [Parser.Type] -> StateT CompilerState IO String
+constructFQName' :: String -> [Parser.Type] -> StateT (CompilerState a) IO String
 constructFQName' "main" _ = return "main"
 constructFQName' funcName args = return $ funcName ++ ":" ++ intercalate "," (map show args)
 
-implsFor :: String -> StateT CompilerState IO [String]
+implsFor :: String -> StateT (CompilerState a) IO [String]
 implsFor structName = do
     impls' <- gets impls
     let impls'' = filter (\x -> Parser.for x == structName) impls'
     return $ map Parser.trait impls''
 
-compileExpr :: Parser.Expr -> StateT CompilerState IO [Instruction]
+compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
 compileExpr (Parser.Add x y) = doBinOp x y Add
 compileExpr (Parser.Sub x y) = doBinOp x y Sub
 compileExpr (Parser.Mul x y) = doBinOp x y Mul
@@ -255,7 +255,7 @@ compileExpr (Parser.FuncDef name args body) = do
     modify (\s -> s{functions = Function name funame function funcDec.types : functions s})
     return [] -- Function definitions get appended at the last stage of compilation
   where
-    compileParameter :: Parser.Expr -> String -> StateT CompilerState IO [Instruction]
+    compileParameter :: Parser.Expr -> String -> StateT (CompilerState a) IO [Instruction]
     compileParameter (Parser.Var varName _) _ = return [LStore varName]
     compileParameter lex@(Parser.ListLit l) funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
@@ -330,7 +330,7 @@ compileExpr st@(Parser.Struct _ fields) = do
     mapM_ createFieldTrait fields
     return []
   where
-    createFieldTrait :: (String, Parser.Type) -> StateT CompilerState IO ()
+    createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
         let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any]}]
@@ -382,21 +382,31 @@ compileExpr (Parser.Lambda args body) = do
     let ldef = Parser.FuncDef name argsAndLets body
     mapM_ compileExpr [ldec, ldef]
     return $ map (\x -> LLoad x.name) letsOfCurrentContext ++ [PushPf name (length letsOfCurrentContext)]
+compileExpr (Parser.Pipeline a (Parser.Var b _)) = do
+    compileExpr (Parser.FuncCall b [a] zeroPosition)
+compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = do
+    compileExpr (Parser.FuncCall f (a : args) zeroPosition)
+compileExpr (Parser.Pipeline a (Parser.Then b c)) = do
+    compileExpr (Parser.Then (Parser.Pipeline a b) c)
+compileExpr (Parser.Then a b) = do
+    a' <- compileExpr a
+    b' <- compileExpr b
+    return $ a' ++ b'
 compileExpr x = error $ show x ++ " is not implemented"
 
-createVirtualFunctions :: StateT CompilerState IO ()
+createVirtualFunctions :: StateT (CompilerState a) IO ()
 createVirtualFunctions = do
     impls' <- gets impls
     traits' <- gets traits
     let traitsAssoc = map (\x -> (x, filter (\y -> Parser.trait y == Parser.name x) impls')) traits'
     mapM_ compileTrait traitsAssoc
   where
-    compileTrait :: (Parser.Expr, [Parser.Expr]) -> StateT CompilerState IO ()
+    compileTrait :: (Parser.Expr, [Parser.Expr]) -> StateT (CompilerState a) IO ()
     compileTrait (trait, impl) = do
         let methods = Parser.methods trait
         let fors = map Parser.for impl
         mapM_ (\method -> createBaseDef method trait fors) methods
-    createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT CompilerState IO ()
+    createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT (CompilerState a) IO ()
     createBaseDef (Parser.FuncDec name typess) trait fors = do
         let traitName = Parser.name trait
         let body =

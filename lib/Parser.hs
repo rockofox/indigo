@@ -25,6 +25,7 @@ import Control.Monad.State
     , runState
     )
 import Data.Char (isUpper)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
 import Text.Megaparsec
@@ -78,7 +79,7 @@ binOpTable =
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]
     , [binary ">>" Then]
-    , [binary "~>" Bind]
+    , [binary "|>" Pipeline]
     , [binary "." StructAccess]
     , [binary "as" Cast]
     , [binary ":" ListConcat]
@@ -166,8 +167,7 @@ extra = do
             else return x
 
 expr :: Parser Expr
-expr = do
-    makeExprParser term binOpTable
+expr = makeExprParser term binOpTable
 
 validType :: Parser Type
 validType =
@@ -273,19 +273,21 @@ doBlock = do
 
 combinedFunc :: Parser Expr
 combinedFunc = do
+    keyword "let"
     name <- identifier <?> "function name"
-    (args, argTypes) <-
+    (args, argTypes) <- parens argsAndTypes <|> argsAndTypes
+    returnType <- optional (symbol "=>" >> validType <?> "return type")
+    symbol "="
+    body <- recover expr <?> "function body"
+    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]))
+  where
+    argsAndTypes =
         unzip <$> many do
             arg <- identifier <?> "function argument"
             symbol ":"
             argType <- validType <?> "function argument type"
             optional $ symbol "->"
             return (Var arg (Position (0, 0)), argType) <?> "function arguments"
-    symbol "=>"
-    returnType <- validType <?> "return type"
-    symbol "="
-    body <- recover expr <?> "function body"
-    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [returnType]))
 
 import_ :: Parser Expr
 import_ = do
@@ -466,8 +468,8 @@ term =
         , StringLit <$> try stringLit
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
-        , letExpr
-        , struct
+        , -- , letExpr
+          struct
         , import_
         , doBlock
         , impl

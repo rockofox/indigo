@@ -85,14 +85,26 @@ beAnimal a = do
   makeNoise a
 end
 
+testInside :: Int -> Int -> Int
+testInside a b = do
+   let blaaaa => Int = 24
+   addIt :: Int -> Int -> Int
+   addIt t u = t + u + blaaaa
+   addIt a, b
+end
 
-main => IO = do
+let main => IO = do
   # let blalbl = foldl (ppp), 0.0, [2.0,4.0,8.0]
   # println blalbl
   # println (mySum [2.0,4.0,8.0])
   let blaa = 10
-  let bello = Dog { name: "Bello" }
-  let minka = Cat { name: "Minka" }
+  let bello = Dog { name: "Bello"   let minka = Cat { name: "Minka" }
+
+  let blaaaa = 12
+
+  let square (a: Int) = a * a
+  (square 10) |> square |> println >> println "Hello World"
+
   # println "Hello World"
   # makeNoise minka
   # makeNoise bello
@@ -102,6 +114,9 @@ main => IO = do
   # println map addOne, [1,2,3,4,5]
   # println map (\a -> a + blaa), [1,2,3,4,5]
   # println testL
-  beAnimal bello
-  beAnimal minka
+  # beAnimal bello
+  # beAnimal minka
+  # addIt 2,4
+  # println testInside 2, 4
+  # println blaaaa
 end
