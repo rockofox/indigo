@@ -4,6 +4,7 @@
 module Verifier where
 
 import AST
+import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
 import Data.Functor ((<&>))
