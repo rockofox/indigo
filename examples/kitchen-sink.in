@@ -1,4 +1,4 @@
-import * from examples.test2
+import * from examples/test2 as test2
 
 printPairs :: List{Int} -> IO
 printPairs [] = do
@@ -98,12 +98,15 @@ let main => IO = do
   # println blalbl
   # println (mySum [2.0,4.0,8.0])
   let blaa = 10
-  let bello = Dog { name: "Bello"   let minka = Cat { name: "Minka" }
+  let bello = Dog { name: "Bello" }
+  let minka = Cat { name: "Minka" }
 
   let blaaaa = 12
 
   let square (a: Int) = a * a
   (square 10) |> square |> println >> println "Hello World"
+
+  println test2@bla 10, 20
 
   # println "Hello World"
   # makeNoise minka

@@ -3,7 +3,9 @@
 {-# HLINT ignore "Use newtype instead of data" #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Parser (Expr (..), Program (..), Type (..), parseProgram, parseFreeUnsafe, parseAndVerify, CompilerFlags (..), typeOf, compareTypes) where
+module Parser (Expr (..), Program (..), parseProgram', ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), typeOf, compareTypes) where
+
+-- module Parser where
 
 import AST
 import Control.Monad qualified
@@ -21,7 +23,6 @@ import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeE
 import Control.Monad.State
     ( MonadState (get, put)
     , State
-    , modify
     , runState
     )
 import Data.Char (isUpper)
@@ -52,7 +53,6 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
-import Verifier (verifyProgram)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -160,7 +160,7 @@ extra = do
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
         else return name
   where
-    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_')
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '@')
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -292,10 +292,12 @@ combinedFunc = do
 import_ :: Parser Expr
 import_ = do
     keyword "import"
+    qualified <- optional (keyword "qualified" >> return True) <?> "qualified"
     objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",")
     keyword "from"
-    from <- many (alphaNumChar <|> char '.') <?> "import path"
-    return $ Import objects from
+    from <- many (alphaNumChar <|> char '.' <|> char '@' <|> char '/') <?> "import path"
+    alias <- optional (keyword " as" >> extra) <?> "import alias"
+    return $ Import{objects = objects, from = from, qualified = fromMaybe False qualified, as = alias}
 
 array :: Parser Expr
 array = do
@@ -354,18 +356,6 @@ parseProgram t cf = do
     case result of
         Left err -> Left err
         Right program' -> Right program'
-
-parseAndVerify :: String -> Text -> CompilerFlags -> Either (ParseErrorBundle Text Void) Program
-parseAndVerify name t cf = do
-    let (result, state) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
-    case result of
-        Left err -> Left err
-        Right program' -> do
-            let (Program exprs) = program'
-            let verifierResult = verifyProgram name t exprs
-            case verifierResult of
-                Left err -> Left err
-                Right _ -> Right program'
 
 -- case verifyProgram name t (verifierTree state) of
 --     Left err -> Left err

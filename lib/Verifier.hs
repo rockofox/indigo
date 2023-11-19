@@ -11,8 +11,9 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Set qualified as Set
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.Void
+import Parser
 import Text.Megaparsec hiding (State)
 import Util
 
@@ -36,7 +37,7 @@ data VBinding = VBinding
     }
     deriving (Show, Eq, Ord)
 
-findMatchingBinding :: String -> State VerifierState (Maybe VBinding)
+findMatchingBinding :: String -> StateT VerifierState IO (Maybe VBinding)
 findMatchingBinding name = do
     frames' <- frames <$> get
     let matchingBindings = concatMap (Set.toList . Set.filter (\binding -> Verifier.name binding == name) . bindings) frames'
@@ -51,7 +52,7 @@ listPatternToBindings (ListPattern exprs) (List t) = do
     map (\(Var name _) -> VBinding{name = name, args = [], ttype = t}) singulars ++ [VBinding{name = restName, args = [], ttype = List t}]
 listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
 
-typeOf' :: Expr -> State VerifierState Type
+typeOf' :: Expr -> StateT VerifierState IO Type
 typeOf' (Var name _) = do
     matchingBinding <- findMatchingBinding name
     return $ maybe Unknown ttype matchingBinding
@@ -60,7 +61,7 @@ typeOf' (FuncCall name _ _) = do
     return $ maybe Unknown ttype matchingBinding
 typeOf' x = return $ typeOf x
 
-compareTypes' :: Type -> Type -> State VerifierState Bool
+compareTypes' :: Type -> Type -> StateT VerifierState IO Bool
 compareTypes' (StructT a) (StructT b) = do
     rootFrame <- gets frames <&> last
     let ttypes' = ttypes rootFrame
@@ -69,7 +70,7 @@ compareTypes' (StructT a) (StructT b) = do
     return $ a `elem` implements b' || b `elem` implements a'
 compareTypes' a b = return $ compareTypes a b
 
-functionTypesAcceptable :: [Type] -> [Type] -> State VerifierState Bool
+functionTypesAcceptable :: [Type] -> [Type] -> StateT VerifierState IO Bool
 functionTypesAcceptable use def = allM (uncurry compareTypes') $ zip use def
 
 -- functionTypesAcceptable use def = all (uncurry compareTypes) $ zip use def
@@ -85,13 +86,13 @@ initVerifierState =
         { frames = [VerifierFrame{bindings = Set.fromList [VBinding{name = "print", args = [Any], ttype = None}, VBinding{name = "println", args = [Any], ttype = None}], ttypes = Map.empty}] -- TODO: actually import prelude
         }
 
-currentFrame :: State VerifierState VerifierFrame
+currentFrame :: StateT VerifierState IO VerifierFrame
 currentFrame = head . frames <$> get
 
-verifyProgram :: String -> Text -> [Expr] -> Either (ParseErrorBundle Text Void) ()
-verifyProgram name input exprs = evalState (verifyProgram' name input exprs) initVerifierState
+verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())
+verifyProgram name input exprs = evalStateT (verifyProgram' name input exprs) initVerifierState
 
-verifyProgram' :: String -> Text -> [Expr] -> State VerifierState (Either (ParseErrorBundle Text Void) ())
+verifyProgram' :: String -> Text -> [Expr] -> StateT VerifierState IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram' name source exprs = do
     let initialState =
             PosState
@@ -106,10 +107,10 @@ verifyProgram' name source exprs = do
         then return $ Right ()
         else return $ Left $ ParseErrorBundle{bundleErrors = NonEmpty.fromList errors, bundlePosState = initialState}
 
-verifyMultiple :: [Expr] -> State VerifierState [ParseError s e]
+verifyMultiple :: [Expr] -> StateT VerifierState IO [ParseError s e]
 verifyMultiple = concatMapM verifyExpr
 
-verifyExpr :: Expr -> State VerifierState [ParseError s e]
+verifyExpr :: Expr -> StateT VerifierState IO [ParseError s e]
 verifyExpr (FuncDef name args body) = do
     -- TODO: Position
     -- currentFrame' <- currentFrame
@@ -173,5 +174,25 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
         Nothing -> return False
     let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes
+verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) = do
+    when (o /= ["*"]) $ error "Only * imports are supported right now"
+    let convertedPath = map (\x -> if x == '@' then '/' else x) from
+    i <- liftIO $ readFile $ convertedPath ++ ".in"
+    let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Right (Program exprs) -> exprs
+    -- concatMapM compileExpr (map mangleAST expr)
+    -- error $ show (map mangleAST expr)
+    if qualified || isJust as
+        then do
+            let alias = if qualified then from else fromJust as
+            concatMapM verifyExpr (map (`mangleAST` alias) expr)
+        else concatMapM verifyExpr expr
+  where
+    mangleAST :: Parser.Expr -> String -> Parser.Expr
+    mangleAST (Parser.FuncDec name types) alias = Parser.FuncDec (alias ++ "@" ++ name) types
+    mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
+    mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
+    mangleAST x _ = x
 verifyExpr x = do
     concatMapM verifyExpr (children x)

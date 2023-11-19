@@ -7,7 +7,7 @@ import Control.Monad (when, (>=>))
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, intercalate)
-import Data.Maybe (fromJust, isNothing)
+import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
@@ -43,7 +43,7 @@ data CompilerState a = CompilerState
     , lets :: [Let]
     , traits :: [Parser.Expr]
     , impls :: [Parser.Expr]
-    , currentContext :: String
+    , currentContext :: String -- TODO: Nested contexts
     }
     deriving (Show)
 
@@ -347,20 +347,24 @@ compileExpr (Parser.StructLit name fields) = do
 compileExpr (Parser.StructAccess struct (Parser.Var field _)) = do
     struct' <- compileExpr struct
     return $ struct' ++ [Access field]
-compileExpr (Parser.Import o from) = do
+compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
-    let convertedPath = map (\x -> if x == '.' then '/' else x) from
+    let convertedPath = map (\x -> if x == '@' then '/' else x) from
     i <- liftIO $ readFile $ convertedPath ++ ".in"
     let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program exprs) -> exprs
-    concatMapM compileExpr (map mangleAST expr)
+    if qualified || isJust as
+        then do
+            let alias = if qualified then from else fromJust as
+            concatMapM compileExpr (map (`mangleAST` alias) expr)
+        else concatMapM compileExpr expr
   where
-    mangleAST :: Parser.Expr -> Parser.Expr
-    mangleAST (Parser.FuncDec name types) = Parser.FuncDec (from ++ "::" ++ name) types
-    mangleAST (Parser.Function fdef dec) = Parser.Function (map mangleAST fdef) (mangleAST dec)
-    mangleAST (Parser.FuncDef name args body) = Parser.FuncDef (from ++ "::" ++ name) args (mangleAST body)
-    mangleAST x = x
+    mangleAST :: Parser.Expr -> String -> Parser.Expr
+    mangleAST (Parser.FuncDec name types) alias = Parser.FuncDec (alias ++ "@" ++ name) types
+    mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
+    mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
+    mangleAST x _ = x
 compileExpr (Parser.Trait name methods) = do
     let methods' = map (\(Parser.FuncDec name' types) -> Parser.FuncDec name' types) methods
     modify (\s -> s{traits = Parser.Trait name methods : traits s})

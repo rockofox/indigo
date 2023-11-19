@@ -1,7 +1,5 @@
 module AST where
 
-import Control.Monad (liftM)
-import Data.Bifunctor (second)
 import Data.Binary qualified
 import GHC.Generics (Generic)
 
@@ -35,7 +33,7 @@ data Expr
     | UnaryMinus Expr
     | Placeholder
     | Discard Expr
-    | Import [String] String
+    | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
     | Ref Expr
     | Struct {name :: String, fields :: [(String, Type)]}
     | StructLit String [(String, Expr)]
@@ -91,7 +89,7 @@ children (IntLit _) = []
 children (StringLit _) = []
 children (FloatLit _) = []
 children (Discard a) = [a]
-children (Import _ _) = []
+children (Import{}) = []
 children (Ref a) = [a]
 children (Struct _ _) = []
 children (StructLit _ a) = map snd a
@@ -211,7 +209,7 @@ typeOf (Function _ _) = error "Cannot infer type of modern function"
 typeOf (DoBlock _) = error "Cannot infer type of do block"
 typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
 typeOf (Discard _) = error "Cannot infer type of discard"
-typeOf (Import _ _) = error "Cannot infer type of import"
+typeOf (Import{}) = error "Cannot infer type of import"
 typeOf (Ref _) = error "Cannot infer type of ref"
 typeOf (Struct _ _) = error "Cannot infer type of struct"
 typeOf (StructLit x _) = StructT x
@@ -230,6 +228,7 @@ typeOf (TypeLit x) = x
 typeOf (Flexible x) = typeOf x
 typeOf (Trait _ _) = error "Cannot infer type of trait"
 typeOf (Impl{}) = error "Cannot infer type of impl"
+typeOf (Then _ b) = typeOf b
 
 -- typeOf x = error $ "Cannot infer type of " ++ show x
 
