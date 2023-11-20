@@ -217,10 +217,13 @@ funcDec = do
     argTypes <- sepBy1 validType (symbol "->")
     return $ FuncDec name argTypes
 
+defArg :: Parser Expr
+defArg = var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer
+
 funcDef :: Parser Expr
 funcDef = do
     name <- identifier <|> gravis <?> "function name"
-    args <- some (var <|> parens listPattern <|> array <|> placeholder) <?> "function arguments"
+    args <- some defArg <?> "function arguments"
     symbol "="
     FuncDef name args <$> expr <?> "function body"
 
@@ -283,11 +286,11 @@ combinedFunc = do
   where
     argsAndTypes =
         unzip <$> many do
-            arg <- identifier <?> "function argument"
+            arg <- defArg <?> "function argument"
             symbol ":"
             argType <- validType <?> "function argument type"
             optional $ symbol "->"
-            return (Var arg (Position (0, 0)), argType) <?> "function arguments"
+            return (arg, argType) <?> "function arguments"
 
 import_ :: Parser Expr
 import_ = do

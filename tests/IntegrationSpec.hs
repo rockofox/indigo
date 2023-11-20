@@ -45,6 +45,11 @@ spec = do
     describe "println" $ do
         it "Can print any string" $ do
             property $ \s -> compileAndRun ("let main => IO = println " ++ show s) `shouldReturn` (s ++ "\n")
+    describe "Operator precedence" $ do
+        it "Has working precedence for multiplication" $ do
+            compileAndRun "let main => IO = println 1 + 2 * 3" `shouldReturn` "7\n"
+        it "Has working precedence for brackets" $ do
+            compileAndRun "let main => IO = println (1 + 2) * 3" `shouldReturn` "9\n"
     describe "Pattern matching" $ do
         it "Can return the first element of a list" $ do
             compileAndRun "t :: List{Int} -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"

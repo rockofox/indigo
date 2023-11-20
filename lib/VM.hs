@@ -261,7 +261,14 @@ locateLabels :: Program -> [(String, Int)]
 locateLabels program = [(x, n) | (Label x, n) <- zip (V.toList program) [0 ..]] -- TODO: Might be inefficient
 
 showDebugInfo :: StateT VM IO String
-showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm V.! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
+-- showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm V.! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
+showDebugInfo = do
+    vm <- get
+    -- Show the current instruction, two values from the stack, and the result
+    let inst = program vm V.! pc vm
+    let stack' = stack vm
+    let stack'' = if length stack' > 1 then take 2 stack' else stack'
+    return $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show stack'' ++ "\t" ++ show (safeHead $ callStack vm)
 
 run' :: Program -> StateT VM IO ()
 run' program = do

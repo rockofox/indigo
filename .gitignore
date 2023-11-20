@@ -25,4 +25,5 @@ cabal.project.local~
 .direnv
 .vscode
 *.wat
+*.wasm
 result

@@ -1,0 +1,15 @@
+# Single-line comments start with two slashes.
+/* Multiline comments start with slash-star,
+   and end with star-slash */
+
+# Functions are called by supplying their arguments separeted by commas
+# Parentheses can be used, but are not required
+print "Hello, world!"
+print("Hello, world!")
+
+# Bindings and Haskell-style functions
+# There is no difference between functions and constants, as constants can be represented as functions with no parameters
+
+let square x = x * x
+let four = square 2
+let pi = 3.14

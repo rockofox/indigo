@@ -55,7 +55,7 @@ data Let = Let
     deriving (Show)
 
 initCompilerState :: Parser.Program -> CompilerState a
-initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] ""
+initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] "__outside"
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -152,15 +152,16 @@ doBinOp x y op = do
         (_, Parser.Flexible _) -> return $ [Swp, Cast] ++ x'
         _ -> return []
     case (x, y) of
-        (_, Parser.FuncCall _ _ zeroPosition) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
-        (Parser.FuncCall _ _ zeroPosition, _) -> return (x' ++ y' ++ cast ++ [op])
+        (Parser.FuncCall{}, Parser.FuncCall{}) -> return (x' ++ LStore "__firstResult" : y' ++ [LStore "__secondResult", LLoad "__firstResult", LLoad "__secondResult", op]) -- TODO: Registers?
+        (_, Parser.FuncCall{}) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
+        (Parser.FuncCall{}, _) -> return (x' ++ y' ++ cast ++ [op])
         (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1] ---------------
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         _ -> return (x' ++ y' ++ cast ++ [op])
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
-typeOf (Parser.FuncCall funcName _ zeroPosition) = do
+typeOf (Parser.FuncCall funcName _ _) = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
@@ -213,9 +214,12 @@ compileExpr (Parser.FuncCall funcName args _) = do
     argTypes <- mapM typeOf args
     functions' <- gets functions
     funcDecs' <- gets funcDecs
-    let fun = case findFunction funcName functions' argTypes of
-            (Just f) -> f
-            Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
+    curCon <- gets currentContext
+    let fun = case findFunction (curCon ++ "@" ++ funcName) functions' argTypes of
+            (Just lf) -> lf
+            Nothing -> case findFunction funcName functions' argTypes of
+                (Just f) -> f
+                Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
     let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
 
     case funcDec of
@@ -237,14 +241,17 @@ compileExpr (Parser.FuncCall funcName args _) = do
 compileExpr fd@(Parser.FuncDec _ _) = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
-compileExpr (Parser.FuncDef name args body) = do
+compileExpr (Parser.FuncDef origName args body) = do
+    curCon <- gets currentContext
+    let previousContext = curCon
+    let name = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
     -- let argTypes = map Parser.typeOf args
     modify (\s -> s{currentContext = name})
     funcDecs' <- gets funcDecs
     when (isNothing $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
-    -- modify (\s -> s{functions = Function name funame [] [] : functions s})
+    modify (\s -> s{functions = Function name funame [] [] : functions s})
 
     body' <- compileExpr body
     funcDecs'' <- gets funcDecs
@@ -253,6 +260,7 @@ compileExpr (Parser.FuncDef name args body) = do
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types : functions s})
+    modify (\s -> s{currentContext = previousContext})
     return [] -- Function definitions get appended at the last stage of compilation
   where
     compileParameter :: Parser.Expr -> String -> StateT (CompilerState a) IO [Instruction]
@@ -265,7 +273,7 @@ compileExpr (Parser.FuncDef name args body) = do
                 lex' <- compileExpr lex
                 return $ [Dup] ++ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
     compileParameter (Parser.ListPattern elements) n = do
-        nextFunName <- ((name ++ "#") ++) . show . (+ 1) <$> allocId
+        nextFunName <- ((n ++ "#") ++) . show . (+ 1) <$> allocId
         let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length elements - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextFunName]
         case last elements of
             Parser.ListLit l -> do
@@ -281,16 +289,21 @@ compileExpr (Parser.FuncDef name args body) = do
                 let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
                 let rest = [Push $ DInt (length elements - 1), Push DNone, Slice, last elements']
                 return $ lengthCheck ++ concat xToY ++ rest
+    compileParameter (Parser.IntLit x) funcName = do
+        -- TODO: fix this
+        nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
+        return [Dup, Push $ DInt $ fromIntegral x, Eq, Jf nextFunName]
     compileParameter Parser.Placeholder _ = return []
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
 compileExpr (Parser.Var x _) = do
     functions' <- gets functions
-    -- let fun = findFunction x functions' [Parser.Any]
-    let fun = find (\y -> last (splitOn "::" (T.pack $ baseName y)) == T.pack x && funame y /= "main") functions'
-    -- when (x == "name") $ error $ show (map (\y -> last (splitOn "::" (T.pack $ baseName y))) functions')
-    case fun of
-        (Just f) -> compileExpr (Parser.FuncCall (funame f) [] zeroPosition)
-        Nothing -> return [LLoad x]
+    curCon <- gets currentContext
+    -- traceM $ "Looking for " ++ x ++ " in " ++ show (map baseName functions')
+    -- traceM $ "Looking for " ++ curCon ++ "@" ++ x ++ " in " ++ show (map baseName functions')
+    let fun = any ((== x) . baseName) functions' || any ((== curCon ++ "@" ++ x) . baseName) functions'
+    if fun
+        then compileExpr (Parser.FuncCall x [] zeroPosition)
+        else return [LLoad x]
 compileExpr (Parser.Let name value) = do
     curCon <- gets currentContext
     typeOf value >>= \v -> modify (\s -> s{lets = Let{name, vtype = v, context = curCon} : lets s})
@@ -386,12 +399,9 @@ compileExpr (Parser.Lambda args body) = do
     let ldef = Parser.FuncDef name argsAndLets body
     mapM_ compileExpr [ldec, ldef]
     return $ map (\x -> LLoad x.name) letsOfCurrentContext ++ [PushPf name (length letsOfCurrentContext)]
-compileExpr (Parser.Pipeline a (Parser.Var b _)) = do
-    compileExpr (Parser.FuncCall b [a] zeroPosition)
-compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = do
-    compileExpr (Parser.FuncCall f (a : args) zeroPosition)
-compileExpr (Parser.Pipeline a (Parser.Then b c)) = do
-    compileExpr (Parser.Then (Parser.Pipeline a b) c)
+compileExpr (Parser.Pipeline a (Parser.Var b _)) = compileExpr (Parser.FuncCall b [a] zeroPosition)
+compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = compileExpr (Parser.FuncCall f (a : args) zeroPosition)
+compileExpr (Parser.Pipeline a (Parser.Then b c)) = compileExpr (Parser.Then (Parser.Pipeline a b) c)
 compileExpr (Parser.Then a b) = do
     a' <- compileExpr a
     b' <- compileExpr b
