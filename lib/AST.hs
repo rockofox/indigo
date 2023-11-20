@@ -157,7 +157,7 @@ instance Show Type where
     show (StructT structName) = structName
     show Self = "Self"
 
-newtype Program = Program [Expr] deriving (Show, Eq, Generic)
+newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
 
 instance Data.Binary.Binary Type
 

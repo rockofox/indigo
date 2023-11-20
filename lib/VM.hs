@@ -49,7 +49,7 @@ data Instruction
     | -- | Pop two values off the stack and push T if either is truthy, F otherwise
       Or
     | -- | Perform a builtin action
-      Builtin Action
+      Builtin Action -- TODO: Seperate IO?
     | -- | Jump to a label
       Jmp String
     | -- | Jump to a label if the top value of the stack is not zero

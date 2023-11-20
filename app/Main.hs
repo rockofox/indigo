@@ -1,6 +1,9 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main where
 
 import BytecodeCompiler qualified
+import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Identity (Identity (..))
@@ -17,7 +20,7 @@ import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import Options.Applicative
 import Parser
-import System.Exit (exitSuccess)
+import System.Exit (exitFailure, exitSuccess)
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
 import System.TimeIt
@@ -34,6 +37,7 @@ data Options = Options
     , runBytecode :: Bool
     , breakpoints :: Maybe String
     , showTime :: Bool
+    , runRepl :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser Options
@@ -65,6 +69,7 @@ optionsParser =
         <*> switch (long "run-bytecode" <> short 'r' <> help "Run bytecode")
         <*> optional (strOption (long "breakpoints" <> short 't' <> help "Breakpoints for the VM to trace (space separated list of program counter indices). -1 to trace on every instruction"))
         <*> switch (long "profile" <> short 'p' <> help "Show time spent parsing, compiling and running")
+        <*> switch (long "repl" <> short 'e' <> help "Start REPL")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -115,7 +120,7 @@ parse name input compilerFlags = do
 
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode breakpoints showTime <-
+    Options input output debug verbose emitBytecode runBytecode breakpoints showTime runRepl <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -123,6 +128,9 @@ main = do
                     <> progDesc "TODO"
                     <> header "indigo - a functional programming language"
                 )
+    when runRepl $ do
+        runStateT repl initREPLState
+        exitSuccess
     program <-
         if not runBytecode
             then do
@@ -154,3 +162,69 @@ main = do
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
     potentiallyTimedOperation "VM" showTime $ VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+
+-- REPL
+data REPLState = REPLState
+    { program :: Program
+    , previousProgram :: Program
+    , previousStack :: [VM.Data]
+    }
+
+initREPLState =
+    REPLState
+        { -- program = Program [FuncDef "main" [] (DoBlock [])],
+          program = Program []
+        , previousProgram = Program []
+        , previousStack = []
+        }
+
+repl :: StateT REPLState IO ()
+repl = do
+    liftIO $ putStr "🔮> "
+    liftIO $ hFlush stdout
+    input <- liftIO getLine
+    case input of
+        ":exit" -> return ()
+        ":ast" -> do
+            Program sexprs <- gets program
+            liftIO $ putStrLn $ prettyPrintProgram (Program sexprs)
+            repl
+        ":vm" -> do
+            Program sexprs <- gets program
+            compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram (Program sexprs)) (BytecodeCompiler.initCompilerState (Program sexprs))
+            liftIO $ putStrLn $ VM.printAssembly (V.fromList compiled) True
+            repl
+        ":help" -> do
+            liftIO $ putStrLn "Commands:"
+            liftIO $ putStrLn ":exit - exit the REPL"
+            liftIO $ putStrLn ":ast - print the AST"
+            liftIO $ putStrLn ":vm - print the VM assembly"
+            repl
+        _ -> do
+            let (result, state) = runIdentity $ runStateT (parseProgram' (T.pack input)) (ParserState{compilerFlags = CompilerFlags{verboseMode = False}, validLets = [], validFunctions = []})
+            case result of
+                Left err -> do
+                    liftIO $ putStrLn $ errorBundlePretty err
+                    repl
+                Right program' -> do
+                    let (Program pexrs) = program'
+                    (Program sexprs) <- gets program
+                    modify (\s -> s{previousProgram = Program sexprs})
+                    modify (\s -> s{program = Program (sexprs ++ pexrs)})
+                    mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [])])
+                    compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram mergedProgram) (BytecodeCompiler.initCompilerState mergedProgram)
+                    let mainPc = BytecodeCompiler.locateLabel compiled "main"
+                    result <- liftIO $ try (VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}) :: StateT REPLState IO (Either SomeException VM.VM)
+                    case result of
+                        Left err -> do
+                            liftIO $ putStrLn $ VM.printAssembly (V.fromList compiled) True
+                            liftIO $ print err
+                            previousProgram <- gets previousProgram
+                            modify (\s -> s{program = previousProgram})
+                            repl
+                        Right vm -> do
+                            previousStack <- gets previousStack
+                            when (previousStack /= VM.stack vm) $ do
+                                liftIO $ print $ head $ VM.stack vm
+                            modify (\s -> s{previousStack = VM.stack vm})
+                            repl
