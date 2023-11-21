@@ -111,7 +111,7 @@ spec = do
                     println f [1, 2, 3]
                     println f ["test", "test2"]
                 end|]
-                `shouldReturn` "6\ntesttest2\n"
+                `shouldReturn` "6\n[test,test2]\n"
     describe "Structs" $ do
         it "Can access fields" $ do
             compileAndRun

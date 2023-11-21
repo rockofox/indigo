@@ -90,6 +90,8 @@ data Instruction
       LLoad String
     | -- | Pop n values off the stack, concatenate them, and push the result
       Concat Int
+    | -- | Construct a list from the top n values of the stack
+      PackList Int
     | -- | Index into a list
       Index
     | -- | Slice a list
@@ -289,6 +291,7 @@ instance Num Data where
     (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
+    (-) (DList x) (DList y) = DList $ filter (`notElem` y) x
     (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
@@ -538,6 +541,7 @@ runInstruction TypeEq =
         (DChar _, DTypeQuery s) -> s == "Char"
         (DFuncRef _ _, DTypeQuery s) -> s == "FuncRef"
         _ -> False
+runInstruction (PackList n) = stackPopN n >>= stackPush . DList
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 -- runInstruction x = error $ show x ++ ": not implemented"

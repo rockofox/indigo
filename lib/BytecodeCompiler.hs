@@ -6,7 +6,7 @@ import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, intercalate)
+import Data.List (elemIndex, find, intercalate, isInfixOf)
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (splitOn)
 import Data.Text qualified
@@ -30,6 +30,7 @@ data Function = Function
     , funame :: String
     , function :: [Instruction]
     , types :: [Parser.Type]
+    , context :: String
     }
     deriving (Show, Generic)
 
@@ -251,7 +252,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     when (isNothing $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
-    modify (\s -> s{functions = Function name funame [] [] : functions s})
+    modify (\s -> s{functions = Function name funame [] [] curCon : functions s})
 
     body' <- compileExpr body
     funcDecs'' <- gets funcDecs
@@ -259,7 +260,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs''
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
-    modify (\s -> s{functions = Function name funame function funcDec.types : functions s})
+    modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
     modify (\s -> s{currentContext = previousContext})
     return [] -- Function definitions get appended at the last stage of compilation
   where
@@ -321,7 +322,7 @@ compileExpr (Parser.ListConcat a b) = do
             [Meta "flex", b'''] -> [b'''] ++ a' ++ [Cast]
             _ -> b'
     return (b'' ++ a'' ++ [Concat 2])
-compileExpr (Parser.ListLit elements) = concatMapM compileExpr elements >>= \elements' -> return (reverse elements' ++ [Concat $ length elements])
+compileExpr (Parser.ListLit elements) = concatMapM compileExpr elements >>= \elements' -> return (reverse elements' ++ [PackList $ length elements])
 compileExpr (Parser.If ifCond ifThen ifElse) = do
     cond' <- compileExpr ifCond
     then' <- compileExpr ifThen
@@ -390,15 +391,15 @@ compileExpr (Parser.Impl name for methods) = do
     return []
 compileExpr (Parser.Lambda args body) = do
     fId <- allocId
-    currentContext' <- gets currentContext
-    lets' <- gets lets
-    let name = ":lambda" ++ show fId
-    let letsOfCurrentContext = filter (\x -> context x == currentContext') lets'
-    let argsAndLets = args ++ map (\x -> Parser.Var x.name zeroPosition) letsOfCurrentContext
+    curCon <- gets currentContext
+    lets' <- gets functions
+    let name = "__lambda" ++ show fId
+    let letsOfCurrentContext = filter (\x -> x.context == curCon && not ("__" `isInfixOf` x.baseName)) lets'
+    let argsAndLets = args ++ map (\x -> Parser.Var (drop 1 (dropWhile (/= '@') x.baseName)) zeroPosition) letsOfCurrentContext
     let ldec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
     let ldef = Parser.FuncDef name argsAndLets body
     mapM_ compileExpr [ldec, ldef]
-    return $ map (\x -> LLoad x.name) letsOfCurrentContext ++ [PushPf name (length letsOfCurrentContext)]
+    return $ map (\x -> Call x.funame) letsOfCurrentContext ++ [PushPf (curCon ++ "@" ++ name) (length letsOfCurrentContext)]
 compileExpr (Parser.Pipeline a (Parser.Var b _)) = compileExpr (Parser.FuncCall b [a] zeroPosition)
 compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = compileExpr (Parser.FuncCall f (a : args) zeroPosition)
 compileExpr (Parser.Pipeline a (Parser.Then b c)) = compileExpr (Parser.Then (Parser.Pipeline a b) c)
@@ -431,7 +432,7 @@ createVirtualFunctions = do
                     -- ++ concatMap (\for -> [TypeOf, Dup, LStore "calledType", Push $ DString for, Eq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
                     ++ concatMap (\for -> [Dup, TypeOf, LStore "calledType", Push $ DTypeQuery for, TypeEq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
                     ++ [Pop, LLoad "calledType", Push $ DString ("`" ++ name ++ "` from trait `" ++ traitName ++ "` called for unimplemented type "), Concat 2, Panic]
-        modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess]})
+        modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess "__outside"]})
         return ()
     createBaseDef _ _ _ = return ()
 

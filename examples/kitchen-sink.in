@@ -143,8 +143,11 @@ let fib (n: Int) => Int = (fib ((n) - 2)) + (fib ((n) - 1))
 
 # let main => IO = _ # TODO: Automatically generate stub main if there's no main function
 let main => IO = do
+  let cities = ["London", "Oslo", "Paris", "Amsterdam", "Berlin"]
+  let visited = ["Berlin", "Oslo"]
   let linus = 123
-  println linus
+  println map (\a -> "I still need to visit " : a : "!" : "\n"), ((cities)-(visited))
+  println map (\a -> a + 2), [1,2,3,4,5]
 end
 
 # let main => IO = do
@@ -180,3 +183,5 @@ end
 #   # println testInside 2, 4
 #   # println blaaaa
 # end
+
+

@@ -4,6 +4,7 @@
 module Verifier where
 
 import AST
+import BytecodeCompiler (preludeFile)
 import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
@@ -13,16 +14,20 @@ import Data.Map qualified as Map
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Set qualified as Set
 import Data.Text (Text, pack)
+import Data.Text qualified as T
 import Data.Void
+import Debug.Trace
 import Parser
 import Text.Megaparsec hiding (State)
 import Util
 
-data VerifierState = VerifierState {frames :: [VerifierFrame]} deriving (Show)
+data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool} deriving (Show)
 
 data VerifierFrame = VerifierFrame
     { bindings :: Set.Set VBinding
     , ttypes :: Map.Map String VType
+    , ftype :: AST.Type
+    , fname :: String
     }
     deriving (Show)
 
@@ -56,9 +61,11 @@ listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pat
 typeOf' :: Expr -> StateT VerifierState IO Type
 typeOf' (Var name _) = do
     matchingBinding <- findMatchingBinding name
+    -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
     return $ maybe Unknown ttype matchingBinding
 typeOf' (FuncCall name _ _) = do
     matchingBinding <- findMatchingBinding name
+    -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
     return $ maybe Unknown ttype matchingBinding
 typeOf' x = return $ typeOf x
 
@@ -74,17 +81,11 @@ compareTypes' a b = return $ compareTypes a b
 functionTypesAcceptable :: [Type] -> [Type] -> StateT VerifierState IO Bool
 functionTypesAcceptable use def = allM (uncurry compareTypes') $ zip use def
 
--- functionTypesAcceptable use def = all (uncurry compareTypes) $ zip use def
-
-argsOf :: Expr -> [Type]
-argsOf expr = case typeOf expr of
-    Fn args _ -> args
-    _ -> []
-
 initVerifierState :: VerifierState
 initVerifierState =
     VerifierState
-        { frames = [VerifierFrame{bindings = Set.fromList [VBinding{name = "print", args = [Any], ttype = None}, VBinding{name = "println", args = [Any], ttype = None}], ttypes = Map.empty}] -- TODO: actually import prelude
+        { frames = [VerifierFrame{bindings = Set.fromList [VBinding{name = "print", args = [Any], ttype = IO}, VBinding{name = "println", args = [Any], ttype = IO}], ttypes = Map.empty}] -- TODO: actually import prelude
+        , topLevel = True
         }
 
 currentFrame :: StateT VerifierState IO VerifierFrame
@@ -103,6 +104,14 @@ verifyProgram' name source exprs = do
                 , pstateTabWidth = defaultTabWidth
                 , pstateLinePrefix = ""
                 }
+    when (name /= "__prelude") $ do
+        prelude <- liftIO preludeFile
+        let parsedPrelude = parseProgram (T.pack prelude) CompilerFlags{verboseMode = False}
+        case parsedPrelude of
+            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Right (Program exprs') -> do
+                _ <- concatMapM verifyExpr exprs'
+                return ()
     errors <- concatMapM verifyExpr exprs
     if null errors
         then return $ Right ()
@@ -122,9 +131,11 @@ verifyExpr (FuncDef name args body) = do
             let argsAndTypes = zip args binding.args
             let argsAsBindings = concatMap argToBindings argsAndTypes
             -- let argsAsBindings = concatMap (\case { Var name' _ -> [VBinding { name = name', args = [], ttype = Any }]; l@ListPattern{} -> listPatternToBindings l; _ -> [] }) args
-            modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty}) : frames state})
+            modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = binding.ttype, fname = name}) : frames state})
             -- Add the function itself to the frame
-            modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = map typeOf args, ttype = Any}) (bindings (head (frames state))), ttypes = Map.empty}) : tail (frames state)})
+            types <- mapM typeOf' args
+            modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = types, ttype = Any}) (bindings (head (frames state))), ttypes = Map.empty, ftype = binding.ttype, fname = name}) : tail (frames state)})
+            modify (\state -> state{topLevel = True})
             bodyErrors <- verifyExpr body
             modify (\state -> state{frames = tail (frames state)})
             return bodyErrors
@@ -140,7 +151,13 @@ verifyExpr (FuncDec name types) = do
     let (arguments, returnType) = if null types then ([], Any) else (init types, last types)
     modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = arguments, ttype = returnType}) (bindings (head (frames state)))} : tail (frames state)})
     return []
-verifyExpr (DoBlock exprs) = verifyMultiple exprs
+-- verifyExpr (DoBlock exprs) = verifyMultiple exprs
+verifyExpr (DoBlock exprs) = concatMapM verifyExpr' exprs
+  where
+    verifyExpr' :: Expr -> StateT VerifierState IO [ParseError s e]
+    verifyExpr' e = do
+        modify (\state -> state{topLevel = True})
+        verifyExpr e
 verifyExpr (Function def dec) = do
     b <- verifyExpr dec
     a <- verifyMultiple def
@@ -167,14 +184,30 @@ verifyExpr (Impl trait for _) = do
     -- modify (\state -> state { frames = rootFrame { ttypes = Map.update (\_ -> Just vtype) for (ttypes rootFrame) } : tail (frames state) })
     return []
 verifyExpr (FuncCall name args (Position (start, _))) = do
+    currentFrame' <- currentFrame
+    topLevel' <- gets topLevel
     matchingBinding <- findMatchingBinding name
+    modify (\s -> s{topLevel = False})
     eArgs <- concatMapM verifyExpr args
     argumentTypes <- mapM typeOf' args
     fta <- case matchingBinding of
-        Just binding -> functionTypesAcceptable argumentTypes binding.args
+        Just binding -> do
+            functionTypesAcceptable argumentTypes binding.args
         Nothing -> return False
+    eNoMatchi <- case matchingBinding of
+        Just binding -> do
+            matchi <- compareTypes' (ftype currentFrame') (ttype binding)
+            return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding.ttype ++ "` of `" ++ binding.name ++ "` is incompatible with type `" ++ show currentFrame'.ftype ++ "` of " ++ currentFrame'.fname))) | topLevel' && currentFrame'.fname /= "__lambda" && not matchi]
+        Nothing -> return []
     let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
-    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes
+    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes ++ eNoMatchi
+verifyExpr (Lambda args body) = do
+    currentFrame' <- currentFrame
+    let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any}) args
+    modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
+    bodyErrors <- verifyExpr body
+    modify (\state -> state{frames = tail (frames state)})
+    return bodyErrors
 verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     let convertedPath = map (\x -> if x == '@' then '/' else x) from
@@ -196,4 +229,5 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
     mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
     mangleAST x _ = x
 verifyExpr x = do
+    modify (\state -> state{topLevel = False})
     concatMapM verifyExpr (children x)
