@@ -241,9 +241,11 @@ opts =
     ]
 
 version :: String
-version = take 7 (giHash gi)
-  where
-    gi = $$tGitInfoCwd
+-- Breaks compile process
+-- version = take 7 (giHash gi)
+--   where
+--     gi = $$tGitInfoCwd
+version = "HEAD"
 
 ini :: Repl ()
 ini = liftIO $ putStrLn $ "Indigo, version " ++ version ++ ". Type :help for help."
