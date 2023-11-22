@@ -73,7 +73,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.create_release.outputs.tag-name }}
+          tag_name: ${{ needs.create_release.outputs.release_tag }}
           files: ${{ env.BINARY_PATH }}
       # - name: Upload Release Asset
       #   id: upload-release-asset
