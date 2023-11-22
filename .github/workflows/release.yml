@@ -1,12 +1,18 @@
 name: Release
 
-on: workflow_dispatch
+on: [push, workflow_dispatch]
 
 jobs:
   create_release:
     name: Create Release
     runs-on: ubuntu-latest
     steps:
+      - uses: dev-drprasad/delete-older-releases@v0.3.2
+        with:
+          keep_latest: 3
+          delete_tag_pattern: latest-.+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -50,16 +56,16 @@ jobs:
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
-        run: echo "EXT=.exe" >> "$GITHUB_ENV"
+        run: echo "BINARY_EXT=.exe" >> "$GITHUB_ENV"
 
       - name: Build binary
         run: |
           mkdir dist-${{matrix.os}}
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
-          mv dist-${{matrix.os}}/indigo${{ env.EXT }} dist-${{matrix.os}}/indigo-${{matrix.os}}${{ env.EXT }}
+          mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
 
       - name: Set binary path name
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{ env.EXT }}" >> "$GITHUB_ENV"
+        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> "$GITHUB_ENV"
 
       # - name: Compress binary
       #   uses: svenstaro/upx-action@2.0.1
