@@ -4,33 +4,19 @@ on: workflow_dispatch
 
 jobs:
   create_release:
-    name: Create Github Release
+    name: Create Release
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v2
-
       - name: Create Release
         id: create_release
-        uses: actions/create-release@v1.1.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: true
+          name: ${{ github.ref_name }}
+          draft: false
           prerelease: false
-
-      - name: Output Release URL File
-        run: echo "${{ steps.create_release.outputs.upload_url }}" > release_url.txt
-      - name: Save Release URL File for publish
-        uses: actions/upload-artifact@v1
-        with:
-          name: release_url
-          path: release_url.txt
-
+          generate_release_notes: false
   build_artifact:
-    needs: [create_release]
+    needs: create_release
     name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -77,24 +63,15 @@ jobs:
       - name: Set binary path name
         run: echo "::set-env name=BINARY_PATH::./dist/indigo${{ env.EXT }}"
 
-      - name: Compress binary
-        uses: svenstaro/upx-action@2.0.1
-        with:
-          file: ${{ env.BINARY_PATH }}
-
-      - name: Load Release URL File from release job
-        uses: actions/download-artifact@v1
-        with:
-          name: release_url
-
-      - name: Get Release File Name & Upload URL
-        id: get_release_info
-        run: |
-          echo "::set-output name=upload_url::$(cat release_url/release_url.txt)"
+      # - name: Compress binary
+      #   uses: svenstaro/upx-action@2.0.1
+      #   with:
+      #     file: ${{ env.BINARY_PATH }}
       
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ needs.create_release.outputs.tag-name }}
           files: ${{ env.BINARY_PATH }}
       # - name: Upload Release Asset
       #   id: upload-release-asset
