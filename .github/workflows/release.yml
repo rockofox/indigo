@@ -27,13 +27,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macOS-latest, windows-latest]
-        ghc:
-          - "8.8.3"
-          - "8.10.1"
-        cabal: ["3.2"]
-        exclude:
-          - os: windows-latest
-            ghc: 8.8.3
+        ghc-version: ['latest']
 
     steps:
       - name: Check out code
@@ -43,9 +37,10 @@ jobs:
         uses: actions/setup-haskell@v1.1.1
         id: setup-haskell-cabal
         with:
-          ghc-version: ${{ matrix.ghc }}
-          cabal-version: ${{ matrix.cabal }}
-
+          ghc-version: ${{ matrix.ghc-version }}
+          # Defaults, added for clarity:
+          cabal-version: 'latest'
+          cabal-update: true
       - name: Freeze
         run: |
           cabal freeze
