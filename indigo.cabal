@@ -9,7 +9,6 @@ license-file:       LICENSE
 author:             rockofox
 maintainer:         ofelix@pm.me
 build-type:         Simple
-extra-doc-files:    CHANGELOG.md
 data-files:         **/*.in
 data-dir:           share
 
