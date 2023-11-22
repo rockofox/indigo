@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         
       - name: Set up GHC ${{ matrix.ghc-version }}
         uses: haskell/actions/setup@v2
@@ -55,6 +55,7 @@ jobs:
 
       - name: Build binary
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir dist
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist
 
