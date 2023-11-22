@@ -55,7 +55,6 @@ jobs:
 
       - name: Build binary
         run: |
-          git config --global --add safe.directory $(realpath .)
           mkdir dist
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist
 
