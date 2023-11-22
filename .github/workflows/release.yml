@@ -50,15 +50,16 @@ jobs:
 
       - name: Build binary
         run: |
-          mkdir dist
-          cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist
+          mkdir dist-{{matrix.os}}
+          cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-{{matrix.os}}
+          mv dist-{{matrix.os}}/indigo dist-{{matrix.os}}/indigo-{{matrix.os}}
 
-      - if: matrix.os == 'windows-latest'
-        name: Set extension to .exe on Windows
-        run: echo "EXT=.exe" >> "$GITHUB_ENV"
+      # - if: matrix.os == 'windows-latest'
+      #   name: Set extension to .exe on Windows
+      #   run: echo "EXT=.exe" >> "$GITHUB_ENV"
 
-      - name: Set binary path name
-        run: echo "BINARY_PATH=./dist/indigo${{ env.EXT }}" >> "$GITHUB_ENV"
+      # - name: Set binary path name
+      #   run: echo "BINARY_PATH=./dist/indigo${{ env.EXT }}" >> "$GITHUB_ENV"
 
       # - name: Compress binary
       #   uses: svenstaro/upx-action@2.0.1
@@ -69,14 +70,4 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-${{ github.sha }}
-          files: ${{ env.BINARY_PATH }}
-      # - name: Upload Release Asset
-      #   id: upload-release-asset
-      #   uses: actions/upload-release-asset@v1.0.1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ steps.get_release_info.outputs.upload_url }}
-      #     asset_path: ${{ env.BINARY_PATH }}
-      #     asset_name: indigo-HEAD-${{ runner.os }}-ghc-${{ matrix.ghc }}${{ env.EXT }}
-      #     asset_content_type: application/octet-stream
+          files: dist-{{matrix.os}}/indigo-{{matrix.os}}
