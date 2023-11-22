@@ -7,16 +7,21 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     steps:
-      - name: Generate release tag
+      - name: Tag the repository
         id: tag
         run: |
-          echo "release_tag=UserBuild_$(date +"%Y.%m.%d_%H-%M")" >> "$GITHUB_OUTPUT"
+          # See https://docs.github.com/en/get-started/using-git/dealing-with-special-characters-in-branch-and-tag-names
+          TAG=v$(date -Iseconds | sed 's/[T:\+]/-/g')
+          echo "$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          git tag -a $TAG -m "Published version $TAG" ${GITHUB_SHA}
+          git push origin $TAG
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           name: ${{ github.ref_name }}
-          tag_name: ${{ steps.tag.outputs.release_tag }}
+          tag_name: ${{ steps.tag.outputs.tag }}
           draft: false
           prerelease: false
           generate_release_notes: false
@@ -73,7 +78,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.create_release.outputs.release_tag }}
+          tag_name: ${{ needs.create_release.outputs.tag }}
           files: ${{ env.BINARY_PATH }}
       # - name: Upload Release Asset
       #   id: upload-release-asset
