@@ -33,14 +33,15 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v2
         
-      - name: Setup Haskell
-        uses: actions/setup-haskell@v1.1.1
-        id: setup-haskell-cabal
+      - name: Set up GHC ${{ matrix.ghc-version }}
+        uses: haskell/actions/setup@v2
+        id: setup
         with:
           ghc-version: ${{ matrix.ghc-version }}
           # Defaults, added for clarity:
           cabal-version: 'latest'
           cabal-update: true
+
       - name: Freeze
         run: |
           cabal freeze
