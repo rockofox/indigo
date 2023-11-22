@@ -7,11 +7,16 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     steps:
+      - name: Generate release tag
+        id: tag
+        run: |
+          echo "::set-output name=release_tag::UserBuild_$(date +"%Y.%m.%d_%H-%M")"
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           name: ${{ github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.release_tag }}
           draft: false
           prerelease: false
           generate_release_notes: false
