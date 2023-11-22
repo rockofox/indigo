@@ -26,8 +26,6 @@ import Options.Applicative
 import Parser
 import System.Console.Repline
 import System.Exit (exitFailure, exitSuccess)
-import System.Posix.IO (stdOutput)
-import System.Posix.Terminal (queryTerminal)
 import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
 import VM qualified

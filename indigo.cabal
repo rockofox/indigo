@@ -31,7 +31,6 @@ library
         text,
         megaparsec,
         parser-combinators,
-        unix,
         mtl,
         -- binaryen,
         directory,
@@ -59,7 +58,6 @@ executable indigo
     hs-source-dirs:   app
     build-depends:    base,
                       optparse-applicative,
-                      unix,
                       megaparsec,
                       mtl,
                       text,
