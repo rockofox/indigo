@@ -83,22 +83,22 @@ jobs:
           mkdir dist-${{matrix.os}}
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
 
-      - name: Rename binary
-        run: |
-          if [ "${{matrix.os}}" == "windows-latest" ]; then
-            mv dist-${{matrix.os}}/indigo.exe dist-${{matrix.os}}/indigo-${{matrix.os}}.exe
-          else
-            mv dist-${{matrix.os}}/indigo dist-${{matrix.os}}/indigo-${{matrix.os}}
-          fi
+      - name: Rename binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: mv dist-${{matrix.os}}/indigo.exe dist-${{matrix.os}}/indigo-${{matrix.os}}.exe
+      
+      - name: Rename binary (Non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: mv dist-${{matrix.os}}/indigo dist-${{matrix.os}}/indigo-${{matrix.os}}
           
-      - name: Set binary path
-        run: |
-          if [ "${{matrix.os}}" == "windows-latest" ]; then
-            echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}.exe" >> $GITHUB_ENV
-          else
-            echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
-          fi
+      - name: Set binary path (Windows)
+        if: matrix.os == 'windows-latest'
+        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}.exe" >> $GITHUB_ENV
           
+      - name: Set binary path (Non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
+        
       # - name: Compress binary
       #   uses: svenstaro/upx-action@2.0.1
       #   with:
