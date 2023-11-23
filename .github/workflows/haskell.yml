@@ -86,9 +86,11 @@ jobs:
         run: |
           mkdir dist-${{matrix.os}}
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
-          mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
 
-      - name: Set binary path name
+      - name: Rename binary
+        run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
+      
+      - name: Set binary path
         run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> "$GITHUB_ENV"
 
       # - name: Compress binary
