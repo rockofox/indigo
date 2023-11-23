@@ -87,7 +87,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: mv dist-${{matrix.os}}/indigo.exe dist-${{matrix.os}}/indigo-${{matrix.os}}.exe
       
-      - name: Rename binary (Non-Windows)
+      - name: Rename binary
         if: matrix.os != 'windows-latest'
         run: mv dist-${{matrix.os}}/indigo dist-${{matrix.os}}/indigo-${{matrix.os}}
           
@@ -95,7 +95,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}.exe" >> $GITHUB_ENV
           
-      - name: Set binary path (Non-Windows)
+      - name: Set binary path
         if: matrix.os != 'windows-latest'
         run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
 
@@ -104,10 +104,15 @@ jobs:
       #   with:
       #     file: ${{ env.BINARY_PATH }}
       
-      - name: Zip and add stuff
+      - name: Zip and add stuff (Windows)
+        if: matrix.os == 'windows-latest'
         run: |
-          mv share/std std
-          zip -r ${{ env.BINARY_PATH }}.zip ${{ env.BINARY_PATH }} std
+          Compress-Archive -Path ${{ env.BINARY_PATH }}, share/std -DestinationPath ${{ env.BINARY_PATH }}.zip
+      
+      - name: Zip and add stuff
+        if: matrix.os != 'windows-latest'
+        run: |
+          zip -r ${{ env.BINARY_PATH }}.zip ${{ env.BINARY_PATH }} share/std
       
       - name: Release
         uses: softprops/action-gh-release@v1
