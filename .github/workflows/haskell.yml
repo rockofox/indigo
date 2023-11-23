@@ -98,14 +98,19 @@ jobs:
       - name: Set binary path (Non-Windows)
         if: matrix.os != 'windows-latest'
         run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
-        
+
       # - name: Compress binary
       #   uses: svenstaro/upx-action@2.0.1
       #   with:
       #     file: ${{ env.BINARY_PATH }}
       
+      - name: Zip and add stuff
+        run: |
+          mv share/std std
+          zip -r ${{ env.BINARY_PATH }}.zip ${{ env.BINARY_PATH }} std
+      
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-${{ github.sha }}
-          files: ${{ env.BINARY_PATH }}
+          files: ${{ env.BINARY_PATH }}.zip
