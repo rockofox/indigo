@@ -24,6 +24,7 @@ import Text.Megaparsec (errorBundlePretty)
 import Util
 import VM
 import Prelude hiding (lex)
+import System.Environment
 
 data Function = Function
     { baseName :: String
@@ -136,7 +137,12 @@ findSourceFile fileName = do
                             e4 <- doesFileExist ("/usr/lib/indigo/" ++ fileName)
                             if e4
                                 then return $ "/usr/lib/indigo/" ++ fileName
-                                else error $ "Could not find file " ++ fileName
+                                else do 
+                                    executablePath' <- getExecutablePath
+                                    e5 <- doesFileExist (executablePath' ++ "/" ++ fileName)
+                                    if e5
+                                        then return $ executablePath' ++ fileName
+                                        else error $ "File " ++ fileName ++ " not found"
 
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.in" >>= readFile

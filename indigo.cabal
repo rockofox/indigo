@@ -40,6 +40,7 @@ library
         vector,
         -- pretty-simple,
         monad-loops,
+        executable-path
     hs-source-dirs:   lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings,
