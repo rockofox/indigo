@@ -82,37 +82,35 @@ jobs:
         run: |
           mkdir dist-${{matrix.os}}
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
-
-      - name: Rename binary (Windows)
+      
+      - name: Set binary extension (Windows)
         if: matrix.os == 'windows-latest'
-        run: mv dist-${{matrix.os}}/indigo.exe dist-${{matrix.os}}/indigo-${{matrix.os}}.exe
+        run: echo "BINARY_EXT=.exe" >> $env:GITHUB_ENV
       
       - name: Rename binary
-        if: matrix.os != 'windows-latest'
-        run: mv dist-${{matrix.os}}/indigo dist-${{matrix.os}}/indigo-${{matrix.os}}
-          
-      - name: Set binary path (Windows)
-        if: matrix.os == 'windows-latest'
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}.exe" >> $GITHUB_ENV
+        run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
           
       - name: Set binary path
-        if: matrix.os != 'windows-latest'
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
-
-      # - name: Compress binary
-      #   uses: svenstaro/upx-action@2.0.1
-      #   with:
-      #     file: ${{ env.BINARY_PATH }}
+        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
       
-      - name: Zip and add stuff (Windows)
+      - name: Set binary path (Windows)
+        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $env:GITHUB_ENV
+
+      - name: Arrange release files
+        run: |
+          mkdir release
+          mv ${{env.BINARY_PATH}} release
+          mv share/std release
+
+      - name: Zip (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          Compress-Archive -Path ${{ env.BINARY_PATH }}, share/std -DestinationPath ${{ env.BINARY_PATH }}.zip
+          Compress-Archive -Path release/* -DestinationPath ${{ env.BINARY_PATH }}.zip
       
-      - name: Zip and add stuff
+      - name: Zip
         if: matrix.os != 'windows-latest'
         run: |
-          zip -r ${{ env.BINARY_PATH }}.zip ${{ env.BINARY_PATH }} share/std
+          zip -r ${{ env.BINARY_PATH }}.zip release/*
       
       - name: Release
         uses: softprops/action-gh-release@v1
