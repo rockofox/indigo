@@ -78,11 +78,6 @@ jobs:
       - name: Run tests
         run: cabal test all
 
-      - if: matrix.os == 'windows-latest'
-        name: Set extension to .exe on Windows
-        run: |
-          echo "BINARY_EXT=.exe" >> $GITHUB_ENV
-
       - name: Build binary
         run: |
           mkdir dist-${{matrix.os}}
@@ -90,13 +85,20 @@ jobs:
 
       - name: Rename binary
         run: |
-          ls
-          echo ${{env.BINARY_EXT}}
-          mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
-      
+          if [ "${{matrix.os}}" == "windows-latest" ]; then
+            mv dist-${{matrix.os}}/indigo.exe dist-${{matrix.os}}/indigo-${{matrix.os}}.exe
+          else
+            mv dist-${{matrix.os}}/indigo dist-${{matrix.os}}/indigo-${{matrix.os}}
+          fi
+          
       - name: Set binary path
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
-
+        run: |
+          if [ "${{matrix.os}}" == "windows-latest" ]; then
+            echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}.exe" >> $GITHUB_ENV
+          else
+            echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}" >> $GITHUB_ENV
+          fi
+          
       # - name: Compress binary
       #   uses: svenstaro/upx-action@2.0.1
       #   with:
