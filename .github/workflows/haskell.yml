@@ -80,7 +80,8 @@ jobs:
 
       - if: matrix.os == 'windows-latest'
         name: Set extension to .exe on Windows
-        run: echo "BINARY_EXT=.exe" >> $GITHUB_ENV
+        run: |
+          echo "BINARY_EXT=.exe" >> $GITHUB_ENV
 
       - name: Build binary
         run: |
@@ -88,7 +89,10 @@ jobs:
           cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
 
       - name: Rename binary
-        run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
+        run: |
+          ls
+          echo ${{env.BINARY_EXT}}
+          mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
       
       - name: Set binary path
         run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
