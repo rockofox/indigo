@@ -98,22 +98,22 @@ jobs:
 
       - name: Arrange release files
         run: |
-          mkdir release
-          mv ${{env.BINARY_PATH}} release
-          mv share/std release
+          mkdir indigo-latest-${{matrix.os}}
+          mv ${{env.BINARY_PATH}} indigo-latest-${{matrix.os}}/indigo${{env.BINARY_EXT}}
+          mv share/std indigo-latest-${{matrix.os}}
 
       - name: Zip (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          Compress-Archive -Path release/* -DestinationPath ${{ env.BINARY_PATH }}.zip
+          Compress-Archive -Path indigo-latest-${{matrix.os}}/* -DestinationPath indigo-latest-${{matrix.os}}.zip
       
       - name: Zip
         if: matrix.os != 'windows-latest'
         run: |
-          zip -r ${{ env.BINARY_PATH }}.zip release/*
+          zip -r indigo-latest-${{matrix.os}}.zip indigo-latest-${{matrix.os}}/*
       
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest-${{ github.sha }}
-          files: ${{ env.BINARY_PATH }}.zip
+          files: indigo-latest-${{matrix.os}}.zip
