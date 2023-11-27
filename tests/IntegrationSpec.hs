@@ -57,6 +57,21 @@ spec = do
             compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
         it "Can return the excess" $ do
             compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
+        it "Can detect zero elements" $ do
+            compileAndRun
+                [r|t :: List{Int} -> Int
+                            t [] = 0
+                            t (x:xs) = x
+                            let main => IO = println (t [])|]
+                `shouldReturn` "0\n"
+        it "Can detect one element" $ do
+            compileAndRun
+                [r|t :: List{Int} -> Int
+                            t [] = 0
+                            t (x:[]) = 1
+                            t (x:xs) = x
+                            let main => IO = println (t [4])|]
+                `shouldReturn` "1\n"
     describe "Prelude" $ do
         it "Can use map" $ do
             compileAndRun "let main => IO = println (map (`+`1), [1, 2, 3])" `shouldReturn` "[2,3,4]\n"
@@ -180,7 +195,34 @@ spec = do
                     end
                 |]
                 `shouldReturn` "Woof\nMeow\n"
+    describe "Lambdas" $ do
+        it "Can use a lambda in the map function" $ do
+            compileAndRun
+                [r|
+                    let main => IO = do
+                        println map (\x -> x + 1), [1, 2, 3]
+                    end
+                |]
+                `shouldReturn` "[2,3,4]\n"
+    describe "Recursion" $ do
+        it "Can use recursion" $ do
+            compileAndRun
+                [r|
+                let rec (x: Int) => Int = do
+                  if x == 0 then do
+                    0
+                  else do
+                    rec ((x) - 1)
+                  end
+                end
 
+                let main => IO = do
+                    println (rec 10)
+                end
+                |]
+                `shouldReturn` "0\n"
+
+-- describe "Import"
 -- it "Can find function based on type with lists, multiple definitions and pattern matching" $ do
 --     compileAndRun
 --         [r|

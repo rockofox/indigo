@@ -62,6 +62,8 @@ data Instruction
       Jf String
     | -- | Call a function
       Call String
+    | -- | Call a function and keep locals
+      CallLocal String
     | -- | Call a function from the stack
       CallS
     | -- | Push a partial function onto the stack
@@ -295,6 +297,7 @@ instance Num Data where
     (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
+    (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x -- TODO
     (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
     fromInteger = DInt . fromInteger
     abs (DInt x) = DInt $ abs x
@@ -371,6 +374,7 @@ runInstruction (Builtin Print) = do
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
+runInstruction (CallLocal x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = (head (callStack vm)).locals} : callStack vm}
 runInstruction CallS =
     stackPop >>= \d -> case d of
         DFuncRef x args -> do

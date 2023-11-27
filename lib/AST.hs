@@ -53,7 +53,6 @@ data Expr
     | Flexible Expr
     | Trait {name :: String, methods :: [Expr]}
     | Impl {trait :: String, for :: String, methods :: [Expr]}
-    | IOLit
     deriving
         ( Show
         , Generic
@@ -109,7 +108,6 @@ children (TypeLit _) = []
 children (Flexible a) = [a]
 children (Trait _ a) = a
 children (Impl _ _ a) = a
-children IOLit = []
 children (FuncDec _ _) = []
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
@@ -133,7 +131,6 @@ data Type
     | Float
     | Bool
     | String
-    | IO
     | Any
     | None
     | Unknown
@@ -148,7 +145,6 @@ instance Show Type where
     show Float = "Float"
     show Bool = "Bool"
     show String = "String"
-    show IO = "IO"
     show Any = "Any"
     show None = "None"
     show Unknown = "Unknown"
@@ -198,7 +194,7 @@ typeOf (Ge _ _) = Bool
 typeOf (And _ _) = Bool
 typeOf (Or _ _) = Bool
 typeOf (Not _) = Bool
-typeOf (FuncCall{}) = error "Cannot infer type of function call"
+typeOf (FuncCall{}) = Any -- error "Cannot infer type of variable"
 typeOf Placeholder = Any
 typeOf (Var{}) = Any -- error "Cannot infer type of variable"
 typeOf (Let _ _) = error "Cannot infer type of let"
@@ -217,7 +213,6 @@ typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo _ _) = error "Cannot infer type of modulo"
 typeOf (Target _ _) = error "Cannot infer type of target"
-typeOf IOLit = IO
 typeOf (ListConcat{}) = List Any
 typeOf (ListPattern _) = List Any
 typeOf (StructAccess s _) = typeOf s

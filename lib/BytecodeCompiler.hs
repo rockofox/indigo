@@ -8,7 +8,7 @@ import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, intercalate, isInfixOf)
 import Data.Maybe (fromJust, isJust, isNothing)
-import Data.Text (splitOn)
+import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -20,11 +20,11 @@ import Parser (CompilerFlags (CompilerFlags), name, parseProgram, types)
 import Parser qualified
 import Paths_indigo qualified
 import System.Directory (doesFileExist)
+import System.Environment
 import Text.Megaparsec (errorBundlePretty)
 import Util
 import VM
 import Prelude hiding (lex)
-import System.Environment
 
 data Function = Function
     { baseName :: String
@@ -137,7 +137,7 @@ findSourceFile fileName = do
                             e4 <- doesFileExist ("/usr/lib/indigo/" ++ fileName)
                             if e4
                                 then return $ "/usr/lib/indigo/" ++ fileName
-                                else do 
+                                else do
                                     executablePath' <- getExecutablePath
                                     e5 <- doesFileExist (executablePath' ++ "/" ++ fileName)
                                     if e5
@@ -205,6 +205,8 @@ compileExpr (Parser.Modulo x y) = doBinOp x y Mod
 compileExpr (Parser.Power x y) = doBinOp x y Pow
 compileExpr (Parser.Gt x y) = doBinOp x y Gt
 compileExpr (Parser.Lt x y) = doBinOp x y Lt
+compileExpr (Parser.Ge x y) = doBinOp x y Lt >>= \x' -> return (x' ++ [Not])
+compileExpr (Parser.Le x y) = doBinOp x y Gt >>= \x' -> return (x' ++ [Not])
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
 compileExpr (Parser.Eq x y) = doBinOp x y Eq
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
@@ -213,7 +215,7 @@ compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromI
 compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
 compileExpr Parser.Placeholder = return []
-compileExpr (Parser.FuncCall "print" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
+compileExpr (Parser.FuncCall "unsafePrint" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
 compileExpr (Parser.FuncCall "abs" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
@@ -229,10 +231,13 @@ compileExpr (Parser.FuncCall funcName args _) = do
                 Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
     let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
 
+    -- If the funcName starts with curCon@, it's a local function
+    let callWay = (if T.pack (curCon ++ "@") `isPrefixOf` T.pack fun.funame then CallLocal (funame fun) else Call (funame fun))
+
     case funcDec of
         (Just fd) -> do
             if length args == length (Parser.types fd) - 1
-                then concatMapM compileExpr args >>= \args' -> return (args' ++ [Call (funame fun)])
+                then concatMapM compileExpr args >>= \args' -> return (args' ++ [callWay])
                 else
                     concatMapM compileExpr args >>= \args' ->
                         return $
@@ -413,6 +418,7 @@ compileExpr (Parser.Then a b) = do
     a' <- compileExpr a
     b' <- compileExpr b
     return $ a' ++ b'
+compileExpr (Parser.UnaryMinus x) = compileExpr x >>= \x' -> return (x' ++ [Push $ DInt (-1), Mul])
 compileExpr x = error $ show x ++ " is not implemented"
 
 createVirtualFunctions :: StateT (CompilerState a) IO ()

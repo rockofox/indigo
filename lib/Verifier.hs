@@ -56,7 +56,8 @@ listPatternToBindings (ListPattern exprs) (List t) = do
     let singulars = init exprs
     let Var restName _ = last exprs
     map (\(Var name _) -> VBinding{name = name, args = [], ttype = t}) singulars ++ [VBinding{name = restName, args = [], ttype = List t}]
-listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
+-- listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
+listPatternToBindings x y = error $ "listPatternToBinding called with non-list-pattern: " ++ show x ++ " " ++ show y
 
 typeOf' :: Expr -> StateT VerifierState IO Type
 typeOf' (Var name _) = do
@@ -75,7 +76,7 @@ compareTypes' (StructT a) (StructT b) = do
     let ttypes' = ttypes rootFrame
     let a' = Map.findWithDefault (VType{implements = []}) a ttypes'
     let b' = Map.findWithDefault (VType{implements = []}) b ttypes'
-    return $ a `elem` implements b' || b `elem` implements a'
+    return $ a `elem` implements b' || b `elem` implements a' || a == b
 compareTypes' a b = return $ compareTypes a b
 
 functionTypesAcceptable :: [Type] -> [Type] -> StateT VerifierState IO Bool
@@ -84,7 +85,7 @@ functionTypesAcceptable use def = allM (uncurry compareTypes') $ zip use def
 initVerifierState :: VerifierState
 initVerifierState =
     VerifierState
-        { frames = [VerifierFrame{bindings = Set.fromList [VBinding{name = "print", args = [Any], ttype = IO}, VBinding{name = "println", args = [Any], ttype = IO}], ttypes = Map.empty}] -- TODO: actually import prelude
+        { frames = [VerifierFrame{bindings = Set.fromList [], ttypes = Map.empty, ftype = Any, fname = "__outside"}] -- TODO: actually import prelude
         , topLevel = True
         }
 

@@ -48,7 +48,7 @@ spec = do
         it "Should parse a simple program" $
             parseProgram "let main => IO = print \"Hello, world!\"" CompilerFlags{verboseMode = False}
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [IO]}}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"]}}])
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" CompilerFlags{verboseMode = False}

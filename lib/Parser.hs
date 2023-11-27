@@ -83,7 +83,7 @@ binOpTable =
     , [binary "." StructAccess]
     , [binary "as" Cast]
     , [binary ":" ListConcat]
-    , [binary "==" Eq, binary "!=" Neq, binary "<" Lt, binary ">" Gt, binary "<=" Le, binary ">=" Ge]
+    , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
     , [prefix "!" Not]
     , [prefix "-" UnaryMinus]
@@ -183,9 +183,6 @@ validType =
         <|> do
             keyword "String"
             return String
-        <|> do
-            keyword "IO"
-            return IO
         <|> do
             keyword "Any"
             return Any

@@ -9,13 +9,13 @@ area :: Float -> Float -> Float
 area x1 x2 = ((x2) - x1) * circle x2
 
 # Recursively add the areas of the Riemann rectangles
-estimate :: Any -> Float
+estimate :: List{Any} -> Float
 estimate (x:[]) = 0.0
 estimate (x:y:xs) = (area x, y) + estimate (y:xs)
 
 pi :: Float -> Float
 pi n = do
-  let rsum = estimate (map (`/`n), (range 1.0, n))
+  let rsum = estimate (map (`/`n), (range 1.0, n, 1.0))
   4.0 * rsum
 end
 

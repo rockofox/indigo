@@ -1,3 +1,5 @@
+struct IO = (inner: Any)
+
 `+` :: Any -> Any -> Any
 `+` x y = x + y
 `-` :: Any -> Any -> Any
@@ -12,6 +14,13 @@ let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} =
 map :: Fn{Any => Any} -> List{Any} -> List{Any}
 map fun [] = []
 map fun (x:xs) = (fun x) : (map fun, xs)
+
+mapM :: Fn{Any => IO} -> List{Any} -> IO
+mapM fun [] = []
+mapM fun (x:xs) = do
+    fun x
+    mapM fun, xs
+end
 
 filter :: Fn{Any => Bool} -> List{Any} -> List{Any}
 filter fun [] = []
@@ -40,17 +49,34 @@ sum :: List{Float} -> Float
 sum [] = 0.0
 sum (x:xs) = x + sum xs
 
+print :: Any -> IO
+print s = do
+  unsafePrint s
+end
+
 println :: Any -> IO
 println s = do
   print s
   print "\n"
 end
 
-range :: Any -> Any -> List{Int}
-range a b = do
-  if a == b then do
+range :: Any -> Any -> Any -> List{Any}
+range a b inc = do
+  if a >= b then do
     []
   else do
-    a : range (a + 1.0), b
+    a : (range (a + inc), b, inc)
+  end
+end
+
+sqrt :: Float -> Float
+sqrt x = x ** 0.5
+
+abs :: Float -> Float
+abs x = do
+  if x < 0.0 then do
+    -x
+  else do
+    x
   end
 end
