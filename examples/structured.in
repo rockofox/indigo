@@ -1,0 +1,3 @@
+struct Person = (name: String, age: Int)
+let peter = Person { name: "Peter", age: 24 }
+println peter.name : " is " : show (peter.age) : " years old"

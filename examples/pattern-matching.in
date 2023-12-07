@@ -1,0 +1,4 @@
+let head ([]: List{Any}) = 0
+let head ((x:xs): List{Any}) = x
+
+print head [1,2,3]

@@ -107,7 +107,7 @@ verifyProgram' name source exprs = do
                 }
     when (name /= "__prelude") $ do
         prelude <- liftIO preludeFile
-        let parsedPrelude = parseProgram (T.pack prelude) CompilerFlags{verboseMode = False}
+        let parsedPrelude = parseProgram (T.pack prelude) initCompilerFlags{needsMain = False}
         case parsedPrelude of
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Program exprs') -> do
@@ -213,7 +213,7 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     let convertedPath = map (\x -> if x == '@' then '/' else x) from
     i <- liftIO $ readFile $ convertedPath ++ ".in"
-    let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+    let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Program exprs) -> exprs
     -- concatMapM compileExpr (map mangleAST expr)

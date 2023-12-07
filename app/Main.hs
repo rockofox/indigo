@@ -98,7 +98,8 @@ potentiallyTimedOperation msg showTime action = if showTime then timeItNamed msg
 
 parseAndVerify :: String -> T.Text -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Void) Program)
 parseAndVerify name t cf = do
-    let (result, state) = runIdentity $ runStateT (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
+    -- let (result, state) = runIdentity $ runStateT (parseProgramCf' t initCompilerFlags) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
+    let result = parseProgram t cf
     case result of
         Left err -> return $ Left err
         Right program' -> do
@@ -109,7 +110,7 @@ parseAndVerify name t cf = do
                 Right _ -> return $ Right program'
 
 -- parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) (Program))
-parse name input compilerFlags = return $ parseAndVerify name (T.pack input) CompilerFlags{verboseMode = False}
+parse name input compilerFlags = return $ parseAndVerify name (T.pack input) initCompilerFlags
 
 main :: IO ()
 main = do
@@ -178,7 +179,7 @@ type Repl a = HaskelineT (StateT REPLState IO) a
 
 cmd :: String -> Repl ()
 cmd input = do
-    let (result, state) = runIdentity $ runStateT (parseProgram' (T.pack input)) (ParserState{compilerFlags = CompilerFlags{verboseMode = False}, validLets = [], validFunctions = []})
+    let (result, state) = runIdentity $ runStateT (parseProgram' (T.pack input)) (ParserState{compilerFlags = initCompilerFlags, validLets = [], validFunctions = []})
     case result of
         Left err -> liftIO $ putStrLn $ errorBundlePretty err
         Right program' -> do

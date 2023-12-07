@@ -26,7 +26,7 @@ import Foreign
 import Foreign.C (CString, newCString, peekCStringLen)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar)
-import Parser (CompilerFlags (CompilerFlags), parseProgram)
+import Parser (CompilerFlags (CompilerFlags), initCompilerFlags, parseProgram)
 import Parser qualified
 import Text.Megaparsec (errorBundlePretty)
 import VM
@@ -44,7 +44,7 @@ import VM
 runProgramRaw :: Ptr CChar -> Int -> IO ()
 runProgramRaw inputPtr inputLen = do
     input <- peekCStringLen (inputPtr, fromIntegral inputLen)
-    let p = parseProgram (Data.Text.pack input) CompilerFlags{verboseMode = False}
+    let p = parseProgram (Data.Text.pack input) initCompilerFlags
     case p of
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
@@ -57,7 +57,7 @@ runProgramRaw inputPtr inputLen = do
 runProgramRawBuffered :: Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
 runProgramRawBuffered inputPtr inputLen outputPtrPtr = do
     program <- peekCStringLen (inputPtr, inputLen)
-    let p = parseProgram (Data.Text.pack program) Parser.CompilerFlags{verboseMode = False}
+    let p = parseProgram (Data.Text.pack program) Parser.initCompilerFlags
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do

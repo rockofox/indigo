@@ -3,7 +3,7 @@
 {-# HLINT ignore "Use newtype instead of data" #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Parser (Expr (..), Program (..), parseProgram', ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), typeOf, compareTypes) where
+module Parser (Expr (..), Program (..), parseProgram', ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), initCompilerFlags, typeOf, compareTypes) where
 
 -- module Parser where
 
@@ -23,6 +23,7 @@ import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeE
 import Control.Monad.State
     ( MonadState (get, put)
     , State
+    , StateT (runStateT)
     , runState
     )
 import Data.Char (isUpper)
@@ -56,10 +57,15 @@ import Text.Megaparsec.Debug (dbg)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
+    , needsMain :: Bool
+    -- ^ Whether to compile to C or WASM
     }
     deriving
         ( Show
         )
+
+initCompilerFlags :: CompilerFlags
+initCompilerFlags = CompilerFlags{verboseMode = False, needsMain = True}
 
 data ParserState = ParserState
     { validFunctions :: [String]
@@ -355,14 +361,19 @@ parseProgram t cf = do
     let (result, _) = runState (parseProgram' t) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
     case result of
         Left err -> Left err
-        Right program' -> Right program'
+        Right program' -> do
+            -- If theres no main function, add one
+            let foundMain = any (\case FuncDef "main" _ _ -> True; _ -> False) program'.exprs || any (\case Function defs _ -> any (\case FuncDef "main" _ _ -> True; _ -> False) defs; _ -> False) program'.exprs
+            if foundMain || not cf.needsMain
+                then Right program'
+                else Right $ Program [FuncDec "main" [StructT "IO"], FuncDef "main" [] (DoBlock program'.exprs)]
 
 -- case verifyProgram name t (verifierTree state) of
 --     Left err -> Left err
 --     Right _ -> Right program'
 
 parseFreeUnsafe :: Text -> Expr
-parseFreeUnsafe t = case parseProgram t (CompilerFlags{verboseMode = False}) of
+parseFreeUnsafe t = case parseProgram t initCompilerFlags of
     Left err -> error $ show err
     Right program' -> case program' of
         Program [exprs] -> replacePositionWithAnyPosition exprs

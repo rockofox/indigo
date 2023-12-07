@@ -69,7 +69,7 @@ compileProgram :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgram (Parser.Program expr) = do
     prelude <- do
         i <- liftIO preludeFile
-        case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+        case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program progExpr) -> return progExpr
     prelude' <- concatMapM compileExpr prelude
@@ -376,7 +376,7 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     let convertedPath = map (\x -> if x == '@' then '/' else x) from
     i <- liftIO $ readFile $ convertedPath ++ ".in"
-    let expr = case parseProgram (T.pack i) CompilerFlags{verboseMode = False} of -- FIXME: pass on flags
+    let expr = case parseProgram (T.pack i) Parser.initCompilerFlags of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program exprs) -> exprs
     if qualified || isJust as

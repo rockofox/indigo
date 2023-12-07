@@ -28,7 +28,7 @@ import VM
 
 compileAndRun :: String -> IO String
 compileAndRun prog = do
-    let p = parseProgram (Data.Text.pack prog) Parser.CompilerFlags{verboseMode = False}
+    let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do
