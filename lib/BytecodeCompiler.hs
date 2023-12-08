@@ -4,15 +4,14 @@ module BytecodeCompiler where
 import AST (zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
-import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
+import Control.Monad.Loops (firstM)
+import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, intercalate, isInfixOf)
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Data.Vector qualified as V
-import Debug.Trace
 import Foreign ()
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -21,10 +20,11 @@ import Parser qualified
 import Paths_indigo qualified
 import System.Directory (doesFileExist)
 import System.Environment
+import System.FilePath
 import Text.Megaparsec (errorBundlePretty)
 import Util
 import VM
-import Prelude hiding (lex)
+import Prelude hiding (FilePath, lex)
 
 data Function = Function
     { baseName :: String
@@ -118,31 +118,15 @@ typesMatchExactly fun typess = all (uncurry (==)) (zip fun.types typess) && leng
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
 
--- FIXME: this is horrible
 findSourceFile :: String -> IO String
 findSourceFile fileName = do
-    e1 <- doesFileExist fileName
-    if e1
-        then return fileName
-        else do
-            p2 <- Paths_indigo.getDataFileName fileName
-            e2 <- doesFileExist p2
-            if e2
-                then return p2
-                else do
-                    e3 <- doesFileExist ("/usr/local/lib/indigo/" ++ fileName)
-                    if e3
-                        then return $ "/usr/local/lib/indigo/" ++ fileName
-                        else do
-                            e4 <- doesFileExist ("/usr/lib/indigo/" ++ fileName)
-                            if e4
-                                then return $ "/usr/lib/indigo/" ++ fileName
-                                else do
-                                    executablePath' <- getExecutablePath
-                                    e5 <- doesFileExist (executablePath' ++ "/" ++ fileName)
-                                    if e5
-                                        then return $ executablePath' ++ fileName
-                                        else error $ "File " ++ fileName ++ " not found"
+    dataFile <- Paths_indigo.getDataFileName fileName
+    executablePathFile <- getExecutablePath >>= \x -> return $ takeDirectory x </> fileName
+    let pathsToTry = map (</> fileName) ["/usr/local/lib/indigo/", "/usr/lib/indigo/"] ++ [executablePathFile, dataFile]
+    firstThatExists <- firstM doesFileExist pathsToTry
+    case firstThatExists of
+        Just x -> return x
+        Nothing -> error $ "Source file " ++ fileName ++ " not found. Tried:\n* " ++ intercalate "\n* " pathsToTry
 
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.in" >>= readFile
