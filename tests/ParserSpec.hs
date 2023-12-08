@@ -15,6 +15,9 @@ isFn :: Type -> Bool
 isFn (AST.Fn _ _) = True
 isFn _ = False
 
+parserCompilerFlags :: CompilerFlags
+parserCompilerFlags = initCompilerFlags{needsMain = False}
+
 spec :: Spec
 spec = do
     describe "compareTypes" $ do
@@ -46,25 +49,25 @@ spec = do
                 \t -> compareTypes (StructT t) (StructT t) `shouldBe` True
     describe "Basic" $ do
         it "Should parse a simple program" $
-            parseProgram "let main => IO = print \"Hello, world!\"" initCompilerFlags
+            parseProgram "let main => IO = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"]}}])
     describe "Struct" $ do
         it "Member access" $ do
-            parseProgram "bello{}.name" initCompilerFlags
+            parseProgram "bello{}.name" parserCompilerFlags
                 `shouldBe` Right
                     (Program [StructAccess (StructLit "bello" []) (Var "name" anyPosition)])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
-            parseProgram "trait Show = do\nshow :: Self -> String\nend" initCompilerFlags
+            parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}]}])
         it "Should parse a trait declaration with multiple methods" $
-            parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" initCompilerFlags
+            parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}, FuncDec{name = "show2", types = [Self, String]}]}])
         it "Should parse a trait implementation" $
-            parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" initCompilerFlags
+            parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right
                     -- (Program [Impl{trait = "Show", for = "Point", methods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
                     ( Program

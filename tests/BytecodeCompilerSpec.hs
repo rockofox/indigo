@@ -45,7 +45,7 @@ spec = do
     describe "Addition" $ do
         it "Should compile 2+4" $ do
             compile [r|2+4|]
-                `shouldReturn` [Push $ DInt 2, Push $ DInt 4, VM.Add, Exit]
+                `shouldReturn` [Label "main", Push $ DInt 2, Push $ DInt 4, VM.Add, Exit]
         it "Should work properly with function calls" $ do
             compile
                 [r|
@@ -65,10 +65,10 @@ spec = do
     describe "Explicit casting" $ do
         it "Can cast from int to float" $ do
             compile [r|2 as Float|]
-                `shouldReturn` [Push 2, Push 0.0, VM.Cast, Exit]
+                `shouldReturn` [Label "main", Push 2, Push 0.0, VM.Cast, Exit]
         it "Casts are compatible with binary operations" $ do
             compile [r|(2 as Float) + 4.0|]
-                `shouldReturn` [Push 2, Push 0.0, VM.Cast, Push 4.0, VM.Add, Exit]
+                `shouldReturn` [Label "main", Push 2, Push 0.0, VM.Cast, Push 4.0, VM.Add, Exit]
     xdescribe "typesMatch" $ do
         it "Should be true for exact matches" $
             property $

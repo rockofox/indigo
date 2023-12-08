@@ -368,16 +368,12 @@ parseProgram t cf = do
                 then Right program'
                 else Right $ Program [FuncDec "main" [StructT "IO"], FuncDef "main" [] (DoBlock program'.exprs)]
 
--- case verifyProgram name t (verifierTree state) of
---     Left err -> Left err
---     Right _ -> Right program'
-
 parseFreeUnsafe :: Text -> Expr
-parseFreeUnsafe t = case parseProgram t initCompilerFlags of
+parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     Left err -> error $ show err
     Right program' -> case program' of
-        Program [exprs] -> replacePositionWithAnyPosition exprs
-        _ -> error "Program should only have one expression"
+        Program [expr'] -> replacePositionWithAnyPosition expr'
+        _ -> error "Expected a single expression"
   where
     replacePositionWithAnyPosition :: Expr -> Expr
     replacePositionWithAnyPosition (FuncCall a b _) = FuncCall a (map replacePositionWithAnyPosition b) anyPosition
