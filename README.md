@@ -5,14 +5,14 @@
 
 Indigo is an **experimental** multiparadigm programming language designed to lay focus on functional programming, clearity and convinience.
 Inspired by F# and Haskell, it aims to deliver satisfactory functional programming features, while exploring new concepts.
-```ruby
+```julia
 let greet (name: String) => IO = println "Hello " : name
 let main => IO = do
     let person = Person { name: "Lily", age: 22 }
     greet person.name
 end
 ```
-```ruby
+```julia
 map (`*`2) [2, 4, 6, 8]     # [4, 8, 12, 16]
 ```
 ### Features
@@ -22,9 +22,13 @@ map (`*`2) [2, 4, 6, 8]     # [4, 8, 12, 16]
 * Partial Functions
 * Lambda/Anonymous functions
 * Pattern Matching
-* Advanced Type System (WIP)
+* Types
 * Function Composition/Pipelines
-* Imports (WIP)
-* Generics (Planned)
-* Uniform Function Call Syntax (Planned)
-* Named and optional parameters (Planned)
+* Imports
+
+### Roadmap
+* Documentation
+* Generics
+* Contracts/Constraints
+* Uniform Function Call Syntax
+* Named and optional parameters
