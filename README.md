@@ -1,7 +1,5 @@
-<h1 align="center">
-    <img align="right" width="140" height="130" src="assets/logo.png" alt="indigo logo">
-    <h3 align="left">Indigo</h3>
-</h1>
+<img align="right" width="140" height="130" src="assets/logo.png" alt="indigo logo">
+<h3 align="left">Indigo</h3>
 
 Indigo is an **experimental** multiparadigm programming language designed to lay focus on functional programming, clearity and convinience.
 Inspired by F# and Haskell, it aims to deliver satisfactory functional programming features, while exploring new concepts.
