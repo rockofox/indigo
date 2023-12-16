@@ -16,6 +16,7 @@ import Data.Text qualified
 import Data.Vector qualified as V
 import Debug.Trace
 import GHC.Generics (Generic)
+import System.Random (randomIO, randomRIO)
 
 data Instruction
     = -- | Push a value onto the stack
@@ -126,7 +127,7 @@ data Instruction
       Exit
     deriving (Show, Eq, Generic)
 
-data Action = Print deriving (Show, Eq, Generic)
+data Action = Print | GetLine | GetChar | Random deriving (Show, Eq, Generic)
 
 data Data
     = DInt Int
@@ -373,6 +374,27 @@ runInstruction (Builtin Print) = do
     case ioMode vm of
         HostDirect -> stackPop >>= liftIO . putStr . show
         VMBuffer -> stackPop >>= \x -> put $ vm{ioBuffer = (ioBuffer vm){output = output (ioBuffer vm) ++ show x}}
+runInstruction (Builtin GetLine) = do
+    vm <- get
+    case ioMode vm of
+        HostDirect -> liftIO getLine >>= stackPush . DString
+        VMBuffer -> do
+            let input = (ioBuffer vm).input
+            let (line, rest) = break (== '\n') input
+            put $ vm{ioBuffer = (ioBuffer vm){input = rest}}
+            stackPush $ DString line
+runInstruction (Builtin GetChar) = do
+    vm <- get
+    case ioMode vm of
+        HostDirect -> liftIO getChar >>= stackPush . DChar
+        VMBuffer -> do
+            let input = (ioBuffer vm).input
+            let (char, rest) = (head input, tail input)
+            put $ vm{ioBuffer = (ioBuffer vm){input = rest}}
+            stackPush $ DChar char
+runInstruction (Builtin Random) = do
+    num <- liftIO (randomIO :: IO Float)
+    stackPush $ DFloat num
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}

@@ -42,7 +42,8 @@ library
         -- pretty-simple,
         monad-loops,
         executable-path,
-        filepath
+        filepath,
+        random
     hs-source-dirs:   lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings,

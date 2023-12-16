@@ -1,0 +1,10 @@
+let main => IO = do
+    let number = randomInt 1, 10
+    println "Guess a number between 1 and 10"
+    let guess = getLine
+    if guess == number as String then do
+        println "You guessed it!"
+    else do
+        println "Sorry, the number was " : ^number
+    end
+end

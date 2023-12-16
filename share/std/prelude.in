@@ -60,6 +60,45 @@ println s = do
   print "\n"
 end
 
+getLine :: IO
+getLine _ = do
+  unsafeGetLine
+end
+
+getChar :: IO
+getChar _ = do
+  unsafeGetChar
+end
+
+max :: Any -> Any -> Any
+max x y = do
+  if x > y then do
+    x
+  else do
+    y
+  end
+end
+
+min :: Any -> Any -> Any
+min x y = do
+  if x < y then do
+    x
+  else do
+    y
+  end
+end
+
+randomFloat :: IO
+randomFloat _ = do
+  unsafeRandom
+end
+
+randomInt :: Int -> Int -> Int
+randomInt a b = do
+  let r = randomFloat
+  (r * ((((b) - a) + a) as Float)) as Int
+end
+
 range :: Any -> Any -> Any -> List{Any}
 range a b inc = do
   if a >= b then do

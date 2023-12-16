@@ -109,6 +109,9 @@ findFunction funcName xs typess = do
         Just x -> Just x
         Nothing -> findAnyFunction funcName xs
 
+internalFunctions :: [String]
+internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
+
 typesMatch :: Function -> [Parser.Type] -> Bool
 typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess) && length typess <= length fun.types
 
@@ -200,6 +203,9 @@ compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
 compileExpr Parser.Placeholder = return []
 compileExpr (Parser.FuncCall "unsafePrint" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
+compileExpr (Parser.FuncCall "unsafeGetLine" _ _) = return [Builtin GetLine]
+compileExpr (Parser.FuncCall "unsafeGetChar" _ _) = return [Builtin GetChar]
+compileExpr (Parser.FuncCall "unsafeRandom" _ _) = return [Builtin Random]
 compileExpr (Parser.FuncCall "abs" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
@@ -297,7 +303,7 @@ compileExpr (Parser.Var x _) = do
     -- traceM $ "Looking for " ++ x ++ " in " ++ show (map baseName functions')
     -- traceM $ "Looking for " ++ curCon ++ "@" ++ x ++ " in " ++ show (map baseName functions')
     let fun = any ((== x) . baseName) functions' || any ((== curCon ++ "@" ++ x) . baseName) functions'
-    if fun
+    if fun || x `elem` internalFunctions
         then compileExpr (Parser.FuncCall x [] zeroPosition)
         else return [LLoad x]
 compileExpr (Parser.Let name value) = do
