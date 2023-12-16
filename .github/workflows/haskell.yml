@@ -1,6 +1,9 @@
 name: Build, Test, and release
 
-on: [push, workflow_dispatch]
+on:
+  push:
+    paths-ignore: "**.md"
+  workflow_dispatch:
 
 jobs:
   create_release:
