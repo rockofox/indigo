@@ -36,6 +36,7 @@ import Text.Megaparsec
     , ParseErrorBundle (..)
     , ParsecT
     , getOffset
+    , noneOf
     , oneOf
     , optional
     , registerParseError
@@ -233,7 +234,7 @@ funcDef = do
 gravis :: Parser String
 gravis = do
     symbol "`"
-    name <- (: []) <$> oneOf ("+-/*" :: String)
+    name <- many $ noneOf ['`']
     symbol "`"
     return name
 

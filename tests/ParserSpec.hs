@@ -6,6 +6,7 @@ import Parser
 import Test.Hspec
 import Test.QuickCheck
 import Test.QuickCheck.Arbitrary.Generic
+import Text.RawString.QQ (r)
 
 instance Arbitrary Type where
     arbitrary = genericArbitrary
@@ -80,3 +81,25 @@ spec = do
                             }
                         ]
                     )
+    describe "Gravis" $ do
+        it "Should parse operators escaped using gravis in dec correctly" $ do
+            parseProgram
+                [r|
+                `+` :: Any -> Any -> Any
+                `-` :: Any -> Any -> Any
+                `*` :: Any -> Any -> Any
+                `/` :: Any -> Any -> Any
+                `==` :: Any -> Any -> Any
+                |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "+", types = [Any, Any, Any]}, FuncDec{name = "-", types = [Any, Any, Any]}, FuncDec{name = "*", types = [Any, Any, Any]}, FuncDec{name = "/", types = [Any, Any, Any]}, FuncDec{name = "==", types = [Any, Any, Any]}])
+        it "Should be able to use gravis escaped functions in calls" $
+            do
+                parseProgram
+                    [r|
+                filter (`==`1), [1, 2, 3]
+            |]
+                    parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncCall "filter" [FuncCall "==" [IntLit 1] anyPosition, ListLit [IntLit 1, IntLit 2, IntLit 3]] anyPosition])
