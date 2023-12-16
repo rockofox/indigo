@@ -80,9 +80,9 @@ data Instruction
       Label String
     | -- | Locate a label
       Locate String
-    | -- | Pop a value off the stack and store it in a free address in the data memory
-      Store
-    | -- | Push the value at the given address in the data memory onto the stack
+    | -- | Pop a value off the stack and store it in the data memory
+      Store Int
+    | -- | Push a value from the data memory onto the stack
       Load Int
     | -- | Return to the caller
       Ret
@@ -120,6 +120,8 @@ data Instruction
       PackMap Int
     | -- | Compares two types and pushes T if they are compatible, F otherwise
       TypeEq
+    | -- | mov
+      Mov Int Data
     | -- | Exit the program
       Exit
     deriving (Show, Eq, Generic)
@@ -409,7 +411,7 @@ runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
 runInstruction (DupN n) = stackPeek >>= \d -> stackPushN $ replicate n d
 -- Memory
 runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
-runInstruction Store = stackPop >>= \d -> get >>= \vm -> put $ vm{memory = d : memory vm, stack = DInt (length (memory vm)) : stack vm}
+runInstruction (Store x) = stackPop >>= \d -> modify $ \vm -> vm{memory = take x (memory vm) ++ [d] ++ drop (x + 1) (memory vm)}
 -- Locals
 runInstruction (LStore name) = do
     localsc <- fmap (locals . safeHead) (gets callStack)
@@ -546,6 +548,10 @@ runInstruction TypeEq =
         (DFuncRef _ _, DTypeQuery s) -> s == "FuncRef"
         _ -> False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList
+runInstruction (Mov n dat) = do
+    -- Move data into register %n
+    vm <- get
+    put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 -- runInstruction x = error $ show x ++ ": not implemented"
