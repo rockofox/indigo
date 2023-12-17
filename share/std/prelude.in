@@ -8,6 +8,26 @@ struct IO = (inner: Any)
 `*` x y = x * y
 `/` :: Any -> Any -> Any
 `/` x y = x / y
+`<` :: Any -> Any -> Any
+`<` x y = x < y
+`>` :: Any -> Any -> Any
+`>` x y = x > y
+`<=` :: Any -> Any -> Any
+`<=` x y = x <= y
+`>=` :: Any -> Any -> Any
+`>=` x y = x >= y
+`==` :: Any -> Any -> Any
+`==` x y = x == y
+`!=` :: Any -> Any -> Any
+`!=` x y = x != y
+`&&` :: Any -> Any -> Any
+`&&` x y = x && y
+`||` :: Any -> Any -> Any
+`||` x y = x || y
+`%` :: Any -> Any -> Any
+`%` x y = x % y
+`!` :: Any -> Any
+`!` x = !x
 
 let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 
