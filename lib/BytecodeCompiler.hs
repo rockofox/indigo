@@ -196,6 +196,9 @@ compileExpr (Parser.Ge x y) = doBinOp x y Lt >>= \x' -> return (x' ++ [Not])
 compileExpr (Parser.Le x y) = doBinOp x y Gt >>= \x' -> return (x' ++ [Not])
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
 compileExpr (Parser.Eq x y) = doBinOp x y Eq
+compileExpr (Parser.Neq x y) = doBinOp x y Eq >>= \x' -> return (x' ++ [Not])
+compileExpr (Parser.And x y) = doBinOp x y And
+compileExpr (Parser.Or x y) = doBinOp x y Or
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
