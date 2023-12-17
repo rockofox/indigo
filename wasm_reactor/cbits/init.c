@@ -1,6 +1,13 @@
 // #include "Main_stub.h"
 #include <Rts.h>
 
+clock_t clock(void) {
+  return 0;
+}
+pid_t getpid(void) {
+  return 0;
+}
+
 __attribute__((export_name("wizer.initialize"))) void __wizer_initialize(void) {
   char *args[] = {
       "indigo-wasm-reactor.wasm", "+RTS", "--nonmoving-gc", "-H64m", "-RTS", NULL};
