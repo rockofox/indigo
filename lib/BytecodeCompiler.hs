@@ -314,6 +314,10 @@ compileExpr (Parser.Let name value) = do
     typeOf value >>= \v -> modify (\s -> s{lets = Let{name, vtype = v, context = curCon} : lets s})
     value' <- compileExpr value
     return $ value' ++ [LStore name]
+compileExpr (Parser.Function [Parser.FuncDef{body = Parser.StrictEval e}] dec) = do
+    let name = dec.name
+    evaledExpr <- compileExpr e
+    return $ evaledExpr ++ [LStore name]
 compileExpr (Parser.Function a b) = mapM_ compileExpr a >> compileExpr b >> return []
 compileExpr (Parser.Flexible a) = compileExpr a >>= \a' -> return $ Meta "flex" : a'
 compileExpr (Parser.ListConcat a b) = do

@@ -82,6 +82,7 @@ type Parser = ParsecT Void Text (State ParserState)
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "^" Flexible]
+    , [prefix "$" StrictEval]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]

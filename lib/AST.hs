@@ -53,6 +53,7 @@ data Expr
     | Flexible Expr
     | Trait {name :: String, methods :: [Expr]}
     | Impl {trait :: String, for :: String, methods :: [Expr]}
+    | StrictEval Expr
     deriving
         ( Show
         , Generic
@@ -109,6 +110,7 @@ children (Flexible a) = [a]
 children (Trait _ a) = a
 children (Impl _ _ a) = a
 children (FuncDec _ _) = []
+children (StrictEval a) = [a]
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -224,6 +226,7 @@ typeOf (Flexible x) = typeOf x
 typeOf (Trait _ _) = error "Cannot infer type of trait"
 typeOf (Impl{}) = error "Cannot infer type of impl"
 typeOf (Then _ b) = typeOf b
+typeOf (StrictEval x) = typeOf x
 
 -- typeOf x = error $ "Cannot infer type of " ++ show x
 
