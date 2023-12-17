@@ -30,7 +30,7 @@ import Parser (CompilerFlags (CompilerFlags), initCompilerFlags, parseProgram)
 import Parser qualified
 import Text.Megaparsec (errorBundlePretty)
 import VM
-    ( IOBuffer (output)
+    ( IOBuffer (..)
     , IOMode (VMBuffer)
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, ioBuffer, ioMode, pc)
@@ -42,8 +42,8 @@ import VM
 
 -- TODO: Put this stuff into a seperate file
 runProgramRaw :: Ptr CChar -> Int -> IO ()
-runProgramRaw inputPtr inputLen = do
-    input <- peekCStringLen (inputPtr, fromIntegral inputLen)
+runProgramRaw progPtr progLen = do
+    input <- peekCStringLen (progPtr, fromIntegral progLen)
     let p = parseProgram (Data.Text.pack input) initCompilerFlags
     case p of
         Left err -> putStrLn $ errorBundlePretty err
@@ -54,16 +54,17 @@ runProgramRaw inputPtr inputLen = do
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
 
-runProgramRawBuffered :: Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
-runProgramRawBuffered inputPtr inputLen outputPtrPtr = do
-    program <- peekCStringLen (inputPtr, inputLen)
+runProgramRawBuffered :: Ptr CChar -> Int -> Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
+runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
+    program <- peekCStringLen (progPtr, progLen)
+    input <- peekCStringLen (inputPtr, inputLen)
     let p = parseProgram (Data.Text.pack program) Parser.initCompilerFlags
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do
             xxx <- evalStateT (compileProgram program) (initCompilerState program)
             let xxxPoint = locateLabel xxx "main"
-            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
+            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}}
             let output' = BS.pack $ output $ ioBuffer vm
             BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
                 outputPtr <- mallocBytes len
@@ -76,7 +77,7 @@ foreign export ccall mallocPtr :: IO (Ptr (Ptr a))
 mallocPtr :: IO (Ptr (Ptr a))
 mallocPtr = malloc
 
-foreign export ccall runProgramRawBuffered :: Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
+foreign export ccall runProgramRawBuffered :: Ptr CChar -> Int -> Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
 
 foreign export ccall runProgramRaw :: Ptr CChar -> Int -> IO ()
 
