@@ -11,7 +11,7 @@ let main => IO = do
 end
 ```
 ```julia
-map (`*`2) [2, 4, 6, 8]     # [4, 8, 12, 16]
+map (`*`2), [2, 4, 6, 8]     # [4, 8, 12, 16]
 ```
 ### Features
 * Structures
