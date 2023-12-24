@@ -37,7 +37,7 @@ syn region  inImportList start='(' skip='([^)]\{-})' end=')' keepend contained c
 
 syn keyword inImportMod contained as qualified hiding
 syn keyword inInfix as
-syn keyword inStructure struct trait impl for let
+syn keyword inStructure struct trait impl for let external
 syn keyword inTypedef type
 syn keyword inNewtypedef newtype
 syn keyword inTypeFam family

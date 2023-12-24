@@ -1,7 +1,7 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
 module BytecodeCompiler where
 
-import AST (zeroPosition)
+import AST (typeToData, zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
@@ -12,6 +12,7 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace
 import Foreign ()
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -35,6 +36,14 @@ data Function = Function
     }
     deriving (Show, Generic)
 
+data External = External
+    { name :: String
+    , returnType :: Parser.Type
+    , args :: [Parser.Type]
+    , from :: String
+    }
+    deriving (Show)
+
 data CompilerState a = CompilerState
     { program :: Parser.Program
     , -- , functions :: [(String, String, [Instruction])]
@@ -46,6 +55,7 @@ data CompilerState a = CompilerState
     , traits :: [Parser.Expr]
     , impls :: [Parser.Expr]
     , currentContext :: String -- TODO: Nested contexts
+    , externals :: [External]
     }
     deriving (Show)
 
@@ -57,7 +67,7 @@ data Let = Let
     deriving (Show)
 
 initCompilerState :: Parser.Program -> CompilerState a
-initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] "__outside"
+initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] "__outside" []
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -217,32 +227,39 @@ compileExpr (Parser.FuncCall funcName args _) = do
     functions' <- gets functions
     funcDecs' <- gets funcDecs
     curCon <- gets currentContext
+    externals' <- gets externals
     let fun = case findFunction (curCon ++ "@" ++ funcName) functions' argTypes of
             (Just lf) -> lf
             Nothing -> case findFunction funcName functions' argTypes of
                 (Just f) -> f
                 Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
     let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
-
+    let external = find (\x -> x.name == funcName) externals'
     -- If the funcName starts with curCon@, it's a local function
     let callWay = (if T.pack (curCon ++ "@") `isPrefixOf` T.pack fun.funame then CallLocal (funame fun) else Call (funame fun))
 
-    case funcDec of
-        (Just fd) -> do
-            if length args == length (Parser.types fd) - 1
-                then concatMapM compileExpr args >>= \args' -> return (args' ++ [callWay])
-                else
+    case external of
+        Just (External _ ereturnType _ from) -> do
+            let retT = typeToData ereturnType
+            args' <- concatMapM compileExpr (reverse args)
+            return $ [Push retT] ++ args' ++ [CallFFI funcName from (length args)]
+        Nothing ->
+            case funcDec of
+                (Just fd) -> do
+                    if length args == length (Parser.types fd) - 1
+                        then concatMapM compileExpr args >>= \args' -> return (args' ++ [callWay])
+                        else
+                            concatMapM compileExpr args >>= \args' ->
+                                return $
+                                    args'
+                                        ++ [PushPf (funame fun) (length args')]
+                Nothing ->
                     concatMapM compileExpr args >>= \args' ->
                         return $
                             args'
-                                ++ [PushPf (funame fun) (length args')]
-        Nothing ->
-            concatMapM compileExpr args >>= \args' ->
-                return $
-                    args'
-                        ++ [ LLoad funcName
-                           , CallS
-                           ]
+                                ++ [ LLoad funcName
+                                   , CallS
+                                   ]
 compileExpr fd@(Parser.FuncDec _ _) = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
@@ -303,10 +320,11 @@ compileExpr (Parser.FuncDef origName args body) = do
 compileExpr (Parser.Var x _) = do
     functions' <- gets functions
     curCon <- gets currentContext
+    externals' <- gets externals
     -- traceM $ "Looking for " ++ x ++ " in " ++ show (map baseName functions')
     -- traceM $ "Looking for " ++ curCon ++ "@" ++ x ++ " in " ++ show (map baseName functions')
     let fun = any ((== x) . baseName) functions' || any ((== curCon ++ "@" ++ x) . baseName) functions'
-    if fun || x `elem` internalFunctions
+    if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
         then compileExpr (Parser.FuncCall x [] zeroPosition)
         else return [LLoad x]
 compileExpr (Parser.Let name value) = do
@@ -416,6 +434,12 @@ compileExpr (Parser.Then a b) = do
     b' <- compileExpr b
     return $ a' ++ b'
 compileExpr (Parser.UnaryMinus x) = compileExpr x >>= \x' -> return (x' ++ [Push $ DInt (-1), Mul])
+compileExpr (Parser.External _ []) = return []
+compileExpr (Parser.External from ((Parser.FuncDec name types) : xs)) = do
+    modify (\s -> s{externals = External{name, returnType = last types, args = init types, from} : externals s})
+    _ <- compileExpr (Parser.External from xs)
+    return []
+compileExpr (Parser.CharLit x) = return [Push $ DChar x]
 compileExpr x = error $ show x ++ " is not implemented"
 
 createVirtualFunctions :: StateT (CompilerState a) IO ()

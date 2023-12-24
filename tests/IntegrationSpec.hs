@@ -221,6 +221,31 @@ spec = do
                 end
                 |]
                 `shouldReturn` "0\n"
+    describe "FFI" $ do
+        it "Hello, World!" $ do
+            compileAndRun
+                [r|
+                external "__default" = do
+                    puts :: String -> IO
+                end
+                
+                let main => IO = do
+                    puts "Hello, World!\n"
+                end
+                |]
+                `shouldReturn` ""
+        it "strlen" $ do
+            compileAndRun
+                [r|
+                external "__default" = do
+                    strlen :: String -> Int
+                end
+                
+                let main => IO = do
+                    println strlen "Hello, World!\n"
+                end
+                |]
+                `shouldReturn` "14\n"
 
 -- describe "Import"
 -- it "Can find function based on type with lists, multiple definitions and pattern matching" $ do

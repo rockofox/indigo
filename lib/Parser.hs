@@ -208,12 +208,18 @@ validType =
             keyword "Self"
             return Self
         <|> do
+            keyword "Char"
+            return Char
+        <|> do
             lookAhead $ satisfy isUpper
             StructT <$> identifier
         <?> "type"
 
 stringLit :: Parser String
 stringLit = lexeme $ char '\"' *> manyTill L.charLiteral (char '\"')
+
+charLit :: Parser Char
+charLit = lexeme $ char '\'' *> L.charLiteral <* char '\''
 
 funcDec :: Parser Expr
 funcDec = do
@@ -457,6 +463,17 @@ impl = do
     symbol "end"
     return $ Impl name for methods
 
+external :: Parser Expr
+external = do
+    keyword "external"
+    from <- stringLit
+    symbol "="
+    symbol "do"
+    newline'
+    decs <- funcDec `sepEndBy` newline'
+    symbol "end"
+    return $ External from decs
+
 term :: Parser Expr
 term =
     choice
@@ -465,10 +482,12 @@ term =
         , FloatLit <$> try float
         , IntLit <$> try integer
         , StringLit <$> try stringLit
+        , CharLit <$> try charLit
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
         , -- , letExpr
-          struct
+          external
+        , struct
         , import_
         , doBlock
         , impl

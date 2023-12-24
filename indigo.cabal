@@ -17,6 +17,10 @@ common warnings
     -- ghc-options: -Wall -Wno-incomplete-uni-patterns -O0 -fno-code
     ghc-options: -Wall -Wno-incomplete-uni-patterns
 
+flag ffi
+    description: FFI
+    default: True
+
 library
     import:           warnings
     exposed-modules: , Parser
@@ -26,6 +30,7 @@ library
                      , Verifier
                      , Util
                      , RegInst
+                     , Ffi
     other-modules: Paths_indigo
     build-depends: base,
         containers,
@@ -44,6 +49,12 @@ library
         executable-path,
         filepath,
         random
+    if flag(ffi)
+        build-depends:
+            libffi,
+            unix
+        cpp-options: -DFFI
+
     hs-source-dirs:   lib
     default-language: Haskell2010
     default-extensions: OverloadedStrings,

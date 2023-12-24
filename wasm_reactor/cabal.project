@@ -1,1 +1,4 @@
 packages: . ..
+
+package indigo
+    flags: -ffi

@@ -1,0 +1,14 @@
+external "sayhello" = do
+    greet :: String -> IO
+    printNumbers :: List{Int} -> Int -> IO
+    printf :: String -> Int -> IO
+end
+external "__default" = do
+    puts :: List{Char} -> IO
+end
+
+let main = do
+    puts ['H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!', '\0']
+    printNumbers [1, 2, 3, 4, 5], 5
+    printf "Hello, %d!\n", 42
+end

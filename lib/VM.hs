@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
@@ -16,7 +17,14 @@ import Data.Text qualified
 import Data.Vector qualified as V
 import Debug.Trace
 import GHC.Generics (Generic)
-import System.Random (randomIO, randomRIO)
+import System.Random (randomIO)
+#ifdef FFI
+import Foreign.LibFFI
+import Foreign.Marshal.Array
+import Foreign.C.Types (CInt)
+import Foreign.C.String (castCharToCChar)
+import Ffi
+#endif
 
 data Instruction
     = -- | Push a value onto the stack
@@ -123,6 +131,8 @@ data Instruction
       TypeEq
     | -- | mov
       Mov Int Data
+    | -- | Call FFI
+      CallFFI String String Int
     | -- | Exit the program
       Exit
     deriving (Show, Eq, Generic)
@@ -346,7 +356,48 @@ findLabelFuzzy x = do
                 [(n, l)] -> return (n, l)
                 xs -> error $ "Multiple labels found: " ++ show xs
 
+#ifdef FFI
+dataToFFIArg :: Data -> IO Arg
+dataToFFIArg (DInt x) = return $ argInt32 (fromIntegral x)
+dataToFFIArg (DFloat x) =  return $ argCFloat (realToFrac x)
+dataToFFIArg (DString x) = return $  argString x
+dataToFFIArg (DBool x) =  return $ argCInt (if x then 1 else 0)
+dataToFFIArg (DChar x) =  return $ argCChar (toEnum $ fromEnum x)
+dataToFFIArg (DList x@(DInt _ : _)) = do
+  withArray (map (\(DInt i) -> fromIntegral i :: CInt) x) $ \ptr -> do
+    return $ argPtr ptr
+dataToFFIArg (DList x@(DChar _ : _)) = do
+  withArray (map (\(DChar c) -> castCharToCChar c) x) $ \ptr -> do
+    return $ argPtr ptr
+dataToFFIArg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
+
 runInstruction :: Instruction -> StateT VM IO ()
+runInstruction (CallFFI name from numArgs) = do
+    dl <- if from /= "__default" then liftIO $ dynLibOpen (from ++ "." ++ dllext) else liftIO $ dynLibOpen crtPath
+    fun <- liftIO $ dynLibSym dl name
+    args <- stackPopN numArgs
+    retT <- stackPop
+    ffiArgs <- liftIO $ mapM dataToFFIArg args
+    case retT of
+      (DInt _) -> do
+        ret <- liftIO $ callFFI fun retInt32 ffiArgs
+        stackPush $ DInt $ fromIntegral ret
+      (DFloat _) -> do
+        ret <- liftIO $ callFFI fun retCFloat ffiArgs
+        stackPush $ DFloat $ realToFrac ret
+      (DString _) -> do
+        ret <- liftIO $ callFFI fun retString ffiArgs
+        stackPush $ DString ret
+      (DChar _) -> do
+        ret <- liftIO $ callFFI fun retCChar ffiArgs
+        stackPush $ DChar $ toEnum $ fromEnum ret
+      DNone -> do
+        _ <- liftIO $ callFFI fun retVoid ffiArgs
+        return ()
+      _ -> error $ "Cannot call FFI function " ++ name ++ " with return type " ++ show retT 
+#else
+runInstruction CallFFI{} = error "Tried to call FFI function, but FFI is not enabled in this build/not supported on this platform"
+#endif
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
 -- runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args

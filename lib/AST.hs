@@ -2,6 +2,7 @@ module AST where
 
 import Data.Binary qualified
 import GHC.Generics (Generic)
+import VM qualified
 
 data Expr
     = Var String Position
@@ -54,6 +55,8 @@ data Expr
     | Trait {name :: String, methods :: [Expr]}
     | Impl {trait :: String, for :: String, methods :: [Expr]}
     | StrictEval Expr
+    | External String [Expr]
+    | CharLit Char
     deriving
         ( Show
         , Generic
@@ -111,6 +114,8 @@ children (Trait _ a) = a
 children (Impl _ _ a) = a
 children (FuncDec _ _) = []
 children (StrictEval a) = [a]
+children (External _ a) = a
+children (CharLit _) = []
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -133,6 +138,7 @@ data Type
     | Float
     | Bool
     | String
+    | Char
     | Any
     | None
     | Unknown
@@ -154,6 +160,7 @@ instance Show Type where
     show (List t) = "List{" ++ show t ++ "}"
     show (StructT structName) = structName
     show Self = "Self"
+    show Char = "Char"
 
 newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
 
@@ -227,6 +234,17 @@ typeOf (Trait _ _) = error "Cannot infer type of trait"
 typeOf (Impl{}) = error "Cannot infer type of impl"
 typeOf (Then _ b) = typeOf b
 typeOf (StrictEval x) = typeOf x
+typeOf (External _ _) = error "Cannot infer type of external"
+typeOf (CharLit _) = Char
+
+typeToData :: Type -> VM.Data
+typeToData Int = VM.DInt 0
+typeToData Float = VM.DFloat 0
+typeToData Bool = VM.DBool False
+typeToData String = VM.DString ""
+typeToData (StructT "IO") = VM.DNone -- Hmmm...
+typeToData Char = VM.DChar ' '
+typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 
 -- typeOf x = error $ "Cannot infer type of " ++ show x
 
