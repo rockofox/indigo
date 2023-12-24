@@ -4,7 +4,7 @@ module Ffi where
 
 import Foreign.Ptr (FunPtr)
 
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 import Control.Exception (bracket)
 import Foreign.Ptr (castPtrToFunPtr)
 import System.Win32.DLL
