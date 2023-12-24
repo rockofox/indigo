@@ -52,7 +52,10 @@ library
     if flag(ffi)
         build-depends:
             libffi,
-            unix
+        if os(windows)
+            build-depends: Win32
+        else
+            build-depends: unix
         cpp-options: -DFFI
 
     hs-source-dirs:   lib

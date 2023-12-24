@@ -4,7 +4,7 @@ module Ffi where
 
 import Foreign.Ptr (FunPtr)
 
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 import Control.Exception (bracket)
 import Foreign.Ptr (castPtrToFunPtr)
 import System.Win32.DLL
@@ -37,7 +37,7 @@ dllext = "so"
 #endif
 
 -- | The Haskell representation of a loaded dynamic library.
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 type DynLib = HMODULE
 #else
 type DynLib = DL
@@ -45,7 +45,7 @@ type DynLib = DL
 
 -- | Return the address of a function symbol contained in a dynamic library.
 dynLibSym :: DynLib -> String -> IO (FunPtr a)
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 dynLibSym source symbol = do
   addr <- getProcAddress source symbol
   return $ castPtrToFunPtr addr
@@ -55,7 +55,7 @@ dynLibSym = dlsym
 
 -- | Load a dynamic library, perform some action on it, and then free it.
 withDynLib :: FilePath -> (DynLib -> IO a) -> IO a
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 withDynLib file f = bracket (loadLibrary file) freeLibrary f
 #else
 withDynLib file = withDL file [RTLD_NOW]
@@ -63,7 +63,7 @@ withDynLib file = withDL file [RTLD_NOW]
 
 -- | Open a dynamic library.
 dynLibOpen :: FilePath -> IO DynLib
-#if defined(MIN_VERSION_Win32)
+#if defined(mingw32_HOST_OS)
 dynLibOpen = loadLibrary
 #else
 dynLibOpen x = dlopen x [RTLD_NOW]
