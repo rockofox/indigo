@@ -140,3 +140,8 @@ abs x = do
   end
 end
 
+cPtr :: Int -> CPtr
+cPtr x = x as CPtr
+
+cNullPtr :: CPtr
+cNullPtr _ = 0 as CPtr

@@ -136,9 +136,11 @@ instance Eq Position where
 data Type
     = Int
     | Float
+    | Double
     | Bool
     | String
     | Char
+    | CPtr
     | Any
     | None
     | Unknown
@@ -151,6 +153,7 @@ data Type
 instance Show Type where
     show Int = "Int"
     show Float = "Float"
+    show Double = "Double"
     show Bool = "Bool"
     show String = "String"
     show Any = "Any"
@@ -161,6 +164,7 @@ instance Show Type where
     show (StructT structName) = structName
     show Self = "Self"
     show Char = "Char"
+    show CPtr = "CPtr"
 
 newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
 
@@ -240,10 +244,12 @@ typeOf (CharLit _) = Char
 typeToData :: Type -> VM.Data
 typeToData Int = VM.DInt 0
 typeToData Float = VM.DFloat 0
+typeToData Double = VM.DDouble 0
 typeToData Bool = VM.DBool False
 typeToData String = VM.DString ""
 typeToData (StructT "IO") = VM.DNone -- Hmmm...
 typeToData Char = VM.DChar ' '
+typeToData CPtr = VM.DCPtr 0
 typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 
 -- typeOf x = error $ "Cannot infer type of " ++ show x

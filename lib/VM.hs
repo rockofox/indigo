@@ -1,5 +1,9 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 
 module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
@@ -21,10 +25,19 @@ import System.Random (randomIO)
 #ifdef FFI
 import Foreign.LibFFI
 import Foreign.Marshal.Array
-import Foreign.C.Types (CInt)
+import Foreign.C.Types (CInt, CFloat, CChar)
 import Foreign.C.String (castCharToCChar)
 import Ffi
+import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType)
+import Foreign.LibFFI.FFITypes
+import Foreign.Storable
+import Foreign.Ptr
 #endif
+
+import Data.Binary qualified (get, put)
+import Foreign.C (CDouble, newCString)
+import GHC.IO (unsafePerformIO)
+import GHC.Int qualified as Ghc.Int
 
 data Instruction
     = -- | Push a value onto the stack
@@ -142,6 +155,7 @@ data Action = Print | GetLine | GetChar | Random deriving (Show, Eq, Generic)
 data Data
     = DInt Int
     | DFloat Float
+    | DDouble Double
     | DString String
     | DBool Bool
     | DList [Data]
@@ -150,6 +164,7 @@ data Data
     | DFuncRef String [Data]
     | DMap (Data.Map String Data)
     | DTypeQuery String
+    | DCPtr WordPtr
     deriving (Generic)
 
 instance Binary Instruction
@@ -157,6 +172,10 @@ instance Binary Instruction
 instance Binary Action
 
 instance Binary Data
+
+instance Binary WordPtr where
+    put = Data.Binary.put . toInteger
+    get = fromInteger <$> Data.Binary.get
 
 instance Show Data where
     show (DInt x) = show x
@@ -169,6 +188,8 @@ instance Show Data where
     show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
     show (DMap x) = show x
     show (DTypeQuery x) = "TypeQuery " ++ x
+    show (DCPtr x) = "CPtr " ++ show x
+    show (DDouble x) = show x
 
 instance Eq Data where
     (DInt x) == (DInt y) = x == y
@@ -176,6 +197,7 @@ instance Eq Data where
     (DString x) == (DString y) = x == y
     (DBool x) == (DBool y) = x == y
     (DList x) == (DList y) = x == y
+    (DCPtr x) == (DCPtr y) = x == y
     x == y = error $ "Cannot eq " ++ show x ++ " and " ++ show y
 
 instance Ord Data where
@@ -301,16 +323,19 @@ run' program = do
 instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
+    (+) (DDouble x) (DDouble y) = DDouble $ x + y
     (+) (DString x) (DString y) = DString $ x ++ y
     -- (+) (DList x) (DList y) = DList $ x ++ y
     (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
+    (-) (DDouble x) (DDouble y) = DDouble $ x - y
     (-) (DList x) (DList y) = DList $ filter (`notElem` y) x
     (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
     (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x -- TODO
+    (*) (DDouble x) (DDouble y) = DDouble $ x * y -- TODO: make generic
     (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
     fromInteger = DInt . fromInteger
     abs (DInt x) = DInt $ abs x
@@ -323,12 +348,14 @@ instance Num Data where
 instance Fractional Data where
     (/) (DInt x) (DInt y) = DInt $ x `div` y
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
+    (/) (DDouble x) (DDouble y) = DDouble $ x / y
     (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
     fromRational = DFloat . fromRational
 
 instance Floating Data where
     (**) (DInt x) (DInt y) = DInt $ x ^ y
     (**) (DFloat x) (DFloat y) = DFloat $ x ** y
+    (**) (DDouble x) (DDouble y) = DDouble $ x ** y
     (**) x y = error $ "Cannot raise " ++ show x ++ " to the power of " ++ show y
     pi = DFloat pi
     exp = error "exp not implemented"
@@ -356,20 +383,138 @@ findLabelFuzzy x = do
                 [(n, l)] -> return (n, l)
                 xs -> error $ "Multiple labels found: " ++ show xs
 
+class IntoData a where
+    intoData :: a -> Data
+
+instance IntoData Bool where
+    intoData = DBool
+
+instance IntoData Char where
+    intoData = DChar
+
+instance IntoData Data where
+    intoData = id
+
+instance IntoData Int where
+    intoData = DInt
+
+instance IntoData Float where
+    intoData = DFloat
+
+instance IntoData [Data] where
+    intoData = DList
+
+instance IntoData CFloat where
+    intoData = DFloat . realToFrac
+
+instance IntoData CDouble where
+    intoData = DDouble . realToFrac
+
+instance IntoData CChar where
+    intoData = DChar . toEnum . fromEnum
+
+instance IntoData String where
+    intoData = DString
+
+instance IntoData Ghc.Int.Int32 where
+    intoData = DInt . fromIntegral
+
+instance IntoData Double where
+    intoData = DDouble
+
+instance IntoData (Ptr ()) where
+    intoData = DCPtr . ptrToWordPtr
+
 #ifdef FFI
-dataToFFIArg :: Data -> IO Arg
-dataToFFIArg (DInt x) = return $ argInt32 (fromIntegral x)
-dataToFFIArg (DFloat x) =  return $ argCFloat (realToFrac x)
-dataToFFIArg (DString x) = return $  argString x
-dataToFFIArg (DBool x) =  return $ argCInt (if x then 1 else 0)
-dataToFFIArg (DChar x) =  return $ argCChar (toEnum $ fromEnum x)
-dataToFFIArg (DList x@(DInt _ : _)) = do
+clearMap :: Data.Map String Data -> Data.Map String Data
+clearMap = Data.Map.delete "__name" . Data.Map.delete "__traits"
+
+-- Only used for structs. I really don't like this
+instance Storable Data where
+  sizeOf _ = 4
+  alignment _ = 4
+  peek _ = error "peek"
+  poke ptr (DInt x) = poke (castPtr ptr) x
+  poke ptr (DString x) = poke (castPtr ptr) (unsafePerformIO $ newCString x)
+  poke ptr (DMap x) = do
+    let values = Data.Map.elems (clearMap x)
+    let sizes = map sizeOf' values
+    mapM_ (\(i, v) -> pokeByteOff ptr (sum $ take i sizes) v) (zip [0..] values)
+    where
+    -- Normal sizeof crashes and I don't know why
+    sizeOf' :: Data -> Int
+    sizeOf' (DChar _) = 1
+    sizeOf' (DDouble _) = 8
+    sizeOf' _ = 4
+  poke _ x = error $ "unsupported poke " ++ show x
+
+dataCType (DInt _) = ffi_type_sint32
+dataCType (DFloat _) = ffi_type_float
+dataCType (DString _) = ffi_type_pointer
+dataCType (DBool _) = ffi_type_sint32
+dataCType (DChar _) = ffi_type_schar
+dataCType (DList _) = ffi_type_pointer
+dataCType (DDouble _) = ffi_type_double
+dataCType (DMap _) = ffi_type_pointer
+dataCType (DCPtr _) = ffi_type_pointer
+dataCType DNone = ffi_type_void
+dataCType _ = error "dataCType: Invalid type"
+
+arg :: Data -> IO Arg
+arg (DInt x) = return $ argInt32 (fromIntegral x)
+arg (DFloat x) =  return $ argCFloat (realToFrac x)
+arg (DString x) = return $  argString x
+arg (DBool x) =  return $ argCInt (if x then 1 else 0)
+arg (DChar x) =  return $ argCChar (toEnum $ fromEnum x)
+arg (DList x@(DInt _ : _)) = do
   withArray (map (\(DInt i) -> fromIntegral i :: CInt) x) $ \ptr -> do
     return $ argPtr ptr
-dataToFFIArg (DList x@(DChar _ : _)) = do
+arg (DList x@(DChar _ : _)) = do -- TODO: make generic
   withArray (map (\(DChar c) -> castCharToCChar c) x) $ \ptr -> do
     return $ argPtr ptr
-dataToFFIArg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
+arg (DDouble x) = return $ argCDouble $ realToFrac x
+arg d@(DMap x) = do
+    if isJust $ Data.Map.lookup "__name" x then do
+      let types = map dataCType (Data.Map.elems (clearMap x))
+      (argT, retT, freeTType) <- newStorableStructArgRet types
+      return $ argT d
+    else
+      error "no"
+arg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
+
+class FfiRet a b where
+  ret :: b -> RetType a
+
+instance FfiRet Ghc.Int.Int32 Data where
+  ret (DInt _) = retInt32
+  ret _ = error "Invalid return type"
+
+instance FfiRet CFloat Data where
+  ret (DFloat _) = retCFloat
+  ret _ = error "Invalid return type"
+
+instance FfiRet CDouble Data where
+  ret (DDouble _) = retCDouble
+  ret _ = error "Invalid return type"
+
+instance FfiRet String Data where
+  ret (DString _) = retString
+  ret _ = error "Invalid return type"
+
+instance FfiRet CChar Data where
+  ret (DChar _) = retCChar
+  ret _ = error "Invalid return type"
+
+instance FfiRet (Ptr ()) Data where 
+  ret (DCPtr _) = retPtr retVoid
+  ret _ = error "Invalid return type"
+
+instance FfiRet () Data where
+  ret DNone = retVoid
+  ret _ = error "Invalid return type"
+
+stackPushA :: IntoData a => a -> StateT VM IO ()
+stackPushA = stackPush . intoData
 
 runInstruction :: Instruction -> StateT VM IO ()
 runInstruction (CallFFI name from numArgs) = do
@@ -377,24 +522,37 @@ runInstruction (CallFFI name from numArgs) = do
     fun <- liftIO $ dynLibSym dl name
     args <- stackPopN numArgs
     retT <- stackPop
-    ffiArgs <- liftIO $ mapM dataToFFIArg args
+    ffiArgs <- liftIO $ mapM arg args
     case retT of
-      (DInt _) -> do
-        ret <- liftIO $ callFFI fun retInt32 ffiArgs
-        stackPush $ DInt $ fromIntegral ret
-      (DFloat _) -> do
-        ret <- liftIO $ callFFI fun retCFloat ffiArgs
-        stackPush $ DFloat $ realToFrac ret
-      (DString _) -> do
-        ret <- liftIO $ callFFI fun retString ffiArgs
-        stackPush $ DString ret
-      (DChar _) -> do
-        ret <- liftIO $ callFFI fun retCChar ffiArgs
-        stackPush $ DChar $ toEnum $ fromEnum ret
+      DInt{} -> do
+        let retType = ret retT :: RetType Ghc.Int.Int32
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
+      DFloat{} -> do
+        let retType = ret retT :: RetType CFloat
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
+      DString{} -> do
+        let retType = ret retT :: RetType String
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
+      DChar{} -> do
+        let retType = ret retT :: RetType CChar
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
+      DCPtr{} -> do
+        let retType = ret retT :: RetType (Ptr ())
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
+      DDouble{} -> do
+        let retType = ret retT :: RetType CDouble
+        result <- liftIO $ callFFI fun retType ffiArgs 
+        stackPushA result
       DNone -> do
-        _ <- liftIO $ callFFI fun retVoid ffiArgs
+        let retType = ret retT :: RetType ()
+        _ <- liftIO $ callFFI fun retType ffiArgs 
         return ()
-      _ -> error $ "Cannot call FFI function " ++ name ++ " with return type " ++ show retT 
+      _ -> error $ "Invalid return type: " ++ show retT
 #else
 runInstruction CallFFI{} = error "Tried to call FFI function, but FFI is not enabled in this build/not supported on this platform"
 #endif
@@ -543,30 +701,44 @@ runInstruction Cast = do
         (DInt x) -> stackPush $ case to of
             DInt _ -> DInt x
             DFloat _ -> DFloat $ fromIntegral x
+            DDouble _ -> DDouble $ fromIntegral x
             DString _ -> DString $ show x
             DBool _ -> DBool $ x /= 0
             DList _ -> DList [DInt x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum x
-            type' -> error $ "Cast for type not implemented: " ++ show type'
+            DCPtr _ -> DCPtr $ fromIntegral x
+            type' -> error $ "Cast to Int for type not implemented: " ++ show type'
         (DFloat x) -> stackPush $ case to of
             DInt _ -> DInt $ round x
             DFloat _ -> DFloat x
+            DDouble _ -> DDouble $ realToFrac x
             DString _ -> DString $ show x
             DBool _ -> DBool $ x /= 0
             DList _ -> DList [DFloat x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum $ round x
-            type' -> error $ "Cast for type not implemented: " ++ show type'
+            type' -> error $ "Cast to Float for type not implemented: " ++ show type'
+        (DDouble x) -> stackPush $ case to of
+            DInt _ -> DInt $ round x
+            DFloat _ -> DFloat $ realToFrac x
+            DDouble _ -> DDouble x
+            DString _ -> DString $ show x
+            DBool _ -> DBool $ x /= 0
+            DList _ -> DList [DDouble x]
+            DNone -> DNone
+            DChar _ -> DChar $ toEnum $ round x
+            type' -> error $ "Cast to Double for type not implemented: " ++ show type'
         (DString x) -> stackPush $ case to of
             DInt _ -> DInt $ read x
             DFloat _ -> DFloat $ read x
+            DDouble _ -> DDouble $ read x
             DString _ -> DString x
             DBool _ -> DBool $ x /= ""
             DList _ -> DList [DString x]
             DNone -> DNone
             DChar _ -> DChar $ head x
-            type' -> error $ "Cast for type not implemented: " ++ show type'
+            type' -> error $ "Cast to String for type not implemented: " ++ show type'
         x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
@@ -589,6 +761,8 @@ runInstruction TypeOf =
                 Just (DString name) -> stackPush $ DString name
                 _ -> stackPush $ DString "Map"
         DTypeQuery s -> stackPush $ DString $ "TypeQuery{" ++ s ++ "}"
+        DCPtr _ -> stackPush $ DString "CPtr"
+        DDouble _ -> stackPush $ DString "Double"
 runInstruction (Repeat n) = do
     vm <- get
     let inst = program vm V.! (pc vm - 1)

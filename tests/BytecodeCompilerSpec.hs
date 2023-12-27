@@ -3,6 +3,7 @@ module BytecodeCompilerSpec (spec) where
 import BytecodeCompiler
 import Control.Monad.State (evalStateT)
 import Data.Text qualified
+import Foreign
 import Parser
 import Test.Hspec
 import Test.QuickCheck
@@ -11,6 +12,10 @@ import Text.Megaparsec (errorBundlePretty)
 import Text.RawString.QQ (r)
 import VM (Action (..), Data (..), Instruction (..))
 import VM qualified
+
+instance Arbitrary WordPtr where
+    arbitrary = fromIntegral <$> (arbitrary :: Gen Word64)
+    shrink x = [x]
 
 instance Arbitrary Type where
     arbitrary = genericArbitrary

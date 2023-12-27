@@ -128,6 +128,17 @@ spec = do
                 end|]
                 `shouldReturn` "6\n[test,test2]\n"
     describe "Structs" $ do
+        it "Can evaluate the point example" $ do
+            compileAndRun
+                [r|
+                struct Point = (x: Int, y: Int)
+
+                let main => IO = do
+                    let p = Point { x : 1, y : 2 }
+                    println p.x
+                    println p.y
+                end|]
+                `shouldReturn` "1\n2\n"
         it "Can access fields" $ do
             compileAndRun
                 [r|

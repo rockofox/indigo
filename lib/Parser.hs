@@ -149,7 +149,7 @@ identifier = do
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
         else return name
   where
-    p = (:) <$> letterChar <*> many alphaNumChar
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_')
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -186,6 +186,9 @@ validType =
             keyword "Float"
             return Float
         <|> do
+            keyword "Double"
+            return Double
+        <|> do
             keyword "Bool"
             return Bool
         <|> do
@@ -210,6 +213,9 @@ validType =
         <|> do
             keyword "Char"
             return Char
+        <|> do
+            keyword "CPtr"
+            return CPtr
         <|> do
             lookAhead $ satisfy isUpper
             StructT <$> identifier

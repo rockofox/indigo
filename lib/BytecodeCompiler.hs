@@ -13,7 +13,7 @@ import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Debug.Trace
-import Foreign ()
+import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
 import Parser (CompilerFlags (CompilerFlags), name, parseProgram, types)
@@ -363,7 +363,9 @@ compileExpr (Parser.TypeLit x) = case x of
     Parser.Float -> return [Push $ DFloat 0.0]
     Parser.String -> return [Push $ DString ""]
     Parser.Bool -> return [Push $ DBool False]
-    _ -> error $ show x ++ " is not implemented"
+    Parser.CPtr -> return [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    Parser.Double -> return [Push $ DDouble 0.0]
+    _ -> error $ "Type " ++ show x ++ " is not implemented"
 compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
 compileExpr st@(Parser.Struct _ fields) = do
     modify (\s -> s{structDecs = st : structDecs s})
