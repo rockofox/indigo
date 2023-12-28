@@ -161,7 +161,7 @@ data Data
     | DList [Data]
     | DNone
     | DChar Char
-    | DFuncRef String [Data]
+    | DFuncRef String [Data] [(String, Data)]
     | DMap (Data.Map String Data)
     | DTypeQuery String
     | DCPtr WordPtr
@@ -185,7 +185,7 @@ instance Show Data where
     show (DList x) = show x
     show DNone = "None"
     show (DChar x) = show x
-    show (DFuncRef x args) = "<" ++ x ++ "(" ++ show args ++ ")>"
+    show (DFuncRef x args _) = "<" ++ x ++ "(" ++ show args ++ ")>"
     show (DMap x) = show x
     show (DTypeQuery x) = "TypeQuery " ++ x
     show (DCPtr x) = "CPtr " ++ show x
@@ -320,6 +320,31 @@ run' program = do
     modify $ \vm -> vm{pc = vm.pc + 1}
     gets running >>= flip when (run' program)
 
+instance Real Data where
+    toRational (DInt x) = toRational x
+    toRational (DFloat x) = toRational x
+    toRational (DDouble x) = toRational x
+    toRational x = error $ "Cannot convert " ++ show x ++ " to Rational"
+
+instance Enum Data where
+    toEnum = DInt
+    fromEnum (DInt x) = x
+    fromEnum (DFloat x) = round x
+    fromEnum (DDouble x) = round x
+    fromEnum x = error $ "Cannot convert " ++ show x ++ " to Int"
+
+instance Integral Data where
+    quot (DInt x) (DInt y) = DInt $ quot x y
+    quot _ _ = undefined
+    rem (DInt x) (DInt y) = DInt $ rem x y
+    rem _ _ = undefined
+    quotRem (DInt x) (DInt y) = (DInt $ quot x y, DInt $ rem x y)
+    quotRem _ _ = undefined
+    toInteger (DInt x) = toInteger x
+    toInteger (DFloat x) = round x
+    toInteger (DDouble x) = round x
+    toInteger x = error $ "Cannot convert " ++ show x ++ " to Integer"
+
 instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
@@ -435,6 +460,7 @@ instance Storable Data where
   alignment _ = 4
   peek _ = error "peek"
   poke ptr (DInt x) = poke (castPtr ptr) x
+  poke ptr (DFloat x) = poke (castPtr ptr) x
   poke ptr (DString x) = poke (castPtr ptr) (unsafePerformIO $ newCString x)
   poke ptr (DMap x) = do
     let values = Data.Map.elems (clearMap x)
@@ -561,7 +587,8 @@ runInstruction (Push d) = stackPush d
 -- runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
 runInstruction (PushPf name nArgs) = do
     (label, _) <- findLabelFuzzy name
-    stackPopN nArgs >>= \args -> stackPush $ DFuncRef label args
+    locals <- gets (locals . safeHead . callStack)
+    stackPopN nArgs >>= \args -> stackPush $ DFuncRef label args locals
 runInstruction Pop = void stackPop
 runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
@@ -575,8 +602,7 @@ runInstruction Abs =
         DInt num -> DInt $ abs num
         DFloat num -> DFloat $ abs num
         _ -> error $ "Cannot take absolute value of " ++ show x
--- runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
-runInstruction Mod = error "Mod not implemented"
+runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
 -- IO
 runInstruction (Builtin Print) = do
     vm <- get
@@ -610,9 +636,10 @@ runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not 
 runInstruction (CallLocal x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = (head (callStack vm)).locals} : callStack vm}
 runInstruction CallS =
     stackPop >>= \d -> case d of
-        DFuncRef x args -> do
+        DFuncRef x args locals -> do
             stackPushN args
             runInstruction $ Call x
+            forM_ locals $ \(name, value) -> runInstruction (Push value) >> runInstruction (LStore name)
         _ -> error $ "Cannot call " ++ show d
 runInstruction (Jmp x) = do
     (_, n) <- findLabelFuzzy x
@@ -696,6 +723,7 @@ runInstruction Length =
         _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; _ -> error "Invalid type for length"
 -- Type
 runInstruction Cast = do
+    -- stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
     to <- stackPop
     stackPop >>= \case
         (DInt x) -> stackPush $ case to of
@@ -755,7 +783,7 @@ runInstruction TypeOf =
         DList _ -> stackPush $ DString "List"
         DNone -> stackPush $ DString "None"
         DChar _ -> stackPush $ DString "Char"
-        DFuncRef _ _ -> stackPush $ DString "FuncRef"
+        DFuncRef{} -> stackPush $ DString "FuncRef"
         DMap m -> do
             case Data.Map.lookup "__name" m of
                 Just (DString name) -> stackPush $ DString name
@@ -776,7 +804,7 @@ runInstruction TypeEq =
         (DList _, DList _) -> True
         (DNone, DNone) -> True
         (DChar _, DChar _) -> True
-        (DFuncRef _ _, DFuncRef _ _) -> True
+        (DFuncRef{}, DFuncRef{}) -> True
         (DMap a, DMap b) -> do
             not (isJust (Data.Map.lookup "__name" a) && isJust (Data.Map.lookup "__name" b)) || (Data.Map.lookup "__name" a == Data.Map.lookup "__name" b)
         (DMap m, DTypeQuery tq) -> do
@@ -792,7 +820,7 @@ runInstruction TypeEq =
         (DList _, DTypeQuery s) -> s == "List"
         (DNone, DTypeQuery s) -> s == "None"
         (DChar _, DTypeQuery s) -> s == "Char"
-        (DFuncRef _ _, DTypeQuery s) -> s == "FuncRef"
+        (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
         _ -> False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList
 runInstruction (Mov n dat) = do

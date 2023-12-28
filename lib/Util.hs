@@ -1,5 +1,7 @@
 module Util where
 
+import Control.Monad
+
 concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
 
@@ -11,3 +13,6 @@ startsWith :: (Eq a) => [a] -> [a] -> Bool
 startsWith [] _ = True
 startsWith _ [] = False
 startsWith (x : xs) (y : ys) = x == y && startsWith xs ys
+
+firstJust :: (a -> Maybe b) -> [a] -> Maybe b
+firstJust f = foldr (\x r -> f x `mplus` r) Nothing

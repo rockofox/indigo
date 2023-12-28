@@ -229,6 +229,7 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
     mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
     mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
     mangleAST x _ = x
+verifyExpr (Parser.Cast _ _) = return [] -- TODO
 verifyExpr x = do
     modify (\state -> state{topLevel = False})
     concatMapM verifyExpr (children x)

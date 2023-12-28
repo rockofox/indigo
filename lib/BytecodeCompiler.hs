@@ -7,7 +7,8 @@ import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, intercalate, isInfixOf)
+import Data.List (elemIndex, find, inits, intercalate, isInfixOf, tails)
+import Data.List.Split qualified
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -228,7 +229,11 @@ compileExpr (Parser.FuncCall funcName args _) = do
     funcDecs' <- gets funcDecs
     curCon <- gets currentContext
     externals' <- gets externals
-    let fun = case findFunction (curCon ++ "@" ++ funcName) functions' argTypes of
+    let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
+    -- Find the function in any context using firstM
+    let contextFunctions = firstJust (\context -> findFunction (Data.Text.unpack context ++ "@" ++ funcName) functions' argTypes) contexts
+
+    let fun = case contextFunctions of
             (Just lf) -> lf
             Nothing -> case findFunction funcName functions' argTypes of
                 (Just f) -> f
@@ -358,15 +363,17 @@ compileExpr (Parser.If ifCond ifThen ifElse) = do
     return $ cond' ++ [Jf elseLabel] ++ then' ++ [Jmp endLabel, Label elseLabel] ++ else' ++ [Label endLabel]
 compileExpr (Parser.FloatLit x) = return [Push (DFloat x)]
 compileExpr (Parser.BoolLit x) = return [Push (DBool x)]
-compileExpr (Parser.TypeLit x) = case x of
-    Parser.Int -> return [Push $ DInt 0]
-    Parser.Float -> return [Push $ DFloat 0.0]
-    Parser.String -> return [Push $ DString ""]
-    Parser.Bool -> return [Push $ DBool False]
-    Parser.CPtr -> return [Push $ DCPtr $ ptrToWordPtr nullPtr]
-    Parser.Double -> return [Push $ DDouble 0.0]
-    _ -> error $ "Type " ++ show x ++ " is not implemented"
-compileExpr (Parser.Cast from to) = compileExpr from >>= \x -> compileExpr to >>= \y -> return (x ++ y ++ [Cast])
+compileExpr (Parser.Cast from to) = do
+    from' <- compileExpr from
+    let to' = compileType to
+    return $ from' ++ to' ++ [Cast]
+  where
+    compileType :: Parser.Expr -> [Instruction]
+    compileType (Parser.Var "Int" _) = [Push $ DInt 0]
+    compileType (Parser.Var "Float" _) = [Push $ DFloat 0.0]
+    compileType (Parser.Var "Double" _) = [Push $ DDouble 0.0]
+    compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    compileType x = error $ "Type " ++ show x ++ " is not implemented"
 compileExpr st@(Parser.Struct _ fields) = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
@@ -420,14 +427,14 @@ compileExpr (Parser.Impl name for methods) = do
 compileExpr (Parser.Lambda args body) = do
     fId <- allocId
     curCon <- gets currentContext
-    lets' <- gets functions
     let name = "__lambda" ++ show fId
-    let letsOfCurrentContext = filter (\x -> x.context == curCon && not ("__" `isInfixOf` x.baseName)) lets'
-    let argsAndLets = args ++ map (\x -> Parser.Var (drop 1 (dropWhile (/= '@') x.baseName)) zeroPosition) letsOfCurrentContext
-    let ldec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
-    let ldef = Parser.FuncDef name argsAndLets body
-    mapM_ compileExpr [ldec, ldef]
-    return $ map (\x -> Call x.funame) letsOfCurrentContext ++ [PushPf (curCon ++ "@" ++ name) (length letsOfCurrentContext)]
+    let def = Parser.FuncDef name args body
+    let dec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
+    let fun = Parser.Function [def] dec
+    _ <- compileExpr fun
+    lets' <- gets functions
+    let fullName = (fromJust $ findAnyFunction (curCon ++ "@" ++ name) lets').funame
+    return [PushPf fullName 0]
 compileExpr (Parser.Pipeline a (Parser.Var b _)) = compileExpr (Parser.FuncCall b [a] zeroPosition)
 compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = compileExpr (Parser.FuncCall f (a : args) zeroPosition)
 compileExpr (Parser.Pipeline a (Parser.Then b c)) = compileExpr (Parser.Then (Parser.Pipeline a b) c)

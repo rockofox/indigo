@@ -156,7 +156,11 @@ identifier = do
             else return x
 
 integer :: Parser Integer
-integer = lexeme L.decimal
+integer =
+    lexeme
+        ( try (char '0' *> char 'x' *> L.hexadecimal)
+            <|> try L.decimal
+        )
 
 float :: Parser Float
 float = lexeme L.float
@@ -443,7 +447,8 @@ recover = withRecovery recover'
         return Placeholder
 
 typeLiteral :: Parser Expr
-typeLiteral = TypeLit <$> validType
+typeLiteral = do
+    TypeLit <$> validType
 
 trait :: Parser Expr
 trait = do
@@ -503,7 +508,6 @@ term =
         , try funcDec
         , try lambda
         , try structLit
-        , typeLiteral
         , array
         , try funcCall
         , try arrayAccess

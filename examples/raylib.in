@@ -1,0 +1,41 @@
+external "__default" = do
+    sin :: Double -> Double
+end
+
+external "libraylib" = do
+    InitWindow :: Int -> Int -> String -> IO
+    BeginDrawing :: IO
+    ClearBackground :: Int -> IO
+    DrawText :: String -> Int -> Int -> Int -> Int -> IO
+    EndDrawing :: IO
+    CloseWindow :: IO
+    WindowShouldClose :: Int
+    SetTargetFPS :: Int -> IO
+    GetFrameTime :: Float
+    DrawTriangle :: Vector2 -> Vector2 -> Vector2 -> Int -> IO
+    DrawRectangle :: Int -> Int -> Int -> Int -> Int -> IO
+    DrawPixel :: Int -> Int -> Int -> IO
+    DrawLine :: Int -> Int -> Int -> Int -> Int -> IO
+end
+
+let gray = 0xFF888888
+let violet = 0xFF8800FF
+let screenWidth = 800
+let screenHeight = 450
+
+let loop (tick: Int) = do
+    BeginDrawing
+    ClearBackground 0
+    DrawText "Hello Indigo", 100, 100, 100, violet
+    EndDrawing
+    if WindowShouldClose == 0 then do
+        loop (tick + 1)
+    else do
+    end
+end
+let main = do
+    InitWindow screenWidth, screenHeight, "Hello Indigo"
+    SetTargetFPS 60
+    loop 0
+    CloseWindow
+end
