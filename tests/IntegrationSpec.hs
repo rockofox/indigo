@@ -215,6 +215,25 @@ spec = do
                     end
                 |]
                 `shouldReturn` "[2,3,4]\n"
+        it "Can use a lambda calling a nested function" $ do
+            compileAndRun
+                [r|
+                    let main => IO = do
+                        let square (x: Int) = x * x
+                        let toThird (x: Int) = x * square x
+                        println map (\x -> toThird x), [1, 2, 3]
+                    end
+                |]
+                `shouldReturn` "[1,8,27]\n"
+        it "Can use strict values in lambda" $ do
+            compileAndRun
+                [r|
+                    let main => IO = do
+                        let strict = $2
+                        println map (\x -> x * strict), [1, 2, 3]
+                    end
+                |]
+                `shouldReturn` "[2,4,6]\n"
     describe "Recursion" $ do
         it "Can use recursion" $ do
             compileAndRun
@@ -257,6 +276,31 @@ spec = do
                 end
                 |]
                 `shouldReturn` "14\n"
+
+    describe "No main" $ do
+        it "Hello World" $ do
+            compileAndRun
+                [r|
+                    println "Hello, World!"
+                |]
+                `shouldReturn` "Hello, World!\n"
+        it "\"99\" bottles of beer" $ do
+            compileAndRun
+                [r|
+                    let bottles (i: Int) => IO = do
+                        if i > 0 then do
+                            println ^i : " bottles of beer on the wall, " : ^i : " bottles of beer."
+                            println "Take one down and pass it around, " : ((i) - 1) as String : " bottles of beer on the wall.\n"
+                            bottles (i)-1
+                        else do
+                            println "No more bottles of beer on the wall, no more bottles of beer."
+                            println "Go to the store and buy some more, 99 bottles of beer on the wall."
+                        end
+                    end
+
+                    bottles 3
+                |]
+                `shouldReturn` "3 bottles of beer on the wall, 3 bottles of beer.\nTake one down and pass it around, 2 bottles of beer on the wall.\n\n2 bottles of beer on the wall, 2 bottles of beer.\nTake one down and pass it around, 1 bottles of beer on the wall.\n\n1 bottles of beer on the wall, 1 bottles of beer.\nTake one down and pass it around, 0 bottles of beer on the wall.\n\nNo more bottles of beer on the wall, no more bottles of beer.\nGo to the store and buy some more, 99 bottles of beer on the wall.\n"
 
 -- describe "Import"
 -- it "Can find function based on type with lists, multiple definitions and pattern matching" $ do

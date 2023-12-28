@@ -372,6 +372,7 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "Int" _) = [Push $ DInt 0]
     compileType (Parser.Var "Float" _) = [Push $ DFloat 0.0]
     compileType (Parser.Var "Double" _) = [Push $ DDouble 0.0]
+    compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
 compileExpr st@(Parser.Struct _ fields) = do
