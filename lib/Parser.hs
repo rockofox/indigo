@@ -83,6 +83,8 @@ binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "^" Flexible]
     , [prefix "$" StrictEval]
+    , [prefix "!" Not]
+    , [prefix "-" UnaryMinus]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]
@@ -93,8 +95,6 @@ binOpTable =
     , [binary ":" ListConcat]
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
-    , [prefix "!" Not]
-    , [prefix "-" UnaryMinus]
     ]
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
