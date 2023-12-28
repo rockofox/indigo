@@ -23,19 +23,19 @@ import Debug.Trace
 import GHC.Generics (Generic)
 import System.Random (randomIO)
 #ifdef FFI
-import Foreign.LibFFI
-import Foreign.Marshal.Array
-import Foreign.C.Types (CInt, CFloat, CChar)
-import Foreign.C.String (castCharToCChar)
 import Ffi
 import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType)
 import Foreign.LibFFI.FFITypes
-import Foreign.Storable
-import Foreign.Ptr
+import Foreign.LibFFI
 #endif
 
 import Data.Binary qualified (get, put)
 import Foreign.C (CDouble, newCString)
+import Foreign.C.String (castCharToCChar)
+import Foreign.C.Types (CChar, CFloat, CInt)
+import Foreign.Marshal.Array
+import Foreign.Ptr
+import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.Int qualified as Ghc.Int
 

@@ -2,6 +2,7 @@
 
 module Ffi where
 
+#ifdef FFI
 import Foreign.Ptr (FunPtr)
 
 #if defined(mingw32_HOST_OS)
@@ -67,4 +68,5 @@ dynLibOpen :: FilePath -> IO DynLib
 dynLibOpen = loadLibrary
 #else
 dynLibOpen x = dlopen x [RTLD_NOW]
+#endif
 #endif
