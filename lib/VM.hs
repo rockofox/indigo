@@ -167,7 +167,7 @@ data Data
     | DMap (Data.Map String Data)
     | DTypeQuery String
     | DCPtr WordPtr
-    deriving (Generic)
+    deriving (Generic, Eq)
 
 instance Binary Instruction
 
@@ -192,15 +192,6 @@ instance Show Data where
     show (DTypeQuery x) = "TypeQuery " ++ x
     show (DCPtr x) = "CPtr " ++ show x
     show (DDouble x) = show x
-
-instance Eq Data where
-    (DInt x) == (DInt y) = x == y
-    (DFloat x) == (DFloat y) = x == y
-    (DString x) == (DString y) = x == y
-    (DBool x) == (DBool y) = x == y
-    (DList x) == (DList y) = x == y
-    (DCPtr x) == (DCPtr y) = x == y
-    x == y = error $ "Cannot eq " ++ show x ++ " and " ++ show y
 
 instance Ord Data where
     (DInt x) `compare` (DInt y) = x `compare` y

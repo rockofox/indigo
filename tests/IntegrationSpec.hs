@@ -6,8 +6,10 @@ import BytecodeCompiler
     , locateLabel
     )
 import Control.Monad.State (evalStateT)
+import Data.Functor
 import Data.Text qualified
 import Data.Vector qualified as V
+import Optimizer
 import Parser
     ( CompilerFlags (CompilerFlags, verboseMode)
     , parseProgram
@@ -32,7 +34,7 @@ compileAndRun prog = do
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do
-            xxx <- evalStateT (compileProgram program) (initCompilerState program)
+            xxx <- evalStateT (compileProgram program) (initCompilerState program) <&> optimize
             let xxxPoint = locateLabel xxx "main"
             -- putStrLn $ printAssembly (V.fromList xxx) True
             vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}

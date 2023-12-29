@@ -22,6 +22,7 @@ import Data.Void qualified
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import GitHash
+import Optimizer
 import Options.Applicative
 import Parser
 import System.Console.Repline
@@ -144,7 +145,8 @@ main = do
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr
-                potentiallyTimedOperation "Compilation" showTime (evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr))
+                potentiallyTimedOperation "Compilation" showTime $ do
+                    optimize <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

@@ -31,6 +31,7 @@ library
                      , Util
                      , RegInst
                      , Ffi
+                     , Optimizer
     other-modules: Paths_indigo
     build-depends: base,
         containers,
@@ -104,6 +105,7 @@ test-suite spec
         IntegrationSpec
         VerifierSpec
         RegInstSpec
+        OptimizerSpec
     build-tool-depends: hspec-discover:hspec-discover == 2.*
     default-language: Haskell2010
     default-extensions: OverloadedStrings, ImportQualifiedPost, QuasiQuotes, DisambiguateRecordFields, DuplicateRecordFields, OverloadedRecordDot
