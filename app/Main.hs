@@ -30,6 +30,7 @@ import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
 import VM qualified
 import Verifier
+import Optimizer
 
 data CmdOptions = Options
     { input :: Maybe FilePath
@@ -144,7 +145,9 @@ main = do
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr
-                potentiallyTimedOperation "Compilation" showTime (evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr))
+                potentiallyTimedOperation "Compilation" showTime $ do
+                    optimize <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
+
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

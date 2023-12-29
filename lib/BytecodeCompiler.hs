@@ -82,7 +82,7 @@ compileProgram (Parser.Program expr) = do
         i <- liftIO preludeFile
         case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
-            Right (Parser.Program progExpr) -> return progExpr
+            Right (Parser.Program progExpr) -> return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
     prelude' <- concatMapM compileExpr prelude
     freePart <- concatMapM compileExpr expr
     createVirtualFunctions
@@ -407,11 +407,13 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     let expr = case parseProgram (T.pack i) Parser.initCompilerFlags of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program exprs) -> exprs
-    if qualified || isJust as
-        then do
-            let alias = if qualified then from else fromJust as
-            concatMapM compileExpr (map (`mangleAST` alias) expr)
-        else concatMapM compileExpr expr
+    let p =
+            if qualified || isJust as
+                then do
+                    let alias = if qualified then from else fromJust as
+                    concatMapM compileExpr (map (`mangleAST` alias) expr)
+                else concatMapM compileExpr expr
+    p >>= \p' -> return $ p' ++ [Label "__sep"]
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
     mangleAST (Parser.FuncDec name types) alias = Parser.FuncDec (alias ++ "@" ++ name) types
