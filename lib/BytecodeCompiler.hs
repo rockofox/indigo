@@ -362,6 +362,7 @@ compileExpr (Parser.If ifCond ifThen ifElse) = do
     endLabel <- allocId >>= \x -> return $ "end" ++ show x
     return $ cond' ++ [Jf elseLabel] ++ then' ++ [Jmp endLabel, Label elseLabel] ++ else' ++ [Label endLabel]
 compileExpr (Parser.FloatLit x) = return [Push (DFloat x)]
+compileExpr (Parser.DoubleLit x) = return [Push (DDouble x)]
 compileExpr (Parser.BoolLit x) = return [Push (DBool x)]
 compileExpr (Parser.Cast from to) = do
     from' <- compileExpr from
@@ -372,6 +373,8 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "Int" _) = [Push $ DInt 0]
     compileType (Parser.Var "Float" _) = [Push $ DFloat 0.0]
     compileType (Parser.Var "Double" _) = [Push $ DDouble 0.0]
+    compileType (Parser.Var "Bool" _) = [Push $ DBool False]
+    compileType (Parser.Var "Char" _) = [Push $ DChar '\0']
     compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
@@ -389,11 +392,11 @@ compileExpr st@(Parser.Struct _ fields) = do
         _ <- compileExpr impl
         return ()
 compileExpr (Parser.StructLit name fields) = do
-    fields' <- concatMapM compileExpr (map snd fields)
+    fields' <- mapM (compileExpr . snd) fields
     let names = map (DString . fst) fields
-    let instructions = zip names fields' >>= \(name', field) -> [Push name', field]
+    let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
     implsForStruct <- implsFor name
-    return $ reverse instructions ++ [Push $ DString name, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length instructions + 4]
+    return $ instructions ++ [Push $ DString name, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length fields * 2 + 4]
 compileExpr (Parser.StructAccess struct (Parser.Var field _)) = do
     struct' <- compileExpr struct
     return $ struct' ++ [Access field]

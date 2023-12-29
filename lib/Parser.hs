@@ -19,7 +19,7 @@ import Control.Monad.Combinators
     , sepEndBy
     , (<|>)
     )
-import Control.Monad.Combinators.Expr (Operator (InfixL, Postfix, Prefix), makeExprParser)
+import Control.Monad.Combinators.Expr (Operator (..), makeExprParser)
 import Control.Monad.State
     ( MonadState (get, put)
     , State
@@ -30,6 +30,7 @@ import Data.Char (isUpper)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
+import GHC.Char (chr)
 import Text.Megaparsec
     ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
     , ParseError (..)
@@ -59,7 +60,6 @@ import Text.Megaparsec.Debug (dbg)
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
     , needsMain :: Bool
-    -- ^ Whether to compile to C or WASM
     }
     deriving
         ( Show
@@ -82,6 +82,8 @@ type Parser = ParsecT Void Text (State ParserState)
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "^" Flexible]
+    , [binary "." StructAccess]
+    , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
     , [prefix "-" UnaryMinus]
@@ -90,8 +92,6 @@ binOpTable =
     , [binary "+" Add, binary "-" Sub]
     , [binary ">>" Then]
     , [binary "|>" Pipeline]
-    , [binary "." StructAccess]
-    , [binary "as" Cast]
     , [binary ":" ListConcat]
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
@@ -99,6 +99,9 @@ binOpTable =
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
+
+binaryR :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
+binaryR name f = InfixR (f <$ symbol name)
 
 prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
 prefix name f = Prefix (f <$ symbol name)
@@ -163,7 +166,10 @@ integer =
         )
 
 float :: Parser Float
-float = lexeme L.float
+float = lexeme (L.float <* optional (char 'f'))
+
+double :: Parser Double
+double = lexeme (L.float <* char 'd')
 
 extra :: Parser String
 extra = do
@@ -229,7 +235,7 @@ stringLit :: Parser String
 stringLit = lexeme $ char '\"' *> manyTill L.charLiteral (char '\"')
 
 charLit :: Parser Char
-charLit = lexeme $ char '\'' *> L.charLiteral <* char '\''
+charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal <* char 'c' >>= \x -> if x > 255 then fail "Char literal must be between 0 and 255" else return (chr x))
 
 funcDec :: Parser Expr
 funcDec = do
@@ -490,10 +496,11 @@ term =
     choice
         [ placeholder
         , parens expr
+        , CharLit <$> try charLit
+        , DoubleLit <$> try double
         , FloatLit <$> try float
         , IntLit <$> try integer
         , StringLit <$> try stringLit
-        , CharLit <$> try charLit
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
         , -- , letExpr

@@ -30,6 +30,8 @@ import Foreign.LibFFI
 #endif
 
 import Data.Binary qualified (get, put)
+import Data.Char (chr, ord)
+import Data.Text.Internal.Unsafe.Char
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
 import Foreign.C.Types (CChar, CFloat, CInt)
@@ -350,17 +352,19 @@ instance Num Data where
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
     (+) (DDouble x) (DDouble y) = DDouble $ x + y
     (+) (DString x) (DString y) = DString $ x ++ y
-    -- (+) (DList x) (DList y) = DList $ x ++ y
+    (+) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x + Data.Char.ord y)
     (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
     (-) (DDouble x) (DDouble y) = DDouble $ x - y
     (-) (DList x) (DList y) = DList $ filter (`notElem` y) x
+    (-) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x - Data.Char.ord y)
     (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
     (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x -- TODO
     (*) (DDouble x) (DDouble y) = DDouble $ x * y -- TODO: make generic
+    (*) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x * Data.Char.ord y)
     (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
     fromInteger = DInt . fromInteger
     abs (DInt x) = DInt $ abs x
@@ -374,6 +378,7 @@ instance Fractional Data where
     (/) (DInt x) (DInt y) = DInt $ x `div` y
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
     (/) (DDouble x) (DDouble y) = DDouble $ x / y
+    (/) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x `div` Data.Char.ord y)
     (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
     fromRational = DFloat . fromRational
 
@@ -462,8 +467,9 @@ instance Storable Data where
   poke ptr (DInt x) = poke (castPtr ptr) x
   poke ptr (DFloat x) = poke (castPtr ptr) x
   poke ptr (DString x) = poke (castPtr ptr) (unsafePerformIO $ newCString x)
+  poke ptr (DChar x) = poke (castPtr ptr) x
   poke ptr (DMap x) = do
-    let values = Data.Map.elems (clearMap x)
+    let values = reverse $ Data.Map.elems (clearMap x)
     let sizes = map sizeOf' values
     mapM_ (\(i, v) -> pokeByteOff ptr (sum $ take i sizes) v) (zip [0..] values)
     where
@@ -478,7 +484,7 @@ dataCType (DInt _) = ffi_type_sint32
 dataCType (DFloat _) = ffi_type_float
 dataCType (DString _) = ffi_type_pointer
 dataCType (DBool _) = ffi_type_sint32
-dataCType (DChar _) = ffi_type_schar
+dataCType (DChar _) = ffi_type_uchar
 dataCType (DList _) = ffi_type_pointer
 dataCType (DDouble _) = ffi_type_double
 dataCType (DMap _) = ffi_type_pointer
@@ -486,24 +492,26 @@ dataCType (DCPtr _) = ffi_type_pointer
 dataCType DNone = ffi_type_void
 dataCType _ = error "dataCType: Invalid type"
 
-arg :: Data -> IO Arg
-arg (DInt x) = return $ argInt32 (fromIntegral x)
-arg (DFloat x) =  return $ argCFloat (realToFrac x)
-arg (DString x) = return $  argString x
-arg (DBool x) =  return $ argCInt (if x then 1 else 0)
-arg (DChar x) =  return $ argCChar (toEnum $ fromEnum x)
+type ArgP = (Arg, Maybe (IO ()))
+
+arg :: Data -> IO ArgP
+arg (DInt x) = return (argInt32 (fromIntegral x), Nothing)
+arg (DFloat x) =  return (argCFloat (realToFrac x), Nothing)
+arg (DString x) = return (argString x, Nothing)
+arg (DBool x) =  return (argCInt (if x then 1 else 0), Nothing)
+arg (DChar x) =  return (argCChar (fromIntegral $ Data.Char.ord x), Nothing)
 arg (DList x@(DInt _ : _)) = do
   withArray (map (\(DInt i) -> fromIntegral i :: CInt) x) $ \ptr -> do
-    return $ argPtr ptr
+    return (argPtr ptr, Nothing)
 arg (DList x@(DChar _ : _)) = do -- TODO: make generic
   withArray (map (\(DChar c) -> castCharToCChar c) x) $ \ptr -> do
-    return $ argPtr ptr
-arg (DDouble x) = return $ argCDouble $ realToFrac x
+    return (argPtr ptr, Nothing)
+arg (DDouble x) = return (argCDouble $ realToFrac x, Nothing)
 arg d@(DMap x) = do
     if isJust $ Data.Map.lookup "__name" x then do
       let types = map dataCType (Data.Map.elems (clearMap x))
-      (argT, retT, freeTType) <- newStorableStructArgRet types
-      return $ argT d
+      (argT, _, freeTType) <- newStorableStructArgRet types
+      return (argT d, Just freeTType)
     else
       error "no"
 arg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
@@ -549,36 +557,39 @@ runInstruction (CallFFI name from numArgs) = do
     args <- stackPopN numArgs
     retT <- stackPop
     ffiArgs <- liftIO $ mapM arg args
+    let ffiArgs' = map fst ffiArgs
+    let frees = map snd ffiArgs 
     case retT of
       DInt{} -> do
         let retType = ret retT :: RetType Ghc.Int.Int32
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DFloat{} -> do
         let retType = ret retT :: RetType CFloat
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DString{} -> do
         let retType = ret retT :: RetType String
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DChar{} -> do
         let retType = ret retT :: RetType CChar
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DCPtr{} -> do
         let retType = ret retT :: RetType (Ptr ())
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DDouble{} -> do
         let retType = ret retT :: RetType CDouble
-        result <- liftIO $ callFFI fun retType ffiArgs 
+        result <- liftIO $ callFFI fun retType ffiArgs'
         stackPushA result
       DNone -> do
         let retType = ret retT :: RetType ()
-        _ <- liftIO $ callFFI fun retType ffiArgs 
+        _ <- liftIO $ callFFI fun retType ffiArgs'
         return ()
       _ -> error $ "Invalid return type: " ++ show retT
+    liftIO $ mapM_ (\case Just x -> x; Nothing -> return ()) frees
 #else
 runInstruction CallFFI{} = error "Tried to call FFI function, but FFI is not enabled in this build/not supported on this platform"
 #endif
@@ -632,8 +643,25 @@ runInstruction (Builtin Random) = do
     stackPush $ DFloat num
 runInstruction Exit = modify $ \vm -> vm{running = False}
 -- Control flow
-runInstruction (Call x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
-runInstruction (CallLocal x) = modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = (head (callStack vm)).locals} : callStack vm}
+runInstruction (Call x) = do
+    nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
+    case nextInstruction of
+        Ret -> tailCall
+        _ -> modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
+  where
+    tailCall = do
+        -- runInstruction $ Push $ DString "tailcall"
+        -- runInstruction $ Builtin Print
+        runInstruction $ Jmp x
+runInstruction (CallLocal x) = do
+    nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
+    case nextInstruction of
+        Ret -> tailCall
+        _ -> modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = (head (callStack vm)).locals} : callStack vm}
+  where
+    tailCall = do
+        traceM "Tail call"
+        runInstruction $ Jmp x
 runInstruction CallS =
     stackPop >>= \d -> case d of
         DFuncRef x args locals -> do
@@ -846,7 +874,7 @@ printAssembly program showLineNumbers =
     printAssembly' (Jmp name) = asmLine ("jmp " <> name)
     printAssembly' (Jz name) = asmLine ("jz " <> name)
     printAssembly' (Jnz name) = asmLine ("jnz " <> name)
-    printAssembly' (Jt name) = asmLine ("jl " <> name)
+    printAssembly' (Jt name) = asmLine ("jt " <> name)
     printAssembly' (Jf name) = asmLine ("jf " <> name)
     printAssembly' (LLoad name) = asmLine ("lload " <> name)
     printAssembly' a = asmLine $ show a

@@ -10,6 +10,7 @@ data Expr
     | IntLit Integer
     | StringLit String
     | FloatLit Float
+    | DoubleLit Double
     | If Expr Expr Expr
     | Let String Expr
     | FuncDef {name :: String, args :: [Expr], body :: Expr}
@@ -116,6 +117,7 @@ children (FuncDec _ _) = []
 children (StrictEval a) = [a]
 children (External _ a) = a
 children (CharLit _) = []
+children (DoubleLit _) = []
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -226,7 +228,7 @@ typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo x _) = typeOf x
 typeOf (Target _ _) = error "Cannot infer type of target"
-typeOf (ListConcat{}) = List Any
+typeOf (ListConcat x y) = typeOf x
 typeOf (ListPattern _) = List Any
 typeOf (StructAccess s _) = typeOf s
 typeOf (Pipeline _ b) = typeOf b
@@ -240,6 +242,7 @@ typeOf (Then _ b) = typeOf b
 typeOf (StrictEval x) = typeOf x
 typeOf (External _ _) = error "Cannot infer type of external"
 typeOf (CharLit _) = Char
+typeOf (DoubleLit _) = Double
 
 typeToData :: Type -> VM.Data
 typeToData Int = VM.DInt 0
