@@ -147,23 +147,24 @@ preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y op = do
+    id <- allocId
     functions' <- gets functions
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
+    let aName = "__op_a_" ++ show id
+    let bName = "__op_b_" ++ show id
     x' <- compileExpr x
     y' <- compileExpr y
+
     cast <- case (x, y) of
         (Parser.Flexible _, Parser.Flexible _) -> error "Double cast"
         (Parser.Flexible _, _) -> return $ Cast : y'
         (_, Parser.Flexible _) -> return $ [Swp, Cast] ++ x'
         _ -> return []
     case (x, y) of
-        (Parser.FuncCall{}, Parser.FuncCall{}) -> return (x' ++ LStore "__firstResult" : y' ++ [LStore "__secondResult", LLoad "__firstResult", LLoad "__secondResult", op]) -- TODO: Registers?
-        (_, Parser.FuncCall{}) -> return (y' ++ x' ++ [Swp] ++ cast ++ [op])
-        (Parser.FuncCall{}, _) -> return (x' ++ y' ++ cast ++ [op])
         (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
-        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1] ---------------
+        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
-        _ -> return (x' ++ y' ++ cast ++ [op])
+        _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
 typeOf (Parser.FuncCall funcName _ _) = do
