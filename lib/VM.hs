@@ -24,21 +24,25 @@ import GHC.Generics (Generic)
 import System.Random (randomIO)
 #ifdef FFI
 import Ffi
-import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType)
+import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType, sizeAndAlignmentOfCType)
 import Foreign.LibFFI.FFITypes
 import Foreign.LibFFI
 #endif
 
+import Control.Monad.Reader
 import Data.Binary qualified (get, put)
 import Data.Char (chr, ord)
+import Data.IORef (IORef)
 import Data.Text.Internal.Unsafe.Char
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
-import Foreign.C.Types (CChar, CFloat, CInt)
+import Foreign.C.Types (CChar, CFloat, CInt, CSChar, CUChar)
+import Foreign.LibFFI.Internal (CType)
 import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
 import GHC.IO (unsafePerformIO)
+import GHC.IORef
 import GHC.Int qualified as Ghc.Int
 
 data Instruction
@@ -298,9 +302,11 @@ showDebugInfo = do
     vm <- get
     -- Show the current instruction, two values from the stack, and the result
     let inst = program vm V.! pc vm
-    let stack' = stack vm
-    let stack'' = if length stack' > 1 then take 2 stack' else stack'
-    return $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show stack'' ++ "\t" ++ show (safeHead $ callStack vm)
+    -- let stack' = stack vm
+    -- let stack'' = if length stack' > 1 then take 2 stack' else stack'
+    -- return $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show stack'' ++ "\t" ++ show (safeHead $ callStack vm)
+    let layers = length (callStack vm) - 1
+    return $ replicate layers ' ' ++ show (pc vm) ++ " " ++ show inst -- ++ " (" ++ show (stack vm) ++ ")"
 
 run' :: Program -> StateT VM IO ()
 run' program = do
@@ -450,26 +456,55 @@ instance IntoData (Ptr ()) where
 clearMap :: Data.Map String Data -> Data.Map String Data
 clearMap = Data.Map.delete "__name" . Data.Map.delete "__traits"
 
+
+globalStructType :: IORef [Ptr CType]
+{-# NOINLINE globalStructType #-}
+globalStructType = unsafePerformIO $ newIORef []
+
 -- Only used for structs. I really don't like this
 instance Storable Data where
   sizeOf _ = 4
   alignment _ = 4
-  peek _ = error "peek"
+  peek ptr = do
+    types <- readIORef globalStructType
+    sizesAndAlignments <- mapM sizeAndAlignmentOfCType types
+    let typesAndOffsets = zip types (scanl (\(o,_) (s,a) -> (o+s,a)) (0,0) sizesAndAlignments)
+    b <- mapM mapData typesAndOffsets
+    return $ DList b
+    where
+      mapData :: (Ptr CType, (Int, Int)) -> IO Data
+      mapData tsa = do
+        let (t,(o,_)) = tsa
+        case () of _
+                    | t == ffi_type_float -> do
+                      return $ DFloat (realToFrac (unsafePerformIO $ peekByteOff ptr o :: CFloat))
+                    | t == ffi_type_sint32 -> do
+                      return $ DInt (fromIntegral (unsafePerformIO $ peekByteOff ptr o :: CInt))
+                    | t == ffi_type_double -> do
+                      return $ DDouble (realToFrac (unsafePerformIO $ peekByteOff ptr o :: CDouble))
+                    | t == ffi_type_pointer -> do
+                      return $ DCPtr (unsafePerformIO $ peekByteOff ptr o :: WordPtr)
+                    | t == ffi_type_uchar -> do
+                      return $ DChar (toEnum (fromEnum (unsafePerformIO $ peekByteOff ptr o :: CUChar)))
+                    | t == ffi_type_void -> do
+                      return DNone
+                    | otherwise -> error $ "mapData: Invalid type " ++ show t
+
+
   poke ptr (DInt x) = poke (castPtr ptr) x
   poke ptr (DFloat x) = poke (castPtr ptr) x
   poke ptr (DString x) = poke (castPtr ptr) (unsafePerformIO $ newCString x)
   poke ptr (DChar x) = poke (castPtr ptr) x
   poke ptr (DMap x) = do
     let values = reverse $ Data.Map.elems (clearMap x)
-    let sizes = map sizeOf' values
+    let sizes = map sizeOfC values
     mapM_ (\(i, v) -> pokeByteOff ptr (sum $ take i sizes) v) (zip [0..] values)
-    where
-    -- Normal sizeof crashes and I don't know why
-    sizeOf' :: Data -> Int
-    sizeOf' (DChar _) = 1
-    sizeOf' (DDouble _) = 8
-    sizeOf' _ = 4
   poke _ x = error $ "unsupported poke " ++ show x
+
+sizeOfC :: Data -> Int
+sizeOfC (DChar _) = 1
+sizeOfC (DDouble _) = 8
+sizeOfC _ = 4
 
 dataCType (DInt _) = ffi_type_sint32
 dataCType (DFloat _) = ffi_type_float
@@ -579,6 +614,14 @@ runInstruction (CallFFI name from numArgs) = do
         let retType = ret retT :: RetType ()
         _ <- liftIO $ callFFI fun retType ffiArgs'
         return ()
+      DMap x -> do
+        let keys = reverse (Data.Map.keys (clearMap x))
+        let types = map dataCType (Data.Map.elems (clearMap x))
+        liftIO $ writeIORef globalStructType types 
+        (_,retType,_) <- liftIO (newStorableStructArgRet types :: IO (Data -> Arg, RetType Data, IO ()))
+        (DList values) <- liftIO $ callFFI fun retType ffiArgs'
+        let result = DMap $ Data.Map.fromList $ zip keys values
+        stackPushA result
       _ -> error $ "Invalid return type: " ++ show retT
     liftIO $ mapM_ (\case Just x -> x; Nothing -> return ()) frees
 #else

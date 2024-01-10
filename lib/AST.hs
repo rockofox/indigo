@@ -1,6 +1,7 @@
 module AST where
 
 import Data.Binary qualified
+import Data.Map qualified
 import GHC.Generics (Generic)
 import VM qualified
 
@@ -213,7 +214,7 @@ typeOf (FuncCall{}) = Any -- error "Cannot infer type of variable"
 typeOf Placeholder = Any
 typeOf (Var{}) = Any -- error "Cannot infer type of variable"
 typeOf (Let _ _) = error "Cannot infer type of let"
-typeOf (If{}) = error "Cannot infer type of if"
+typeOf (If _ b _) = typeOf b
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
 typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
 typeOf (Function _ _) = error "Cannot infer type of modern function"
@@ -253,6 +254,8 @@ typeToData String = VM.DString ""
 typeToData (StructT "IO") = VM.DNone -- Hmmm...
 typeToData Char = VM.DChar ' '
 typeToData CPtr = VM.DCPtr 0
+typeToData StructT{} = VM.DMap Data.Map.empty
+typeToData Any = VM.DNone
 typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 
 -- typeOf x = error $ "Cannot infer type of " ++ show x

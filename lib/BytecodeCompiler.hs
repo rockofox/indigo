@@ -6,9 +6,11 @@ import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
+import Data.Bifunctor (second)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, inits, intercalate, isInfixOf, tails)
 import Data.List.Split qualified
+import Data.Map qualified
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -181,6 +183,15 @@ typeOf (Parser.Var varName _) = do
     return a
 typeOf x = return $ Parser.typeOf x
 
+getStructFields :: String -> StateT (CompilerState a) IO [(String, Parser.Type)]
+getStructFields structName = do
+    structDecs' <- gets structDecs
+    let structDec = fromJust $ find (\x -> Parser.name x == structName) structDecs'
+    let fields = case structDec of
+            Parser.Struct _ fields' -> fields'
+            _ -> error "Not a struct"
+    return fields
+
 constructFQName :: String -> [Parser.Expr] -> StateT (CompilerState a) IO String
 constructFQName "main" _ = return "main"
 constructFQName funcName args = mapM (typeOf >=> return . show) args <&> \x -> funcName ++ ":" ++ intercalate "," x
@@ -246,7 +257,11 @@ compileExpr (Parser.FuncCall funcName args _) = do
 
     case external of
         Just (External _ ereturnType _ from) -> do
-            let retT = typeToData ereturnType
+            retT <- case ereturnType of
+                Parser.StructT name -> do
+                    fields <- getStructFields name
+                    return $ DMap $ Data.Map.fromList $ map (second typeToData) fields
+                _ -> return $ typeToData ereturnType
             args' <- concatMapM compileExpr (reverse args)
             return $ [Push retT] ++ args' ++ [CallFFI funcName from (length args)]
         Nothing ->
