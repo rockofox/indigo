@@ -52,7 +52,7 @@ spec = do
         it "Should parse a simple program" $
             parseProgram "let main => IO = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"]}}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"], generics = []}}])
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" parserCompilerFlags
@@ -62,11 +62,11 @@ spec = do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String], generics = []}]}])
         it "Should parse a trait declaration with multiple methods" $
             parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String]}, FuncDec{name = "show2", types = [Self, String]}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String], generics = []}, FuncDec{name = "show2", types = [Self, String], generics = []}]}])
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right
@@ -93,7 +93,7 @@ spec = do
                 |]
                 parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncDec{name = "+", types = [Any, Any, Any]}, FuncDec{name = "-", types = [Any, Any, Any]}, FuncDec{name = "*", types = [Any, Any, Any]}, FuncDec{name = "/", types = [Any, Any, Any]}, FuncDec{name = "==", types = [Any, Any, Any]}])
+                    (Program [FuncDec{name = "+", types = [Any, Any, Any], generics = []}, FuncDec{name = "-", types = [Any, Any, Any], generics = []}, FuncDec{name = "*", types = [Any, Any, Any], generics = []}, FuncDec{name = "/", types = [Any, Any, Any], generics = []}, FuncDec{name = "==", types = [Any, Any, Any], generics = []}])
         it "Should be able to use gravis escaped functions in calls" $
             do
                 parseProgram

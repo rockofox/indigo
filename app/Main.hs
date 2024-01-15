@@ -97,17 +97,17 @@ inputFileBinary input = case input of
 potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = if showTime then timeItNamed msg action else action
 
-parseAndVerify :: String -> T.Text -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Void) Program)
+parseAndVerify :: String -> T.Text -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Void, Maybe Program) Program)
 parseAndVerify name t cf = do
     -- let (result, state) = runIdentity $ runStateT (parseProgramCf' t initCompilerFlags) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
     let result = parseProgram t cf
     case result of
-        Left err -> return $ Left err
+        Left err -> return $ Left (err, Nothing)
         Right program' -> do
             let (Program exprs) = program'
             verifierResult <- verifyProgram name t exprs
             case verifierResult of
-                Left err -> return $ Left err
+                Left err -> return $ Left (err, Just program')
                 Right _ -> return $ Right program'
 
 -- parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) (Program))
@@ -141,7 +141,12 @@ main = do
                 prog <- parse (fromJust input) i CompilerFlags{verboseMode = verbose}
                 rprog <- prog
                 expr <- case rprog of
-                    Left err -> error $ "Parse error: " ++ errorBundlePretty err
+                    Left (err, expr) -> do
+                        case expr of
+                            Just expr -> do
+                                when debug $ putStrLn $ prettyPrintProgram expr
+                            Nothing -> return ()
+                        error $ "Parse error: " ++ errorBundlePretty err
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr

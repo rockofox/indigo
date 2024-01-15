@@ -286,6 +286,28 @@ spec = do
                     println "Hello, World!"
                 |]
                 `shouldReturn` "Hello, World!\n"
+        it "Functional" $ do
+            compileAndRun
+                [r|
+                    print (map (`*`3), [2, 4, 6, 8])
+                |]
+                `shouldReturn` "[6,12,18,24]"
+        it "Structured" $ do
+            compileAndRun
+                [r|
+                    struct Person = (name: String, age: Int)
+                    let peter = Person { name: "Peter", age: 24 }
+                    println peter.name : " is " : (peter.age) as String : " years old"
+                |]
+                `shouldReturn` "Peter is 24 years old\n"
+        it "Pattern matching" $ do
+            compileAndRun
+                [r|
+                    let head ([]: List{Any}) = 0
+                    let head ((x:xs): List{Any}) = x
+                    print head [1,2,3]
+                |]
+                `shouldReturn` "1"
         it "\"99\" bottles of beer" $ do
             compileAndRun
                 [r|

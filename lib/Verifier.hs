@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
 import Data.Functor ((<&>))
+import Data.List (find, group, groupBy)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, isJust, isNothing)
@@ -40,6 +41,7 @@ data VBinding = VBinding
     { name :: String
     , args :: [AST.Type]
     , ttype :: AST.Type
+    , generics :: [AST.GenericExpr]
     }
     deriving (Show, Eq, Ord)
 
@@ -55,7 +57,7 @@ listPatternToBindings :: Expr -> Type -> [VBinding]
 listPatternToBindings (ListPattern exprs) (List t) = do
     let singulars = init exprs
     let Var restName _ = last exprs
-    map (\(Var name _) -> VBinding{name = name, args = [], ttype = t}) singulars ++ [VBinding{name = restName, args = [], ttype = List t}]
+    map (\(Var name _) -> VBinding{name = name, args = [], ttype = t, generics = []}) singulars ++ [VBinding{name = restName, args = [], ttype = List t, generics = []}]
 -- listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
 listPatternToBindings x y = error $ "listPatternToBinding called with non-list-pattern: " ++ show x ++ " " ++ show y
 
@@ -70,17 +72,46 @@ typeOf' (FuncCall name _ _) = do
     return $ maybe Unknown ttype matchingBinding
 typeOf' x = return $ typeOf x
 
-compareTypes' :: Type -> Type -> StateT VerifierState IO Bool
-compareTypes' (StructT a) (StructT b) = do
-    rootFrame <- gets frames <&> last
-    let ttypes' = ttypes rootFrame
-    let a' = Map.findWithDefault (VType{implements = []}) a ttypes'
-    let b' = Map.findWithDefault (VType{implements = []}) b ttypes'
-    return $ a `elem` implements b' || b `elem` implements a' || a == b
-compareTypes' a b = return $ compareTypes a b
+compareTypes' :: Type -> Type -> [AST.GenericExpr] -> StateT VerifierState IO Bool
+compareTypes' aT (StructT b) generics = do
+    case aT of
+        StructT a -> do
+            let gen = find (\(GenericExpr name _) -> name == b) generics
+            case gen of
+                Just (GenericExpr _ (Just (StructT t))) -> compStructs a t
+                Just (GenericExpr _ _) -> return True
+                Nothing -> return True
+        _ -> do
+            -- return $ isJust $ find (\(GenericExpr name _) -> name == b) generics
+            let gen = find (\(GenericExpr name _) -> name == b) generics
+            case gen of
+                Just (GenericExpr _ (Just t)) -> return $ compareTypes aT t
+                Just (GenericExpr _ Nothing) -> return True
+                Nothing -> return False
+  where
+    compStructs :: String -> String -> StateT VerifierState IO Bool
+    compStructs a b = do
+        rootFrame <- gets frames <&> last
+        let ttypes' = ttypes rootFrame
+        let a' = Map.findWithDefault (VType{implements = []}) a ttypes'
+        let b' = Map.findWithDefault (VType{implements = []}) b ttypes'
+        return $ a `elem` implements b' || b `elem` implements a' || a == b
+compareTypes' a b _ = do
+    return $ compareTypes a b
 
-functionTypesAcceptable :: [Type] -> [Type] -> StateT VerifierState IO Bool
-functionTypesAcceptable use def = allM (uncurry compareTypes') $ zip use def
+allTheSame :: (Eq a) => [a] -> Bool
+allTheSame xs = all (== head xs) (tail xs)
+
+functionTypesAcceptable :: [Type] -> [Type] -> [AST.GenericExpr] -> StateT VerifierState IO Bool
+functionTypesAcceptable use def generics = do
+    let genericNames = map (\(GenericExpr name _) -> name) generics
+    let useAndDef = zip use def
+    let udStructs = filter (\(a, b) -> case (a, b) of (_, StructT _) -> True; _ -> False) useAndDef
+    let udStructsGeneric = filter (\(a, StructT b) -> b `elem` genericNames) udStructs
+    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\(a, StructT b) -> b == x) udStructsGeneric)) genericNames
+    let genericsMatch = all (\(genericName, types) -> allTheSame types) groupedUdStructsGeneric
+    typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
+    return $ typesMatch' && genericsMatch
 
 initVerifierState :: VerifierState
 initVerifierState =
@@ -129,28 +160,30 @@ verifyExpr (FuncDef name args body) = do
     b <- findMatchingBinding name
     case b of
         Just binding -> do
+            currentFrame' <- currentFrame
+            modify (\state -> state{frames = currentFrame'{bindings = Set.map (\b -> if Verifier.name b == name && b.ttype == Any then b{ttype = typeOf body} else b) (bindings (head (frames state)))} : tail (frames state)})
+
             let argsAndTypes = zip args binding.args
             let argsAsBindings = concatMap argToBindings argsAndTypes
-            -- let argsAsBindings = concatMap (\case { Var name' _ -> [VBinding { name = name', args = [], ttype = Any }]; l@ListPattern{} -> listPatternToBindings l; _ -> [] }) args
-            modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = binding.ttype, fname = name}) : frames state})
-            -- Add the function itself to the frame
+            let bType = if binding.ttype == Any then typeOf body else binding.ttype
+            modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = bType, fname = name}) : frames state})
             types <- mapM typeOf' args
-            modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = types, ttype = Any}) (bindings (head (frames state))), ttypes = Map.empty, ftype = binding.ttype, fname = name}) : tail (frames state)})
+            modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = types, ttype = bType, generics = []}) (bindings (head (frames state))), ttypes = Map.empty, ftype = bType, fname = name}) : tail (frames state)})
             modify (\state -> state{topLevel = True})
             bodyErrors <- verifyExpr body
             modify (\state -> state{frames = tail (frames state)})
             return bodyErrors
           where
             argToBindings :: (Expr, Type) -> [VBinding]
-            argToBindings (Var name' _, Fn args' ret) = [VBinding{name = name', args = args', ttype = ret}]
-            argToBindings (Var name' _, ttype') = [VBinding{name = name', args = [], ttype = ttype'}]
+            argToBindings (Var name' _, Fn args' ret) = [VBinding{name = name', args = args', ttype = ret, generics = []}]
+            argToBindings (Var name' _, ttype') = [VBinding{name = name', args = [], ttype = ttype', generics = []}]
             argToBindings (l@ListPattern{}, t) = listPatternToBindings l t
             argToBindings _ = []
         Nothing -> return [FancyError 0 (Set.singleton (ErrorFail $ "Function " ++ name ++ " is missing a declaration"))]
-verifyExpr (FuncDec name types) = do
+verifyExpr (FuncDec name types generics) = do
     currentFrame' <- currentFrame
     let (arguments, returnType) = if null types then ([], Any) else (init types, last types)
-    modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = arguments, ttype = returnType}) (bindings (head (frames state)))} : tail (frames state)})
+    modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = arguments, ttype = returnType, generics}) (bindings (head (frames state)))} : tail (frames state)})
     return []
 -- verifyExpr (DoBlock exprs) = verifyMultiple exprs
 verifyExpr (DoBlock exprs) = concatMapM verifyExpr' exprs
@@ -165,12 +198,12 @@ verifyExpr (Function def dec) = do
     return $ a ++ b
 verifyExpr (Trait _ methods) = do
     currentFrame' <- currentFrame
-    modify (\state -> state{frames = currentFrame'{bindings = Set.union (bindings (head (frames state))) (Set.fromList (map (\(FuncDec name' types) -> VBinding{name = name', args = types, ttype = Any}) methods))} : tail (frames state)})
+    modify (\state -> state{frames = currentFrame'{bindings = Set.union (bindings (head (frames state))) (Set.fromList (map (\(FuncDec name' types _) -> VBinding{name = name', args = types, ttype = Any, generics = []}) methods))} : tail (frames state)})
     return []
 verifyExpr (Let name expr) = do
     currentFrame' <- currentFrame
     letType <- typeOf' expr
-    modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = [], ttype = letType}) (bindings (head (frames state)))} : tail (frames state)})
+    modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = [], ttype = letType, generics = []}) (bindings (head (frames state)))} : tail (frames state)})
     verifyExpr expr
 verifyExpr (Var name (Position (start, _))) = do
     matchingBinding <- findMatchingBinding name
@@ -193,18 +226,18 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     argumentTypes <- mapM typeOf' args
     fta <- case matchingBinding of
         Just binding -> do
-            functionTypesAcceptable argumentTypes binding.args
+            functionTypesAcceptable argumentTypes binding.args binding.generics
         Nothing -> return False
     eNoMatchi <- case matchingBinding of
         Just binding -> do
-            matchi <- compareTypes' (ftype currentFrame') (ttype binding)
+            matchi <- compareTypes' (ftype currentFrame') (ttype binding) binding.generics
             return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding.ttype ++ "` of `" ++ binding.name ++ "` is incompatible with type `" ++ show currentFrame'.ftype ++ "` of " ++ currentFrame'.fname))) | topLevel' && currentFrame'.fname /= "__lambda" && not matchi]
         Nothing -> return []
     let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
     currentFrame' <- currentFrame
-    let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any}) args
+    let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}) args
     modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
     bodyErrors <- verifyExpr body
     modify (\state -> state{frames = tail (frames state)})
@@ -225,7 +258,7 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
         else concatMapM verifyExpr expr
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
-    mangleAST (Parser.FuncDec name types) alias = Parser.FuncDec (alias ++ "@" ++ name) types
+    mangleAST (Parser.FuncDec name types _) alias = Parser.FuncDec (alias ++ "@" ++ name) types []
     mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
     mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
     mangleAST x _ = x

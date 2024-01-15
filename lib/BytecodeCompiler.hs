@@ -250,7 +250,7 @@ compileExpr (Parser.FuncCall funcName args _) = do
             Nothing -> case findFunction funcName functions' argTypes of
                 (Just f) -> f
                 Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
-    let funcDec = find (\(Parser.FuncDec name' _) -> name' == baseName fun) funcDecs'
+    let funcDec = find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
     -- If the funcName starts with curCon@, it's a local function
     let callWay = (if T.pack (curCon ++ "@") `isPrefixOf` T.pack fun.funame then CallLocal (funame fun) else Call (funame fun))
@@ -281,7 +281,7 @@ compileExpr (Parser.FuncCall funcName args _) = do
                                 ++ [ LLoad funcName
                                    , CallS
                                    ]
-compileExpr fd@(Parser.FuncDec _ _) = do
+compileExpr fd@(Parser.FuncDec{}) = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
 compileExpr (Parser.FuncDef origName args body) = do
@@ -291,7 +291,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     -- let argTypes = map Parser.typeOf args
     modify (\s -> s{currentContext = name})
     funcDecs' <- gets funcDecs
-    when (isNothing $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) : funcDecs s})
+    when (isNothing $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) Parser.Any) [] : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
     modify (\s -> s{functions = Function name funame [] [] curCon : functions s})
@@ -299,7 +299,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     body' <- compileExpr body
     funcDecs'' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
-    let funcDec = fromJust $ find (\(Parser.FuncDec name' _) -> name' == name) funcDecs''
+    let funcDec = fromJust $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs''
     let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
@@ -402,7 +402,7 @@ compileExpr st@(Parser.Struct _ fields) = do
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
-        let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any]}]
+        let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = []}]
         let impl = Parser.Impl traitName (Parser.name st) [Parser.FuncDef{name = name, args = [Parser.Var "self" zeroPosition], body = Parser.StructAccess (Parser.Var "self" zeroPosition) (Parser.Var name zeroPosition)}]
         _ <- compileExpr trait
         _ <- compileExpr impl
@@ -432,12 +432,12 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     p >>= \p' -> return $ p' ++ [Label "__sep"]
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
-    mangleAST (Parser.FuncDec name types) alias = Parser.FuncDec (alias ++ "@" ++ name) types
+    mangleAST (Parser.FuncDec name types _) alias = Parser.FuncDec (alias ++ "@" ++ name) types []
     mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
     mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
     mangleAST x _ = x
 compileExpr (Parser.Trait name methods) = do
-    let methods' = map (\(Parser.FuncDec name' types) -> Parser.FuncDec name' types) methods
+    let methods' = map (\(Parser.FuncDec name' types _) -> Parser.FuncDec name' types []) methods
     modify (\s -> s{traits = Parser.Trait name methods : traits s})
     mapM_ compileExpr methods'
     return []
@@ -451,7 +451,7 @@ compileExpr (Parser.Lambda args body) = do
     curCon <- gets currentContext
     let name = "__lambda" ++ show fId
     let def = Parser.FuncDef name args body
-    let dec = Parser.FuncDec name (replicate (length args + 1) Parser.Any)
+    let dec = Parser.FuncDec name (replicate (length args + 1) Parser.Any) []
     let fun = Parser.Function [def] dec
     _ <- compileExpr fun
     lets' <- gets functions
@@ -466,7 +466,7 @@ compileExpr (Parser.Then a b) = do
     return $ a' ++ b'
 compileExpr (Parser.UnaryMinus x) = compileExpr x >>= \x' -> return (x' ++ [Push $ DInt (-1), Mul])
 compileExpr (Parser.External _ []) = return []
-compileExpr (Parser.External from ((Parser.FuncDec name types) : xs)) = do
+compileExpr (Parser.External from ((Parser.FuncDec name types _) : xs)) = do
     modify (\s -> s{externals = External{name, returnType = last types, args = init types, from} : externals s})
     _ <- compileExpr (Parser.External from xs)
     return []
@@ -486,7 +486,7 @@ createVirtualFunctions = do
         let fors = map Parser.for impl
         mapM_ (\method -> createBaseDef method trait fors) methods
     createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT (CompilerState a) IO ()
-    createBaseDef (Parser.FuncDec name typess) trait fors = do
+    createBaseDef (Parser.FuncDec name typess _) trait fors = do
         let traitName = Parser.name trait
         let body =
                 [Label name]

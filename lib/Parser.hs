@@ -3,7 +3,7 @@
 {-# HLINT ignore "Use newtype instead of data" #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
-module Parser (Expr (..), Program (..), parseProgram', ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), initCompilerFlags, typeOf, compareTypes) where
+module Parser (Expr (..), Program (..), parseProgram', parseProgramPure, ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), initCompilerFlags, typeOf, compareTypes) where
 
 -- module Parser where
 
@@ -242,7 +242,7 @@ funcDec = do
     name <- identifier <|> gravis
     symbol "::"
     argTypes <- sepBy1 validType (symbol "->")
-    return $ FuncDec name argTypes
+    return $ FuncDec name argTypes []
 
 defArg :: Parser Expr
 defArg = var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer
@@ -301,15 +301,30 @@ doBlock = do
     keyword "end" <|> lookAhead (keyword "else")
     return $ DoBlock exprs
 
+generic :: Parser [GenericExpr]
+generic = do
+    symbol "<"
+    args <- sepBy1 typeAndMaybeConstraint (symbol ",")
+    symbol ">"
+    return args
+  where
+    typeAndMaybeConstraint = do
+        name <- identifier
+        constraint <- optional $ do
+            symbol ":"
+            validType
+        return $ GenericExpr name constraint
+
 combinedFunc :: Parser Expr
 combinedFunc = do
     keyword "let"
     name <- identifier <?> "function name"
+    generics <- fromMaybe [] <$> optional generic
     (args, argTypes) <- parens argsAndTypes <|> argsAndTypes
     returnType <- optional (symbol "=>" >> validType <?> "return type")
     symbol "="
     body <- recover expr <?> "function body"
-    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]))
+    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics)
   where
     argsAndTypes =
         unzip <$> many do
@@ -377,6 +392,11 @@ arrayAccess = do
 placeholder :: Parser Expr
 placeholder = symbol "_" >> return Placeholder
 
+parseProgramPure :: Text -> Program
+parseProgramPure t = case parseProgram t initCompilerFlags of
+    Left err -> error $ show err
+    Right program' -> program'
+
 parseProgram' :: Text -> State ParserState (Either (ParseErrorBundle Text Void) Program)
 parseProgram' = runParserT program ""
 
@@ -390,7 +410,7 @@ parseProgram t cf = do
             let foundMain = any (\case FuncDef "main" _ _ -> True; _ -> False) program'.exprs || any (\case Function defs _ -> any (\case FuncDef "main" _ _ -> True; _ -> False) defs; _ -> False) program'.exprs
             if foundMain || not cf.needsMain
                 then Right program'
-                else Right $ Program [FuncDec "main" [StructT "IO"], FuncDef "main" [] (DoBlock program'.exprs)]
+                else Right $ Program [FuncDec "main" [StructT "IO"] [], FuncDef "main" [] (DoBlock program'.exprs)]
 
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
@@ -458,26 +478,36 @@ typeLiteral = do
 
 trait :: Parser Expr
 trait = do
-    symbol "trait"
+    keyword "trait"
     name <- identifier
-    symbol "="
-    symbol "do"
-    newline'
-    methods <- funcDec `sepEndBy` newline'
-    symbol "end"
+    methods <-
+        ( do
+                symbol "="
+                keyword "do"
+                newline'
+                fds <- funcDec `sepEndBy` newline'
+                keyword "end"
+                return fds
+            )
+            <|> return []
     return $ Trait name methods
 
 impl :: Parser Expr
 impl = do
-    symbol "impl"
+    keyword "impl"
     name <- identifier
     symbol "for"
     for <- identifier
-    symbol "="
-    symbol "do"
-    newline'
-    methods <- funcDef `sepEndBy` newline'
-    symbol "end"
+    methods <-
+        ( do
+                symbol "="
+                symbol "do"
+                newline'
+                fds <- funcDef `sepEndBy` newline'
+                symbol "end"
+                return fds
+            )
+            <|> return []
     return $ Impl name for methods
 
 external :: Parser Expr
@@ -507,9 +537,9 @@ term =
           external
         , struct
         , import_
-        , doBlock
         , impl
         , Parser.trait
+        , doBlock
         , try combinedFunc
         , try funcDef
         , try funcDec

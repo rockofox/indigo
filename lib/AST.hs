@@ -5,6 +5,8 @@ import Data.Map qualified
 import GHC.Generics (Generic)
 import VM qualified
 
+data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
+
 data Expr
     = Var String Position
     | BoolLit Bool
@@ -16,7 +18,7 @@ data Expr
     | Let String Expr
     | FuncDef {name :: String, args :: [Expr], body :: Expr}
     | FuncCall String [Expr] Position
-    | FuncDec {name :: String, types :: [Type]}
+    | FuncDec {name :: String, types :: [Type], generics :: [GenericExpr]}
     | Function {def :: [Expr], dec :: Expr}
     | DoBlock [Expr]
     | ExternDec String String [Type]
@@ -114,7 +116,7 @@ children (TypeLit _) = []
 children (Flexible a) = [a]
 children (Trait _ a) = a
 children (Impl _ _ a) = a
-children (FuncDec _ _) = []
+children (FuncDec{}) = []
 children (StrictEval a) = [a]
 children (External _ a) = a
 children (CharLit _) = []
@@ -173,6 +175,8 @@ newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
 
 instance Data.Binary.Binary Type
 
+instance Data.Binary.Binary GenericExpr
+
 instance Data.Binary.Binary Expr
 
 instance Data.Binary.Binary Program
@@ -216,9 +220,9 @@ typeOf (Var{}) = Any -- error "Cannot infer type of variable"
 typeOf (Let _ _) = error "Cannot infer type of let"
 typeOf (If _ b _) = typeOf b
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
-typeOf (FuncDec _ _) = error "Cannot infer type of function declaration"
+typeOf (FuncDec{}) = error "Cannot infer type of function declaration"
 typeOf (Function _ _) = error "Cannot infer type of modern function"
-typeOf (DoBlock _) = error "Cannot infer type of do block"
+typeOf (DoBlock x) = if null x then None else typeOf $ last x
 typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
 typeOf (Discard _) = error "Cannot infer type of discard"
 typeOf (Import{}) = error "Cannot infer type of import"
