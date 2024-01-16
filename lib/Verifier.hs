@@ -80,7 +80,7 @@ compareTypes' aT (StructT b) generics = do
             case gen of
                 Just (GenericExpr _ (Just (StructT t))) -> compStructs a t
                 Just (GenericExpr _ _) -> return True
-                Nothing -> return True
+                Nothing -> compStructs a b
         _ -> do
             -- return $ isJust $ find (\(GenericExpr name _) -> name == b) generics
             let gen = find (\(GenericExpr name _) -> name == b) generics
