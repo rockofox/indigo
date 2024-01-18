@@ -139,14 +139,7 @@ instance Eq Position where
     (Position (start1, end1)) == (Position (start2, end2)) = start1 == start2 && end1 == end2
 
 data Type
-    = Int
-    | Float
-    | Double
-    | Bool
-    | String
-    | Char
-    | CPtr
-    | Any
+    = Any
     | None
     | Unknown
     | Fn {args :: [Type], ret :: Type}
@@ -156,11 +149,13 @@ data Type
     deriving (Eq, Ord, Generic)
 
 instance Show Type where
-    show Int = "Int"
-    show Float = "Float"
-    show Double = "Double"
-    show Bool = "Bool"
-    show String = "String"
+    show (StructT "Int") = "Int"
+    show (StructT "Float") = "Float"
+    show (StructT "Double") = "Double"
+    show (StructT "Bool") = "Bool"
+    show (StructT "String") = "String"
+    show (StructT "CPtr") = "CPtr"
+    show (StructT "Char") = "Char"
     show Any = "Any"
     show None = "None"
     show Unknown = "Unknown"
@@ -168,8 +163,6 @@ instance Show Type where
     show (List t) = "List{" ++ show t ++ "}"
     show (StructT structName) = structName
     show Self = "Self"
-    show Char = "Char"
-    show CPtr = "CPtr"
 
 newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
 
@@ -195,25 +188,25 @@ compareTypes (List x) (List y) = compareTypes x y
 compareTypes x y = x == y || x == Any || y == Any
 
 typeOf :: Expr -> Type
-typeOf (IntLit _) = Int
-typeOf (FloatLit _) = Float
-typeOf (BoolLit _) = Bool
-typeOf (StringLit _) = String
+typeOf (IntLit _) = StructT "Int"
+typeOf (FloatLit _) = StructT "Float"
+typeOf (BoolLit _) = StructT "Bool"
+typeOf (StringLit _) = StructT "String"
 typeOf (Add x _) = typeOf x
 typeOf (Sub x _) = typeOf x
 typeOf (Mul x _) = typeOf x
 typeOf (Div x _) = typeOf x
 typeOf (Power x _) = typeOf x
 typeOf (UnaryMinus x) = typeOf x
-typeOf (Eq _ _) = Bool
-typeOf (Neq _ _) = Bool
-typeOf (Lt _ _) = Bool
-typeOf (Gt _ _) = Bool
-typeOf (Le _ _) = Bool
-typeOf (Ge _ _) = Bool
-typeOf (And _ _) = Bool
-typeOf (Or _ _) = Bool
-typeOf (Not _) = Bool
+typeOf (Eq _ _) = StructT "Bool"
+typeOf (Neq _ _) = StructT "Bool"
+typeOf (Lt _ _) = StructT "Bool"
+typeOf (Gt _ _) = StructT "Bool"
+typeOf (Le _ _) = StructT "Bool"
+typeOf (Ge _ _) = StructT "Bool"
+typeOf (And _ _) = StructT "Bool"
+typeOf (Or _ _) = StructT "Bool"
+typeOf (Not _) = StructT "Bool"
 typeOf (FuncCall{}) = Any -- error "Cannot infer type of variable"
 typeOf Placeholder = Any
 typeOf (Var{}) = Any -- error "Cannot infer type of variable"
@@ -246,18 +239,18 @@ typeOf (Impl{}) = error "Cannot infer type of impl"
 typeOf (Then _ b) = typeOf b
 typeOf (StrictEval x) = typeOf x
 typeOf (External _ _) = error "Cannot infer type of external"
-typeOf (CharLit _) = Char
-typeOf (DoubleLit _) = Double
+typeOf (CharLit _) = StructT "Char"
+typeOf (DoubleLit _) = StructT "Double"
 
 typeToData :: Type -> VM.Data
-typeToData Int = VM.DInt 0
-typeToData Float = VM.DFloat 0
-typeToData Double = VM.DDouble 0
-typeToData Bool = VM.DBool False
-typeToData String = VM.DString ""
+typeToData (StructT "Int") = VM.DInt 0
+typeToData (StructT "Float") = VM.DFloat 0
+typeToData (StructT "Double") = VM.DDouble 0
+typeToData (StructT "Bool") = VM.DBool False
+typeToData (StructT "String") = VM.DString ""
 typeToData (StructT "IO") = VM.DNone -- Hmmm...
-typeToData Char = VM.DChar ' '
-typeToData CPtr = VM.DCPtr 0
+typeToData (StructT "Char") = VM.DChar ' '
+typeToData (StructT "CPtr") = VM.DCPtr 0
 typeToData StructT{} = VM.DMap Data.Map.empty
 typeToData Any = VM.DNone
 typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"

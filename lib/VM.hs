@@ -27,6 +27,7 @@ import Ffi
 import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType, sizeAndAlignmentOfCType)
 import Foreign.LibFFI.FFITypes
 import Foreign.LibFFI
+import Foreign.LibFFI.Internal (CType)
 #endif
 
 import Control.Monad.Reader
@@ -37,7 +38,6 @@ import Data.Text.Internal.Unsafe.Char
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
 import Foreign.C.Types (CChar, CFloat, CInt, CSChar, CUChar)
-import Foreign.LibFFI.Internal (CType)
 import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
@@ -534,12 +534,12 @@ arg (DList x@(DChar _ : _)) = do -- TODO: make generic
     return (argPtr ptr, Nothing)
 arg (DDouble x) = return (argCDouble $ realToFrac x, Nothing)
 arg d@(DMap x) = do
-    if isJust $ Data.Map.lookup "__name" x then do
+    -- if isJust $ Data.Map.lookup "__name" x then do
       let types = map dataCType (Data.Map.elems (clearMap x))
       (argT, _, freeTType) <- newStorableStructArgRet types
       return (argT d, Just freeTType)
-    else
-      error "no"
+    -- else
+    --   error "Tried to pass a map to FFI, but it does not have a __name field"
 arg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
 
 class FfiRet a b where

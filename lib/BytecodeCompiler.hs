@@ -70,7 +70,18 @@ data Let = Let
     deriving (Show)
 
 initCompilerState :: Parser.Program -> CompilerState a
-initCompilerState prog = CompilerState prog [] [] [] 0 [] [] [] "__outside" []
+initCompilerState prog =
+    CompilerState
+        prog
+        []
+        []
+        []
+        0
+        []
+        []
+        []
+        "__outside"
+        []
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -257,9 +268,9 @@ compileExpr (Parser.FuncCall funcName args _) = do
 
     case external of
         Just (External _ ereturnType _ from) -> do
-            retT <- case ereturnType of
-                Parser.StructT name -> do
-                    fields <- getStructFields name
+            retT <- case typeToData ereturnType of
+                DMap _ -> do
+                    fields <- getStructFields from
                     return $ DMap $ Data.Map.fromList $ map (second typeToData) fields
                 _ -> return $ typeToData ereturnType
             args' <- concatMapM compileExpr (reverse args)

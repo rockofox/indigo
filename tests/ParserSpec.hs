@@ -26,8 +26,9 @@ spec = do
             property $
                 \t -> compareTypes t t `shouldBe` True
         xit "Should be false for non-exact matches (except for Any or Fn or Self)" $
-            property $ -- Janky
+            property $
                 \t1 t2 ->
+                    -- Janky
                     notElem Any [t1, t2]
                         && not (isFn t1 || isFn t2)
                         && notElem Self [t1, t2]
@@ -62,11 +63,11 @@ spec = do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String], generics = []}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String"], generics = []}]}])
         it "Should parse a trait declaration with multiple methods" $
             parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, String], generics = []}, FuncDec{name = "show2", types = [Self, String], generics = []}]}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String"], generics = []}, FuncDec{name = "show2", types = [Self, StructT "String"], generics = []}]}])
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right

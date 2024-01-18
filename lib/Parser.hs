@@ -118,6 +118,9 @@ parens = between (symbol "(") (symbol ")")
 curlyBrackets :: Parser a -> Parser a
 curlyBrackets = between (symbol "{") (symbol "}")
 
+squareBrackets :: Parser a -> Parser a
+squareBrackets = between (symbol "[") (symbol "]")
+
 lineComment, blockComment :: Parser ()
 lineComment = L.skipLineComment "#"
 blockComment = L.skipBlockComment "/*" "*/"
@@ -190,21 +193,7 @@ expr = makeExprParser term binOpTable
 validType :: Parser Type
 validType =
     do
-        keyword "Int"
-        return Int
-        <|> do
-            keyword "Float"
-            return Float
-        <|> do
-            keyword "Double"
-            return Double
-        <|> do
-            keyword "Bool"
-            return Bool
-        <|> do
-            keyword "String"
-            return String
-        <|> do
+        do
             keyword "Any"
             return Any
         <|> do
@@ -220,12 +209,6 @@ validType =
         <|> do
             keyword "Self"
             return Self
-        <|> do
-            keyword "Char"
-            return Char
-        <|> do
-            keyword "CPtr"
-            return CPtr
         <|> do
             lookAhead $ satisfy isUpper
             StructT <$> identifier

@@ -145,3 +145,21 @@ cPtr x = x as CPtr
 
 cNullPtr :: CPtr
 cNullPtr _ = 0 as CPtr
+
+# timesM :: Int -> Fn{Int -> IO => IO} -> IO
+# timesM n f = do
+#   if n <= 0 then do
+#   else do
+#     f n
+#     timesM (n - 1), f
+#   end
+# end
+let times (n: Int f: Fn{Int => Any}) => Any = do
+  if n < 0 then do
+  else do
+    f n
+    times ((n) - 1), f
+  end
+end
+
+let void (x: Any) => Any = _
