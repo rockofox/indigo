@@ -1,0 +1,19 @@
+trait Animal
+
+struct Cat = ()
+struct Dog = ()
+
+struct Car = ()
+
+impl Animal for Cat
+impl Animal for Dog
+
+let pet (a: Animal) => IO = do
+    println "petting animal"
+end
+
+let main => IO = do
+    pet Cat {}
+    pet Dog {}
+    pet Car {}
+end

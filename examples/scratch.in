@@ -1,0 +1,33 @@
+# let split ([]: String sep: String) => [String] = [""]
+# let split ((c:cs): String sep: String) => [String] = do
+#     let rest = split cs, sep
+#     if c == sep then do
+#         "" : (split cs, sep)
+#     else do
+#         (c : (head rest)) : (tail rest)
+#     end
+# end
+trait Number
+impl Number for Int
+impl Number for Float
+
+let add<N: Number> (a: N b: N) => N = a + b
+
+let split<T> ([]: [T] sep: T) => [T] = [""]
+
+let printNumList<N: Number> (l: [N] n: N) => IO = do
+    
+end
+
+let xxx (a: Int) => Int = a
+
+# let test (a: A b: B) => C = do
+# end
+
+let main => IO = do
+    println xxx (add 1,2)
+    # println add 1.0, 10
+    # println split [1, 2, 3, 4, 5], 3
+    # printNumList [1, 2, 3, 4, 5], 3
+    # println "Hello, world!"
+end

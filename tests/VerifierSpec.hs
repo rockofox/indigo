@@ -2,16 +2,19 @@ module VerifierSpec (spec) where
 
 import AST (Expr (..), Type (..), exprs, zeroPosition)
 import Control.Applicative qualified as Set
-import Data.List.NonEmpty ()
+import Control.Monad (unless)
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.List.NonEmpty qualified as NE
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.List.NonEmpty qualified as Set
 import Data.Text qualified as T
 import GHC.IO (unsafePerformIO)
 import Parser (parseProgramPure)
-import Test.Hspec (Spec, describe, it, shouldBe)
+import Test.Hspec (Expectation, HasCallStack, Spec, describe, expectationFailure, it, shouldBe)
 import Test.Hspec.Megaparsec (errFancy, fancy, shouldFailWith)
-import Text.Megaparsec (ErrorFancy (ErrorFail))
-import Text.Megaparsec.Error.Builder ()
+import Text.Megaparsec
+import Text.Megaparsec.Error (ErrorFancy (ErrorFail))
+import Text.Megaparsec.Error.Builder
 import Text.RawString.QQ (r)
 import Verifier (verifyProgram)
 
@@ -67,3 +70,56 @@ spec = do
                 |]
             unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
                 `shouldBe` Right ()
+        it "Should success on a list example" $ do
+            let prog =
+                    [r|
+                    trait Number
+                    impl Number for Int
+                    impl Number for Float
+
+                    let listTest<N: Number> (a: [N] b: N) => N = do
+                    end
+
+                    let main => IO = do
+                        println listTest [1, 2, 3], 4
+                    end
+                |]
+            unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
+                `shouldBe` Right ()
+        it "Can fail on list example" $ do
+            let prog =
+                    [r|
+                    trait Number
+                    impl Number for Int
+                    impl Number for Float
+
+                    let listTest<N: Number> (a: [N] b: N) => N = do
+                    end
+
+                    let main => IO = do
+                        println listTest [1, 2, 3], "4"
+                    end
+                |]
+            unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
+                `shouldFailWith` errFancy 282 (fancy $ ErrorFail "Argument types do not match on listTest, expected: [List{N},N], got: [List{Int},String]")
+        it "Can type erase on return type" $ do
+            let prog =
+                    [r|
+                trait Number
+                impl Number for Int
+                impl Number for Float
+
+                let add<N: Number> (a: N b: N) => N = do
+                    a + b
+                end
+                
+                let xxx (a: Int) => Int = do
+                    a
+                end
+
+                let main => IO = do
+                    println xxx (add 1, 2)
+                end
+            |]
+            unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
+                `shouldFailWith` errFancy 377 (fancy $ ErrorFail "Argument types do not match on xxx, expected: [Int], got: [Number]")

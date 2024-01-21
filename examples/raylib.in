@@ -13,9 +13,13 @@ external "libraylib" = do
     SetTargetFPS :: Int -> IO
     GetFrameTime :: Float
     DrawTriangle :: Vector2 -> Vector2 -> Vector2 -> Int -> IO
-    DrawRectangle :: Int -> Int -> Int -> Int -> Int -> IO
+    DrawRectangle :: Int -> Int -> Int -> Int -> RaylibColor -> IO
     DrawPixel :: Int -> Int -> Int -> IO
     DrawLine :: Int -> Int -> Int -> Int -> Int -> IO
+    GetFPS :: Int
+    SetWindowTitle :: String -> IO
+    ColorToHSV :: RaylibColor -> Vector3
+    ColorFromHSV :: Float -> Float -> Float -> RaylibColor
 end
 
 let gray = 0xFF888888
@@ -23,17 +27,28 @@ let violet = 0xFF8800FF
 let screenWidth = 800
 let screenHeight = 450
 
-let loop (tick: Int) = do
+struct RaylibColor = (r: Char, g: Char, b: Char, a: Char)
+struct Vector3 = (x: Float, y: Float, z: Float)
+/* test */
+let loop (tick: Int) => IO = do
     BeginDrawing
     ClearBackground 0
-    DrawText "Hello Indigo", 100, 100, 100, violet
+    times 7, (\i -> do
+        times 5, (\j -> do
+            # DrawRectangle i*100, j*100, 100, 100, RaylibColor { r: (255c/20c) * ^i, g: (255c/20c) * ^j, b: 0c, a: 255c }
+            DrawRectangle i*100, j*100, 100, 100, (ColorFromHSV ^i * 8.0 + ^tick, 1.0, 1.0)
+        end)
+    end)
+    DrawText "Hello Indigo", 100, 100, 100, 0xFF0A0AAA
+    let fps = $GetFPS
+    SetWindowTitle ("Hello Indigo, FPS: " : ^fps)
     EndDrawing
     if WindowShouldClose == 0 then do
         loop (tick + 1)
     else do
     end
 end
-let main = do
+let main => IO = do
     InitWindow screenWidth, screenHeight, "Hello Indigo"
     SetTargetFPS 60
     loop 0

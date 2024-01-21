@@ -54,21 +54,21 @@ spec = do
             compileAndRun "let main => IO = println (1 + 2) * 3" `shouldReturn` "9\n"
     describe "Pattern matching" $ do
         it "Can return the first element of a list" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
+            compileAndRun "t :: [Int] -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
         it "Can return the first two" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
+            compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
         it "Can return the excess" $ do
-            compileAndRun "t :: List{Int} -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
+            compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
         it "Can detect zero elements" $ do
             compileAndRun
-                [r|t :: List{Int} -> Int
+                [r|t :: [Int] -> Int
                             t [] = 0
                             t (x:xs) = x
                             let main => IO = println (t [])|]
                 `shouldReturn` "0\n"
         it "Can detect one element" $ do
             compileAndRun
-                [r|t :: List{Int} -> Int
+                [r|t :: [Int] -> Int
                             t [] = 0
                             t (x:[]) = 1
                             t (x:xs) = x
@@ -120,9 +120,9 @@ spec = do
         it "Can find function based on type with lists" $ do
             compileAndRun
                 [r|
-                f :: List{Int} -> Int
+                f :: [Int] -> Int
                 f x = sum x
-                f :: List{String} -> String
+                f :: [String] -> String
                 f x = x
                 let main => IO = do
                     println f [1, 2, 3]
@@ -303,8 +303,8 @@ spec = do
         it "Pattern matching" $ do
             compileAndRun
                 [r|
-                    let head ([]: List{Any}) = 0
-                    let head ((x:xs): List{Any}) = x
+                    let head ([]: [Any]) = 0
+                    let head ((x:xs): [Any]) = x
                     print head [1,2,3]
                 |]
                 `shouldReturn` "1"
@@ -330,13 +330,13 @@ spec = do
 -- it "Can find function based on type with lists, multiple definitions and pattern matching" $ do
 --     compileAndRun
 --         [r|
---         f :: List{Int} -> Int
+--         f :: [Int] -> Int
 --         f [] = 0
 --         f (x:xs) = x + (f xs)
---         f :: List{Float} -> Float
+--         f :: [Float] -> Float
 --         # f [] = 0.0
 --         f (x:xs) = x + ((f xs) as Float)
---         # f :: List{String} -> String
+--         # f :: [String] -> String
 --         # f x = x
 --         let main => IO = do
 --             println f [1, 2, 3]

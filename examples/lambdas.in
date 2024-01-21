@@ -1,0 +1,6 @@
+let main => IO = do
+    let square (x:Int) = x * x
+    let squareAll (xs:[Int]) = square 2
+    let strict = $12
+    println map (\x -> squareAll x), [1, 2, 3]
+end

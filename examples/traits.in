@@ -1,0 +1,16 @@
+trait Animal = do
+    makeNoise :: Self -> IO
+end
+
+impl Animal for Dog = do
+    makeNoise self = println "Woof"
+end
+
+impl Animal for Cat = do
+    makeNoise self = println "Meow"
+end
+
+let main => IO = do
+    makeNoise (Dog {})
+    makeNoise (Cat {})
+end

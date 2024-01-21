@@ -204,8 +204,8 @@ validType =
                 ret <- validType
                 return Fn{args = args, ret = ret}
         <|> do
-            keyword "List"
-            curlyBrackets $ List <$> validType
+            squareBrackets $ do
+                List <$> validType
         <|> do
             keyword "Self"
             return Self

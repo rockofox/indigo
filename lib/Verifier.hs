@@ -57,7 +57,11 @@ listPatternToBindings :: Expr -> Type -> [VBinding]
 listPatternToBindings (ListPattern exprs) (List t) = do
     let singulars = init exprs
     let Var restName _ = last exprs
-    map (\(Var name _) -> VBinding{name = name, args = [], ttype = t, generics = []}) singulars ++ [VBinding{name = restName, args = [], ttype = List t, generics = []}]
+    concatMap (\case (Var name _) -> [VBinding{name = name, args = [], ttype = t, generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = List t, generics = []}]
+listPatternToBindings (ListPattern exprs) (StructT "String") = do
+    let singulars = init exprs
+    let Var restName _ = last exprs
+    concatMap (\case (Var name _) -> [VBinding{name = name, args = [], ttype = StructT "Char", generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = StructT "String", generics = []}]
 -- listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
 listPatternToBindings x y = error $ "listPatternToBinding called with non-list-pattern: " ++ show x ++ " " ++ show y
 
@@ -73,21 +77,25 @@ typeOf' (FuncCall name _ _) = do
 typeOf' x = return $ typeOf x
 
 compareTypes' :: Type -> Type -> [AST.GenericExpr] -> StateT VerifierState IO Bool
-compareTypes' aT (StructT b) generics = do
-    case aT of
-        StructT a -> do
-            let gen = find (\(GenericExpr name _) -> name == b) generics
-            case gen of
-                Just (GenericExpr _ (Just (StructT t))) -> compStructs a t
-                Just (GenericExpr _ _) -> return True
-                Nothing -> compStructs a b
-        _ -> do
-            -- return $ isJust $ find (\(GenericExpr name _) -> name == b) generics
-            let gen = find (\(GenericExpr name _) -> name == b) generics
-            case gen of
-                Just (GenericExpr _ (Just t)) -> return $ compareTypes aT t
-                Just (GenericExpr _ Nothing) -> return True
-                Nothing -> return False
+compareTypes' (List x) (List y) generics = compareTypes' x y generics
+compareTypes' (List Any) (StructT "String") _ = return True
+compareTypes' (List (StructT "Char")) (StructT "String") _ = return True
+compareTypes' (StructT "String") (List (StructT "Char")) _ = return True
+compareTypes' (StructT "String") (List Any) _ = return True
+compareTypes' aT (StructT b) generics = case aT of
+    StructT a -> do
+        let gen = find (\(GenericExpr name _) -> name == b) generics
+        case gen of
+            Just (GenericExpr _ (Just (StructT t))) -> compStructs a t
+            Just (GenericExpr _ _) -> return True
+            Nothing -> compStructs a b
+    _ -> do
+        -- return $ isJust $ find (\(GenericExpr name _) -> name == b) generics
+        let gen = find (\(GenericExpr name _) -> name == b) generics
+        case gen of
+            Just (GenericExpr _ (Just t)) -> return $ compareTypes aT t
+            Just (GenericExpr _ Nothing) -> return True
+            Nothing -> return False
   where
     compStructs :: String -> String -> StateT VerifierState IO Bool
     compStructs a b = do
@@ -95,21 +103,27 @@ compareTypes' aT (StructT b) generics = do
         let ttypes' = ttypes rootFrame
         let a' = Map.findWithDefault (VType{implements = []}) a ttypes'
         let b' = Map.findWithDefault (VType{implements = []}) b ttypes'
-        return $ a `elem` implements b' || b `elem` implements a' || a == b
-compareTypes' a b _ = do
-    return $ compareTypes a b
+        return $ b `elem` implements a' || a == b
+compareTypes' a b _ = return $ compareTypes a b
 
-allTheSame :: (Eq a) => [a] -> Bool
-allTheSame xs = all (== head xs) (tail xs)
+allTheSame :: [Type] -> Bool
+allTheSame xs = all (compareSame $ head xs) (tail xs)
+  where
+    compareSame :: Type -> Type -> Bool
+    compareSame (List x) (List y) = compareSame x y
+    compareSame x y = x == y
 
 functionTypesAcceptable :: [Type] -> [Type] -> [AST.GenericExpr] -> StateT VerifierState IO Bool
 functionTypesAcceptable use def generics = do
     let genericNames = map (\(GenericExpr name _) -> name) generics
     let useAndDef = zip use def
-    let udStructs = filter (\(a, b) -> case (a, b) of (_, StructT _) -> True; _ -> False) useAndDef
-    let udStructsGeneric = filter (\(a, StructT b) -> b `elem` genericNames) udStructs
-    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\(a, StructT b) -> b == x) udStructsGeneric)) genericNames
-    let genericsMatch = all (\(genericName, types) -> allTheSame types) groupedUdStructsGeneric
+    -- let udStructs = filter (\(a, b) -> case (a, b) of (_, StructT _) -> True; (_, List (StructT _)) -> True; _ -> False) useAndDef
+    let udStructs = concatMap (\(a, b) -> case (a, b) of (_, StructT _) -> [(a, b)]; (List c'@(StructT _), List c@(StructT _)) -> [(c', c)]; _ -> []) useAndDef
+    let udStructsGeneric = filter (\case (_, StructT b) -> b `elem` genericNames; (_, List (StructT b)) -> b `elem` genericNames) udStructs
+    -- traceM $ "udStructsGeneric: " ++ show udStructsGeneric
+    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, StructT b) -> b == x; (_, List (StructT b)) -> b == x) udStructsGeneric)) genericNames
+    -- traceM $ "groupedUdStructsGeneric: " ++ show groupedUdStructsGeneric
+    let genericsMatch = all (\(_, types) -> allTheSame types) groupedUdStructsGeneric
     typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
     return $ typesMatch' && genericsMatch
 
@@ -180,11 +194,23 @@ verifyExpr (FuncDef name args body) = do
             argToBindings (l@ListPattern{}, t) = listPatternToBindings l t
             argToBindings _ = []
         Nothing -> return [FancyError 0 (Set.singleton (ErrorFail $ "Function " ++ name ++ " is missing a declaration"))]
-verifyExpr (FuncDec name types generics) = do
+verifyExpr (FuncDec name dtypes generics) = do
     currentFrame' <- currentFrame
+    let types = init dtypes ++ typeErase [last dtypes]
     let (arguments, returnType) = if null types then ([], Any) else (init types, last types)
     modify (\state -> state{frames = currentFrame'{bindings = Set.insert (VBinding{name = name, args = arguments, ttype = returnType, generics}) (bindings (head (frames state)))} : tail (frames state)})
     return []
+  where
+    typeErase :: [Type] -> [Type]
+    typeErase = map typeErase'
+      where
+        typeErase' :: Type -> Type
+        typeErase' (StructT name) =
+            case find (\(GenericExpr name' _) -> name' == name) generics of
+                Just (GenericExpr _ (Just t)) -> t
+                Just (GenericExpr _ Nothing) -> Any
+                _ -> StructT name
+        typeErase' t = t
 -- verifyExpr (DoBlock exprs) = verifyMultiple exprs
 verifyExpr (DoBlock exprs) = concatMapM verifyExpr' exprs
   where
@@ -225,8 +251,7 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     eArgs <- concatMapM verifyExpr args
     argumentTypes <- mapM typeOf' args
     fta <- case matchingBinding of
-        Just binding -> do
-            functionTypesAcceptable argumentTypes binding.args binding.generics
+        Just binding -> functionTypesAcceptable argumentTypes binding.args binding.generics
         Nothing -> return False
     eNoMatchi <- case matchingBinding of
         Just binding -> do

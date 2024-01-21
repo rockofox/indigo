@@ -1,5 +1,5 @@
 #!../dist/indigo
-mysum :: List{Float} -> Float
+mysum :: [Float] -> Float
 mysum [] = 0.0
 mysum (x:xs) = x + mysum xs
 

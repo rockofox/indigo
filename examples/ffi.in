@@ -1,10 +1,10 @@
 external "sayhello" = do
     greet :: String -> IO
-    printNumbers :: List{Int} -> Int -> IO
+    printNumbers :: [Int] -> Int -> IO
     printf :: String -> Int -> IO
 end
 external "__default" = do
-    puts :: List{Char} -> IO
+    puts :: [Char] -> IO
 end
 
 let main = do

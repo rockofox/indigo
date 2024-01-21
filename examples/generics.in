@@ -1,0 +1,33 @@
+trait Animal
+
+struct Dog = (name: String)
+struct Cat = (name: String)
+
+impl Animal for Dog
+impl Animal for Cat
+
+trait Number
+impl Number for Int
+impl Number for Float
+
+let kiss<T: Animal> (a: T b: T) => IO = do
+    println a.name
+end
+
+let bla<T: Number> (a: T b: T) => T = do
+    a + b
+end
+
+let main => IO = do
+    let a = Dog { name: "dog" }
+    let b = Cat { name: "cat" }
+    let square (x: Int) = x * x
+    let x = 1
+    let y = 2.0
+    kiss Dog{ name: "dog" }, Dog{ name: "dog" }
+    kiss Cat{ name: "cat" }, Cat{ name: "cat" }
+    # kiss a, b
+    println bla 1.0,4.0
+
+    # print square x
+end

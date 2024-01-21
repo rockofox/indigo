@@ -757,17 +757,19 @@ runInstruction (Concat n) =
     stackPopN n >>= \x -> do
         stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> (map DChar string); el -> [el]) x
         stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
-runInstruction Index = stackPopN 2 >>= \(DInt i : DList l : _) -> stackPush $ l !! i
+runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ list !! index; [DInt index, DString str] -> stackPush $ DChar $ str !! index; x -> error $ "Invalid types for index: " ++ show x
 runInstruction Slice = do
     start <- stackPop
     end <- stackPop
-    DList list <- stackPop
+    wasString <- stackPeek >>= \case DString _ -> return True; _ -> return False
+    list <- stackPop >>= \case DList l -> return l; DString s -> return $ map DChar s; _ -> error "Invalid type for slice"
     stackPush $ case (end, start) of
         (DInt start', DInt end') -> DList $ slice start' (Just end') list
         (DInt start', DNone) -> DList $ slice start' Nothing list
         (DNone, DInt end') -> DList $ slice 0 (Just end') list
         (DNone, DNone) -> DList $ slice 0 Nothing list
         _ -> error "Invalid slice"
+    when wasString $ stackPop >>= \(DList x) -> stackPush $ DString $ map (\(DChar char) -> char) x
   where
     slice :: Int -> Maybe Int -> [a] -> [a]
     slice start maybeEnd xs

@@ -31,18 +31,18 @@ struct IO = (inner: Any)
 
 let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 
-map :: Fn{Any => Any} -> List{Any} -> List{Any}
+map :: Fn{Any => Any} -> [Any] -> [Any]
 map fun [] = []
 map fun (x:xs) = (fun x) : (map fun, xs)
 
-mapM :: Fn{Any => IO} -> List{Any} -> IO
+mapM :: Fn{Any => IO} -> [Any] -> IO
 mapM fun [] = []
 mapM fun (x:xs) = do
     fun x
     mapM fun, xs
 end
 
-filter :: Fn{Any => Bool} -> List{Any} -> List{Any}
+filter :: Fn{Any => Bool} -> [Any] -> [Any]
 filter fun [] = []
 filter fun (x:xs) = do
     if fun x then
@@ -51,21 +51,21 @@ filter fun (x:xs) = do
         filter fun, xs
 end
 
-foldl :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
+foldl :: Fn{Any -> Any => Any} -> Any -> [Any] -> Any
 foldl fun acc [] = acc
 foldl fun acc (x:xs) = foldl (fun), (fun acc, x), xs
 
-foldr :: Fn{Any -> Any => Any} -> Any -> List{Any} -> Any
+foldr :: Fn{Any -> Any => Any} -> Any -> [Any] -> Any
 foldr fun acc [] = acc
 foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
 
 add x y = x + y
 
-sum :: List{Int} -> Int
+sum :: [Int] -> Int
 sum [] = 0
 sum (x:xs) = x + sum xs
 
-sum :: List{Float} -> Float
+sum :: [Float] -> Float
 sum [] = 0.0
 sum (x:xs) = x + sum xs
 
@@ -119,7 +119,7 @@ randomInt a b = do
   (r * ((((b) - a) + a) as Float)) as Int
 end
 
-range :: Any -> Any -> Any -> List{Any}
+range :: Any -> Any -> Any -> [Any]
 range a b inc = do
   if a >= b then do
     []
@@ -163,3 +163,6 @@ let times (n: Int f: Fn{Int => Any}) => Any = do
 end
 
 let void (x: Any) => Any = _
+
+let head ((x:xs): [Any]) => Any = x
+let tail ((_:xs): [Any]) => [Any] = xs
