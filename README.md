@@ -23,10 +23,9 @@ map (`*`2), [2, 4, 6, 8]     # [4, 8, 12, 16]
 * Types
 * Function Composition/Pipelines
 * Imports
+* Generics
 
 ### Roadmap
-* Documentation
-* Generics
-* Contracts/Constraints
-* Uniform Function Call Syntax
+* More advanced type system (e.g refinement types)
+* Uniform Function Call Syntax (considered/researching)
 * Named and optional parameters
