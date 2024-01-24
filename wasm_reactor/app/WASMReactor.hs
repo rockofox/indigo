@@ -26,7 +26,7 @@ import Foreign
 import Foreign.C (CString, newCString, peekCStringLen)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar)
-import Parser (CompilerFlags (CompilerFlags), initCompilerFlags, parseProgram)
+import Parser (CompilerFlags (CompilerFlags), exprs, initCompilerFlags, parseProgram)
 import Parser qualified
 import Text.Megaparsec (errorBundlePretty)
 import VM
@@ -39,6 +39,7 @@ import VM
     , runVM
     , runVMVM
     )
+import Verifier (verifyProgram)
 
 -- TODO: Put this stuff into a seperate file
 runProgramRaw :: Ptr CChar -> Int -> IO ()
@@ -56,21 +57,25 @@ runProgramRaw progPtr progLen = do
 
 runProgramRawBuffered :: Ptr CChar -> Int -> Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
 runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
-    program <- peekCStringLen (progPtr, progLen)
+    programStr <- peekCStringLen (progPtr, progLen)
     input <- peekCStringLen (inputPtr, inputLen)
-    let p = parseProgram (Data.Text.pack program) Parser.initCompilerFlags
+    let p = parseProgram (Data.Text.pack programStr) Parser.initCompilerFlags
     case p of
         Left err -> error $ errorBundlePretty err
         Right program -> do
-            xxx <- evalStateT (compileProgram program) (initCompilerState program)
-            let xxxPoint = locateLabel xxx "main"
-            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}}
-            let output' = BS.pack $ output $ ioBuffer vm
-            BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
-                outputPtr <- mallocBytes len
-                poke outputPtrPtr outputPtr
-                copyBytes outputPtr buf len
-                pure len
+            verified <- verifyProgram "" (Data.Text.pack programStr) (exprs program)
+            case verified of
+                Left err -> error $ errorBundlePretty err
+                Right _ -> do
+                    xxx <- evalStateT (compileProgram program) (initCompilerState program)
+                    let xxxPoint = locateLabel xxx "main"
+                    vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}}
+                    let output' = BS.pack $ output $ ioBuffer vm
+                    BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
+                        outputPtr <- mallocBytes len
+                        poke outputPtrPtr outputPtr
+                        copyBytes outputPtr buf len
+                        pure len
 
 foreign export ccall mallocPtr :: IO (Ptr (Ptr a))
 
