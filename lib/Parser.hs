@@ -95,10 +95,17 @@ binOpTable =
     , [binary ":" ListConcat]
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
+    , [binaryAny binaryFunctionCall]
     ]
+
+binaryFunctionCall :: String -> Expr -> Expr -> Expr
+binaryFunctionCall f a b = FuncCall f [a, b] anyPosition
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
+
+binaryAny :: (String -> Expr -> Expr -> Expr) -> Operator Parser Expr
+binaryAny f = InfixL (f <$> identifier)
 
 binaryR :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binaryR name f = InfixR (f <$ symbol name)
@@ -340,7 +347,13 @@ struct = do
     name <- extra
     symbol "="
     fields <- parens $ structField `sepBy` symbol ","
-    return $ Struct name fields
+    refinementSrc <- lookAhead $ optional $ do
+        keyword "satisfies"
+        parens $ many (noneOf [')'])
+    refinement <- optional $ do
+        keyword "satisfies"
+        parens expr
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc}
   where
     structField = do
         fieldName <- identifier <?> "field name"
@@ -350,6 +363,7 @@ struct = do
 
 structLit :: Parser Expr
 structLit = do
+    start <- getOffset
     name <- extra
     symbol "{"
     fields <-
@@ -362,7 +376,8 @@ structLit = do
             )
             (symbol ",")
     symbol "}"
-    return $ StructLit name fields
+    end <- getOffset
+    return $ StructLit name fields (Position (start, end))
 
 arrayAccess :: Parser Expr
 arrayAccess = do

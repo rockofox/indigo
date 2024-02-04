@@ -5,6 +5,7 @@ module Verifier where
 
 import AST
 import BytecodeCompiler (preludeFile)
+import BytecodeCompiler qualified
 import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
@@ -16,13 +17,16 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Set qualified as Set
 import Data.Text (Text, pack)
 import Data.Text qualified as T
+import Data.Vector qualified as V
 import Data.Void
 import Debug.Trace
 import Parser
 import Text.Megaparsec hiding (State)
 import Util
+import VM (printAssembly)
+import VM qualified
 
-data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool} deriving (Show)
+data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool, structDecs :: [Expr]} deriving (Show)
 
 data VerifierFrame = VerifierFrame
     { bindings :: Set.Set VBinding
@@ -187,6 +191,28 @@ initVerifierState =
 currentFrame :: StateT VerifierState IO VerifierFrame
 currentFrame = head . frames <$> get
 
+runRefinement :: Expr -> Expr -> IO Bool
+runRefinement refinement value = do
+    let prog =
+            Program
+                [ FuncDec "__refinement" [Any, StructT "Bool"] []
+                , FuncDef "__refinement" [Var "it" zeroPosition] refinement
+                , FuncDec "main" [StructT "IO"] []
+                , FuncDef
+                    "main"
+                    []
+                    ( DoBlock
+                        [ FuncCall "__refinement" [value] zeroPosition
+                        ]
+                    )
+                ]
+    compiled <- evalStateT (BytecodeCompiler.compileProgram prog) (BytecodeCompiler.initCompilerState prog)
+    let mainPc = BytecodeCompiler.locateLabel compiled "main"
+    result <- VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    return $ case VM.stack result of
+        [VM.DBool b] -> b
+        _ -> error $ "Refinement did not return a boolean, but " ++ show (VM.stack result) ++ " instead"
+
 verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram name input exprs = evalStateT (verifyProgram' name input exprs) initVerifierState
 
@@ -285,6 +311,17 @@ verifyExpr (Var name (Position (start, _))) = do
     matchingBinding <- findMatchingBinding name
     return [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding]
 verifyExpr (StructAccess _ _) = return [] -- TODO
+verifyExpr s@(Struct{}) = modify (\state -> state{structDecs = s : structDecs state}) >> return []
+verifyExpr sl@(StructLit structName _ (Position (start, _))) = do
+    struct <- gets structDecs <&> find (\case Struct{name = name'} -> name' == structName; _ -> False)
+    case struct of
+        Nothing -> return [FancyError 0 (Set.singleton (ErrorFail $ "Could not find relevant struct for " ++ structName))]
+        Just st -> do
+            case st.refinement of
+                Just rf -> do
+                    r <- liftIO $ runRefinement rf sl
+                    (if r then return [] else return [FancyError start (Set.singleton (ErrorFail $ "Refinement failed (" ++ st.refinementSrc ++ ")"))])
+                Nothing -> return []
 verifyExpr (Impl trait for _) = do
     rootFrame <- head . frames <$> get
     modify (\state -> state{frames = rootFrame{ttypes = Map.alter (\case Just (VType{implements = impls}) -> Just (VType{implements = trait : impls}); Nothing -> Just (VType{implements = [trait]})) for (ttypes rootFrame)} : tail (frames state)})

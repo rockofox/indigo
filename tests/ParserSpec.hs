@@ -58,7 +58,7 @@ spec = do
         it "Member access" $ do
             parseProgram "bello{}.name" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [StructAccess (StructLit "bello" []) (Var "name" anyPosition)])
+                    (Program [StructAccess (StructLit "bello" [] anyPosition) (Var "name" anyPosition)])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags

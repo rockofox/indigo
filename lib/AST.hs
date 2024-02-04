@@ -40,8 +40,8 @@ data Expr
     | Discard Expr
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
     | Ref Expr
-    | Struct {name :: String, fields :: [(String, Type)]}
-    | StructLit String [(String, Expr)]
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String}
+    | StructLit String [(String, Expr)] Position
     | StructAccess Expr Expr
     | ListLit [Expr]
     | ListPattern [Expr]
@@ -98,8 +98,8 @@ children (FloatLit _) = []
 children (Discard a) = [a]
 children (Import{}) = []
 children (Ref a) = [a]
-children (Struct _ _) = []
-children (StructLit _ a) = map snd a
+children (Struct{}) = []
+children (StructLit _ a _) = map snd a
 children (StructAccess a b) = [a, b]
 children (ListLit a) = a
 children (ListPattern a) = a
@@ -220,8 +220,8 @@ typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
 typeOf (Discard _) = error "Cannot infer type of discard"
 typeOf (Import{}) = error "Cannot infer type of import"
 typeOf (Ref _) = error "Cannot infer type of ref"
-typeOf (Struct _ _) = error "Cannot infer type of struct"
-typeOf (StructLit x _) = StructT x
+typeOf (Struct{}) = error "Cannot infer type of struct"
+typeOf (StructLit x _ _) = StructT x
 typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo x _) = typeOf x

@@ -199,7 +199,7 @@ getStructFields structName = do
     structDecs' <- gets structDecs
     let structDec = fromJust $ find (\x -> Parser.name x == structName) structDecs'
     let fields = case structDec of
-            Parser.Struct _ fields' -> fields'
+            Parser.Struct{fields = fields'} -> fields'
             _ -> error "Not a struct"
     return fields
 
@@ -405,7 +405,7 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
-compileExpr st@(Parser.Struct _ fields) = do
+compileExpr st@(Parser.Struct{fields}) = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
     return []
@@ -418,7 +418,7 @@ compileExpr st@(Parser.Struct _ fields) = do
         _ <- compileExpr trait
         _ <- compileExpr impl
         return ()
-compileExpr (Parser.StructLit name fields) = do
+compileExpr (Parser.StructLit name fields _) = do
     fields' <- mapM (compileExpr . snd) fields
     let names = map (DString . fst) fields
     let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
