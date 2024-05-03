@@ -89,13 +89,16 @@ allocId = do
     modify (\s' -> s'{lastLabel = s + 1})
     return s
 
+preludeExpr :: IO [Parser.Expr]
+preludeExpr = do
+    i <- liftIO preludeFile
+    case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
+        Left err -> error $ "Parse error: " ++ errorBundlePretty err
+        Right (Parser.Program progExpr) -> return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
+
 compileProgram :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgram (Parser.Program expr) = do
-    prelude <- do
-        i <- liftIO preludeFile
-        case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
-            Left err -> error $ "Parse error: " ++ errorBundlePretty err
-            Right (Parser.Program progExpr) -> return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
+    prelude <- liftIO preludeExpr
     prelude' <- concatMapM compileExpr prelude
     freePart <- concatMapM compileExpr expr
     createVirtualFunctions
@@ -218,27 +221,41 @@ implsFor structName = do
     return $ map Parser.trait impls''
 
 compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
-compileExpr (Parser.Add x y) = doBinOp x y Add
-compileExpr (Parser.Sub x y) = doBinOp x y Sub
-compileExpr (Parser.Mul x y) = doBinOp x y Mul
-compileExpr (Parser.Div x y) = doBinOp x y Div
-compileExpr (Parser.Modulo x y) = doBinOp x y Mod
-compileExpr (Parser.Power x y) = doBinOp x y Pow
-compileExpr (Parser.Gt x y) = doBinOp x y Gt
-compileExpr (Parser.Lt x y) = doBinOp x y Lt
-compileExpr (Parser.Ge x y) = doBinOp x y Lt >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Le x y) = doBinOp x y Gt >>= \x' -> return (x' ++ [Not])
+compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y . last
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq x y) = doBinOp x y Eq
-compileExpr (Parser.Neq x y) = doBinOp x y Eq >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.And x y) = doBinOp x y And
-compileExpr (Parser.Or x y) = doBinOp x y Or
+compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y . last
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit x) = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
 compileExpr Parser.Placeholder = return []
+compileExpr (Parser.FuncCall "unsafeAdd" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Add])
+compileExpr (Parser.FuncCall "unsafeSub" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Sub])
+compileExpr (Parser.FuncCall "unsafeMul" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mul])
+compileExpr (Parser.FuncCall "unsafeDiv" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Div])
+compileExpr (Parser.FuncCall "unsafeMod" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mod])
+compileExpr (Parser.FuncCall "unsafePow" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Pow])
+compileExpr (Parser.FuncCall "unsafeGt" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Gt])
+compileExpr (Parser.FuncCall "unsafeLt" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Lt])
+compileExpr (Parser.FuncCall "unsafeGe" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Lt, Not])
+compileExpr (Parser.FuncCall "unsafeLe" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Gt, Not])
+compileExpr (Parser.FuncCall "unsafeEq" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Eq])
+compileExpr (Parser.FuncCall "unsafeNeq" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Eq, Not])
+compileExpr (Parser.FuncCall "unsafeAnd" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [And])
+compileExpr (Parser.FuncCall "unsafeOr" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Or])
 compileExpr (Parser.FuncCall "unsafePrint" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
 compileExpr (Parser.FuncCall "unsafeGetLine" _ _) = return [Builtin GetLine]
 compileExpr (Parser.FuncCall "unsafeGetChar" _ _) = return [Builtin GetChar]

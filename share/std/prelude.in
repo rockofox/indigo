@@ -1,33 +1,46 @@
 struct IO = (inner: Any)
 
-`+` :: Any -> Any -> Any
-`+` x y = x + y
-`-` :: Any -> Any -> Any
-`-` x y = (x) - y
-`*` :: Any -> Any -> Any
-`*` x y = x * y
-`/` :: Any -> Any -> Any
-`/` x y = x / y
-`<` :: Any -> Any -> Any
-`<` x y = x < y
-`>` :: Any -> Any -> Any
-`>` x y = x > y
-`<=` :: Any -> Any -> Any
-`<=` x y = x <= y
-`>=` :: Any -> Any -> Any
-`>=` x y = x >= y
-`==` :: Any -> Any -> Any
-`==` x y = x == y
-`!=` :: Any -> Any -> Any
-`!=` x y = x != y
-`&&` :: Any -> Any -> Any
-`&&` x y = x && y
-`||` :: Any -> Any -> Any
-`||` x y = x || y
-`%` :: Any -> Any -> Any
-`%` x y = x % y
-`!` :: Any -> Any
-`!` x = !x
+# `+` :: Any -> Any -> Any
+# `+` x y = x + y
+# `-` :: Any -> Any -> Any
+# `-` x y = (x) - y
+# `*` :: Any -> Any -> Any
+# `*` x y = x * y
+# `/` :: Any -> Any -> Any
+# `/` x y = x / y
+# `<` :: Any -> Any -> Any
+# `<` x y = x < y
+# `>` :: Any -> Any -> Any
+# `>` x y = x > y
+# `<=` :: Any -> Any -> Any
+# `<=` x y = x <= y
+# `>=` :: Any -> Any -> Any
+# `>=` x y = x >= y
+# `==` :: Any -> Any -> Any
+# `==` x y = x == y
+# `!=` :: Any -> Any -> Any
+# `!=` x y = x != y
+# `&&` :: Any -> Any -> Any
+# `&&` x y = x && y
+# `||` :: Any -> Any -> Any
+# `||` x y = x || y
+# `%` :: Any -> Any -> Any
+# `%` x y = x % y
+# `!` :: Any -> Any
+# `!` x = !x
+let + (x: Int y: Int) => Int = unsafeAdd x, y
+let - (x: Int y: Int) => Int = unsafeSub x, y
+let * (x: Int y: Int) => Int = unsafeMul x, y
+let / (x: Int y: Int) => Int = unsafeDiv x, y
+let `<` (x: Int y: Int) => Int = unsafeLt x, y
+let `>` (x: Int y: Int) => Int = unsafeGt x, y
+let `<=` (x: Int y: Int) => Int = unsafeLe x, y
+let `>=` (x: Int y: Int) => Int = unsafeGe x, y
+let == (x: Int y: Int) => Int = unsafeEq x, y
+let != (x: Int y: Int) => Int = unsafeNe x, y
+let && (x: Int y: Int) => Int = unsafeAnd x, y
+let || (x: Int y: Int) => Int = unsafeOr x, y
+let % (x: Int y: Int) => Int = unsafeMod x, y
 
 let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 

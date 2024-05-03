@@ -86,11 +86,11 @@ spec = do
         it "Should parse operators escaped using gravis in dec correctly" $ do
             parseProgram
                 [r|
-                `+` :: Any -> Any -> Any
+                + :: Any -> Any -> Any
                 `-` :: Any -> Any -> Any
-                `*` :: Any -> Any -> Any
-                `/` :: Any -> Any -> Any
-                `==` :: Any -> Any -> Any
+                * :: Any -> Any -> Any
+                / :: Any -> Any -> Any
+                == :: Any -> Any -> Any
                 |]
                 parserCompilerFlags
                 `shouldBe` Right

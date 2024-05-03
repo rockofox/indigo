@@ -27,3 +27,4 @@ cabal.project.local~
 *.wat
 *.wasm
 result
+*.tix

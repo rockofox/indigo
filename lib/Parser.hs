@@ -8,6 +8,7 @@ module Parser (Expr (..), Program (..), parseProgram', parseProgramPure, ParserS
 -- module Parser where
 
 import AST
+import Control.Applicative.Combinators (someTill)
 import Control.Monad qualified
 import Control.Monad.Combinators
     ( between
@@ -56,6 +57,7 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
+import Text.ParserCombinators.ReadP (many1)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -96,10 +98,15 @@ binOpTable =
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
     , [binaryAny binaryFunctionCall]
+    -- , [prefixAny pFunctionCall]
+    -- , [postfixAny pFunctionCall]
     ]
 
 binaryFunctionCall :: String -> Expr -> Expr -> Expr
 binaryFunctionCall f a b = FuncCall f [a, b] anyPosition
+
+pFunctionCall :: String -> Expr -> Expr
+pFunctionCall f a = FuncCall f [a] anyPosition
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
@@ -113,6 +120,12 @@ binaryR name f = InfixR (f <$ symbol name)
 prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
 prefix name f = Prefix (f <$ symbol name)
 postfix name f = Postfix (f <$ symbol name)
+
+prefixAny :: (String -> Expr -> Expr) -> Operator Parser Expr
+prefixAny f = Prefix (f <$> identifier)
+
+postfixAny :: (String -> Expr -> Expr) -> Operator Parser Expr
+postfixAny f = Postfix (f <$> identifier)
 
 ref :: Parser Expr
 ref = do
@@ -162,7 +175,7 @@ identifier = do
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
         else return name
   where
-    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_')
+    p = some (alphaNumChar <|> char '_' <|> oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '$', '%', '^', '~'])
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -245,11 +258,7 @@ funcDef = do
     FuncDef name args <$> expr <?> "function body"
 
 gravis :: Parser String
-gravis = do
-    symbol "`"
-    name <- many $ noneOf ['`']
-    symbol "`"
-    return name
+gravis = lexeme $ char '`' *> someTill L.charLiteral (char '`')
 
 funcCall :: Parser Expr
 funcCall = do
@@ -262,7 +271,7 @@ funcCall = do
 letExpr :: Parser Expr
 letExpr = do
     keyword "let"
-    name <- identifier
+    name <- identifier <|> gravis
     symbol "="
     value <- recover expr
     state <- get
@@ -308,7 +317,7 @@ generic = do
 combinedFunc :: Parser Expr
 combinedFunc = do
     keyword "let"
-    name <- identifier <?> "function name"
+    name <- identifier <|> gravis <?> "function name"
     generics <- fromMaybe [] <$> optional generic
     (args, argTypes) <- parens argsAndTypes <|> argsAndTypes
     returnType <- optional (symbol "=>" >> validType <?> "return type")

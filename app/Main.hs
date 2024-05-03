@@ -42,6 +42,7 @@ data CmdOptions = Options
     , breakpoints :: Maybe String
     , showTime :: Bool
     , showVersion :: Bool
+    , noVerify :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser CmdOptions
@@ -67,6 +68,7 @@ optionsParser =
         <*> optional (strOption (long "breakpoints" <> short 't' <> help "Breakpoints for the VM to trace (space separated list of program counter indices). -1 to trace on every instruction"))
         <*> switch (long "profile" <> short 'p' <> help "Show time spent parsing, compiling and running")
         <*> switch (long "version" <> short 'V' <> help "Show version")
+        <*> switch (long "no-verify" <> short 'n' <> help "Don't verify the program")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -97,25 +99,29 @@ inputFileBinary input = case input of
 potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = if showTime then timeItNamed msg action else action
 
-parseAndVerify :: String -> T.Text -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Void, Maybe Program) Program)
-parseAndVerify name t cf = do
-    -- let (result, state) = runIdentity $ runStateT (parseProgramCf' t initCompilerFlags) (ParserState{compilerFlags = cf, validLets = [], validFunctions = []})
-    let result = parseProgram t cf
+parseAndVerify name input compilerFlags =
+    return
+        ( do
+            let result = parseProgram (T.pack input) initCompilerFlags
+            case result of
+                Left err -> return $ Left (err, Nothing)
+                Right program' -> do
+                    let (Program exprs) = program'
+                    verifierResult <- verifyProgram name (T.pack input) exprs
+                    case verifierResult of
+                        Left err -> return $ Left (err, Just program')
+                        Right _ -> return $ Right program'
+        )
+
+parseNoVerify name input compilerFlags = return $ do
+    let result = parseProgram (T.pack input) initCompilerFlags
     case result of
         Left err -> return $ Left (err, Nothing)
-        Right program' -> do
-            let (Program exprs) = program'
-            verifierResult <- verifyProgram name t exprs
-            case verifierResult of
-                Left err -> return $ Left (err, Just program')
-                Right _ -> return $ Right program'
-
--- parse :: String -> String -> CompilerFlags -> IO (Either (ParseErrorBundle T.Text Data.Void.Void) (Program))
-parse name input compilerFlags = return $ parseAndVerify name (T.pack input) initCompilerFlags
+        Right program' -> return $ Right program'
 
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode breakpoints showTime showVersion <-
+    Options input output debug verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -127,18 +133,16 @@ main = do
         putStrLn $ "Indigo, version " ++ version
         exitSuccess
     when (isNothing input) $ do
-        -- runStateT repl initREPLState
         newRepl
         exitSuccess
     program <-
         if not runBytecode
             then do
                 i <- inputFile input
-                -- prog <- liftIO $ potentiallyTimedOperation "Parsing" showTime (parse (fromJust input) i CompilerFlags{verboseMode = verbose})
-                -- let expr = case prog of
-                --         Left err -> error $ "Parse error: " ++ errorBundlePretty err
-                --         Right expr -> expr
-                prog <- parse (fromJust input) i CompilerFlags{verboseMode = verbose}
+                prog <-
+                    if noVerify
+                        then parseNoVerify (fromJust input) i CompilerFlags{verboseMode = verbose}
+                        else parseAndVerify (fromJust input) i CompilerFlags{verboseMode = verbose}
                 rprog <- prog
                 expr <- case rprog of
                     Left (err, expr) -> do
