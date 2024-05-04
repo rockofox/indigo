@@ -28,9 +28,11 @@ import Control.Monad.State
     , runState
     )
 import Data.Char (isUpper)
+import Data.List
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
+import Debug.Trace
 import GHC.Char (chr)
 import Text.Megaparsec
     ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
@@ -415,9 +417,18 @@ parseProgram t cf = do
         Right program' -> do
             -- If theres no main function, add one
             let foundMain = any (\case FuncDef "main" _ _ -> True; _ -> False) program'.exprs || any (\case Function defs _ -> any (\case FuncDef "main" _ _ -> True; _ -> False) defs; _ -> False) program'.exprs
+            let (outside, inside) = partition shouldBeOutside program'.exprs
+            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [StructT "IO"] [], FuncDef "main" [] (DoBlock inside)]
             if foundMain || not cf.needsMain
                 then Right program'
-                else Right $ Program [FuncDec "main" [StructT "IO"] [], FuncDef "main" [] (DoBlock program'.exprs)]
+                else Right artificialMainProgram
+  where
+    shouldBeOutside :: Expr -> Bool
+    shouldBeOutside Trait{} = True
+    shouldBeOutside Impl{} = True
+    shouldBeOutside External{} = True
+    shouldBeOutside Import{} = True
+    shouldBeOutside _ = False
 
 parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
