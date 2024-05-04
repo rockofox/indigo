@@ -74,10 +74,14 @@ typeOf' (Var name _) = do
     matchingBinding <- findMatchingBinding name
     -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
     return $ maybe Unknown ttype matchingBinding
-typeOf' (FuncCall name _ _) = do
+typeOf' (FuncCall name args _) = do
     matchingBinding <- findMatchingBinding name
     -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
-    return $ maybe Unknown ttype matchingBinding
+    let actualArgNum = length args
+    let formalArgNum = length (fromJust matchingBinding).args
+    if actualArgNum == formalArgNum
+        then return $ maybe Unknown ttype matchingBinding
+        else return Fn{args = take actualArgNum (fromJust matchingBinding).args, ret = (fromJust matchingBinding).args !! actualArgNum}
 typeOf' (Add a _) = typeOf' a
 typeOf' (Sub a _) = typeOf' a
 typeOf' (Mul a _) = typeOf' a
