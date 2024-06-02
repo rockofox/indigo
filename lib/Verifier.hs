@@ -10,7 +10,7 @@ import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
 import Data.Functor ((<&>))
-import Data.List (find, group, groupBy)
+import Data.List (find)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, isJust, isNothing)
@@ -19,11 +19,9 @@ import Data.Text (Text, pack)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void
-import Debug.Trace
 import Parser
 import Text.Megaparsec hiding (State)
 import Util
-import VM (printAssembly)
 import VM qualified
 
 data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool, structDecs :: [Expr]} deriving (Show)
@@ -71,17 +69,17 @@ listPatternToBindings x y = error $ "listPatternToBinding called with non-list-p
 
 typeOf' :: Expr -> StateT VerifierState IO Type
 typeOf' (Var name _) = do
-    matchingBinding <- findMatchingBinding name
-    -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
-    return $ maybe Unknown ttype matchingBinding
+    typeOf' (FuncCall name [] zeroPosition)
 typeOf' (FuncCall name args _) = do
     matchingBinding <- findMatchingBinding name
-    -- when (isNothing matchingBinding) $ error $ "Could not find relevant binding for " ++ name
-    let actualArgNum = length args
-    let formalArgNum = length (fromJust matchingBinding).args
-    if actualArgNum == formalArgNum
-        then return $ maybe Unknown ttype matchingBinding
-        else return Fn{args = take actualArgNum (fromJust matchingBinding).args, ret = (fromJust matchingBinding).args !! actualArgNum}
+    if isJust matchingBinding
+        then do
+            let actualArgNum = length args
+            let formalArgNum = length (fromJust matchingBinding).args
+            if actualArgNum == formalArgNum
+                then return $ maybe Unknown ttype matchingBinding
+                else return Fn{args = take actualArgNum (fromJust matchingBinding).args, ret = (fromJust matchingBinding).args !! actualArgNum}
+        else return Unknown
 typeOf' (Add a _) = typeOf' a
 typeOf' (Sub a _) = typeOf' a
 typeOf' (Mul a _) = typeOf' a
@@ -190,6 +188,7 @@ initVerifierState =
     VerifierState
         { frames = [VerifierFrame{bindings = Set.fromList [], ttypes = Map.empty, ftype = Any, fname = "__outside"}] -- TODO: actually import prelude
         , topLevel = True
+        , structDecs = []
         }
 
 currentFrame :: StateT VerifierState IO VerifierFrame

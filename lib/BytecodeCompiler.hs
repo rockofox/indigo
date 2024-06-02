@@ -1,7 +1,7 @@
 -- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
 module BytecodeCompiler where
 
-import AST (typeToData, zeroPosition)
+import AST (zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
@@ -220,6 +220,19 @@ implsFor structName = do
     let impls'' = filter (\x -> Parser.for x == structName) impls'
     return $ map Parser.trait impls''
 
+typeToData :: Parser.Type -> VM.Data
+typeToData (Parser.StructT "Int") = VM.DInt 0
+typeToData (Parser.StructT "Float") = VM.DFloat 0
+typeToData (Parser.StructT "Double") = VM.DDouble 0
+typeToData (Parser.StructT "Bool") = VM.DBool False
+typeToData (Parser.StructT "String") = VM.DString ""
+typeToData (Parser.StructT "IO") = VM.DNone -- Hmmm...
+typeToData (Parser.StructT "Char") = VM.DChar ' '
+typeToData (Parser.StructT "CPtr") = VM.DCPtr 0
+typeToData Parser.StructT{} = VM.DMap Data.Map.empty
+typeToData Parser.Any = VM.DNone
+typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
+
 compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
 compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y . last
 compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y . last
@@ -339,10 +352,10 @@ compileExpr (Parser.FuncDef origName args body) = do
     compileParameter lex@(Parser.ListLit l) funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
         if null l
-            then return [Dup, Push $ DList [], Eq, Jf nextFunName]
+            then return [Dup, Push $ DList [], Eq, Jf nextFunName, Pop]
             else do
                 lex' <- compileExpr lex
-                return $ [Dup] ++ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
+                return $ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
     compileParameter (Parser.ListPattern elements) n = do
         nextFunName <- ((n ++ "#") ++) . show . (+ 1) <$> allocId
         let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length elements - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextFunName]
@@ -421,6 +434,7 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "Char" _) = [Push $ DChar '\0']
     compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    compileType (Parser.ListLit [x]) = compileType x ++ [PackList 1]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
 compileExpr st@(Parser.Struct{fields}) = do
     modify (\s -> s{structDecs = st : structDecs s})

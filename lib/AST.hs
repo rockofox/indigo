@@ -2,8 +2,8 @@ module AST where
 
 import Data.Binary qualified
 import Data.Map qualified
+import Debug.Trace
 import GHC.Generics (Generic)
-import VM qualified
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
 
@@ -222,6 +222,7 @@ typeOf (Import{}) = error "Cannot infer type of import"
 typeOf (Ref _) = error "Cannot infer type of ref"
 typeOf (Struct{}) = error "Cannot infer type of struct"
 typeOf (StructLit x _ _) = StructT x
+typeOf (ListLit [Var x _]) = List $ StructT x
 typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo x _) = typeOf x
@@ -232,7 +233,7 @@ typeOf (StructAccess s _) = typeOf s
 typeOf (Pipeline _ b) = typeOf b
 typeOf (Lambda _ _) = Fn [] Any
 typeOf (Cast _ (Var to _)) = StructT to -- TODO
-typeOf (Cast _ _) = error "Cannot infer type of cast"
+typeOf (Cast _ b) = typeOf b
 typeOf (TypeLit x) = x
 typeOf (Flexible x) = typeOf x
 typeOf (Trait _ _) = error "Cannot infer type of trait"
@@ -243,22 +244,18 @@ typeOf (External _ _) = error "Cannot infer type of external"
 typeOf (CharLit _) = StructT "Char"
 typeOf (DoubleLit _) = StructT "Double"
 
-typeToData :: Type -> VM.Data
-typeToData (StructT "Int") = VM.DInt 0
-typeToData (StructT "Float") = VM.DFloat 0
-typeToData (StructT "Double") = VM.DDouble 0
-typeToData (StructT "Bool") = VM.DBool False
-typeToData (StructT "String") = VM.DString ""
-typeToData (StructT "IO") = VM.DNone -- Hmmm...
-typeToData (StructT "Char") = VM.DChar ' '
-typeToData (StructT "CPtr") = VM.DCPtr 0
-typeToData StructT{} = VM.DMap Data.Map.empty
-typeToData Any = VM.DNone
-typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
-
 -- typeOf x = error $ "Cannot infer type of " ++ show x
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True
 typesMatch (x : xs) (y : ys) = compareTypes x y && typesMatch xs ys
 typesMatch _ _ = False
+
+typeToString :: Type -> String
+typeToString (StructT x) = x
+typeToString Any = "Any"
+typeToString None = "None"
+typeToString Unknown = "Unknown"
+typeToString (Fn args ret) = "Fn{" ++ show args ++ " -> " ++ show ret ++ "}"
+typeToString (List t) = "List{" ++ typeToString t ++ "}"
+typeToString Self = "Self"

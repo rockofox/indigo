@@ -24,26 +24,24 @@ import GHC.Generics (Generic)
 import System.Random (randomIO)
 #ifdef FFI
 import Ffi
-import Foreign.LibFFI.Base (newStorableStructArgRet, newStructCType, sizeAndAlignmentOfCType)
+import Foreign.LibFFI.Base (newStorableStructArgRet, sizeAndAlignmentOfCType)
 import Foreign.LibFFI.FFITypes
 import Foreign.LibFFI
 import Foreign.LibFFI.Internal (CType)
 #endif
 
-import Control.Monad.Reader
 import Data.Binary qualified (get, put)
 import Data.Char (chr, ord)
-import Data.IORef (IORef)
-import Data.Text.Internal.Unsafe.Char
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
-import Foreign.C.Types (CChar, CFloat, CInt, CSChar, CUChar)
+import Foreign.C.Types (CChar, CFloat, CInt, CUChar)
 import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
+import Util (showSanitized)
 
 data Instruction
     = -- | Push a value onto the stack
@@ -306,7 +304,21 @@ showDebugInfo = do
     -- let stack'' = if length stack' > 1 then take 2 stack' else stack'
     -- return $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show stack'' ++ "\t" ++ show (safeHead $ callStack vm)
     let layers = length (callStack vm) - 1
-    return $ replicate layers ' ' ++ show (pc vm) ++ " " ++ show inst -- ++ " (" ++ show (stack vm) ++ ")"
+    return $ replicate layers ' ' ++ show (pc vm) ++ " " ++ show inst ++ " <- " ++ showSanitized (stack vm)
+
+debugShowData :: Data -> String
+debugShowData (DInt x) = "DInt " ++ show x
+debugShowData (DFloat x) = "DFloat " ++ show x
+debugShowData (DDouble x) = "DDouble " ++ show x
+debugShowData (DString x) = "DString " ++ show x
+debugShowData (DBool x) = "DBool " ++ show x
+debugShowData (DList x) = "DList " ++ concatMap (\y -> debugShowData y ++ ",") x
+debugShowData DNone = "DNone"
+debugShowData (DChar x) = "DChar " ++ show x
+debugShowData (DFuncRef x args locals) = "DFuncRef " ++ x ++ " " ++ show args ++ " " ++ show locals
+debugShowData (DMap x) = "DMap " ++ show x
+debugShowData (DTypeQuery x) = "DTypeQuery " ++ x
+debugShowData (DCPtr x) = "DCPtr " ++ show x
 
 run' :: Program -> StateT VM IO ()
 run' program = do
@@ -784,7 +796,7 @@ runInstruction Slice = do
 runInstruction Length =
     stackLen >>= \case
         0 -> stackPush $ DInt (-1)
-        _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; _ -> error "Invalid type for length"
+        _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; x -> error $ "Invalid type for length (" ++ debugShowData x ++ ")"
 -- Type
 runInstruction Cast = do
     -- stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
@@ -800,7 +812,7 @@ runInstruction Cast = do
             DNone -> DNone
             DChar _ -> DChar $ toEnum x
             DCPtr _ -> DCPtr $ fromIntegral x
-            type' -> error $ "Cast to Int for type not implemented: " ++ show type'
+            type' -> error $ "Cast to Int for type not implemented: " ++ debugShowData type'
         (DFloat x) -> stackPush $ case to of
             DInt _ -> DInt $ round x
             DFloat _ -> DFloat x
@@ -810,7 +822,7 @@ runInstruction Cast = do
             DList _ -> DList [DFloat x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum $ round x
-            type' -> error $ "Cast to Float for type not implemented: " ++ show type'
+            type' -> error $ "Cast to Float for type not implemented: " ++ debugShowData type'
         (DDouble x) -> stackPush $ case to of
             DInt _ -> DInt $ round x
             DFloat _ -> DFloat $ realToFrac x
@@ -820,7 +832,7 @@ runInstruction Cast = do
             DList _ -> DList [DDouble x]
             DNone -> DNone
             DChar _ -> DChar $ toEnum $ round x
-            type' -> error $ "Cast to Double for type not implemented: " ++ show type'
+            type' -> error $ "Cast to Double for type not implemented: " ++ debugShowData type'
         (DString x) -> stackPush $ case to of
             DInt _ -> DInt $ read x
             DFloat _ -> DFloat $ read x
@@ -830,8 +842,14 @@ runInstruction Cast = do
             DList _ -> DList [DString x]
             DNone -> DNone
             DChar _ -> DChar $ head x
-            type' -> error $ "Cast to String for type not implemented: " ++ show type'
-        x -> error $ "Cannot cast " ++ show x ++ " to " ++ show to
+            type' -> error $ "Cast to String for type not implemented: " ++ debugShowData type'
+        (DList []) -> stackPush $ case to of
+            DList _ -> DList []
+            type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
+        x -> do
+            if x == to
+                then stackPush x
+                else error $ "Cast not implemented: " ++ debugShowData x ++ " to " ++ debugShowData to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
 runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "Invalid type for access"
