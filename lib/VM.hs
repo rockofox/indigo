@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
@@ -104,8 +105,6 @@ data Instruction
       Swp
     | -- | A label
       Label String
-    | -- | Locate a label
-      Locate String
     | -- | Pop a value off the stack and store it in the data memory
       Store Int
     | -- | Push a value from the data memory onto the stack
@@ -295,14 +294,10 @@ locateLabels :: Program -> [(String, Int)]
 locateLabels program = [(x, n) | (Label x, n) <- zip (V.toList program) [0 ..]] -- TODO: Might be inefficient
 
 showDebugInfo :: StateT VM IO String
--- showDebugInfo = get >>= \vm -> return $ show (pc vm) ++ "\t" ++ show (program vm V.! pc vm) ++ "\t" ++ show (stack vm) ++ "\t" ++ show (safeHead $ callStack vm) -- Showing the stack breaks stuff for some reason??
 showDebugInfo = do
     vm <- get
     -- Show the current instruction, two values from the stack, and the result
     let inst = program vm V.! pc vm
-    -- let stack' = stack vm
-    -- let stack'' = if length stack' > 1 then take 2 stack' else stack'
-    -- return $ show (pc vm) ++ "\t" ++ show inst ++ "\t" ++ show stack'' ++ "\t" ++ show (safeHead $ callStack vm)
     let layers = length (callStack vm) - 1
     return $ replicate layers ' ' ++ show (pc vm) ++ " " ++ show inst ++ " <- " ++ showSanitized (stack vm)
 
@@ -546,12 +541,9 @@ arg (DList x@(DChar _ : _)) = do -- TODO: make generic
     return (argPtr ptr, Nothing)
 arg (DDouble x) = return (argCDouble $ realToFrac x, Nothing)
 arg d@(DMap x) = do
-    -- if isJust $ Data.Map.lookup "__name" x then do
-      let types = map dataCType (Data.Map.elems (clearMap x))
-      (argT, _, freeTType) <- newStorableStructArgRet types
-      return (argT d, Just freeTType)
-    -- else
-    --   error "Tried to pass a map to FFI, but it does not have a __name field"
+  let types = map dataCType (Data.Map.elems (clearMap x))
+  (argT, _, freeTType) <- newStorableStructArgRet types
+  return (argT d, Just freeTType)
 arg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
 
 class FfiRet a b where
@@ -641,7 +633,6 @@ runInstruction CallFFI{} = error "Tried to call FFI function, but FFI is not ena
 #endif
 -- Basic stack operations
 runInstruction (Push d) = stackPush d
--- runInstruction (PushPf name nArgs) = stackPopN nArgs >>= \args -> stackPush $ DFuncRef name args
 runInstruction (PushPf name nArgs) = do
     (label, _) <- findLabelFuzzy name
     locals <- gets (locals . safeHead . callStack)
@@ -696,8 +687,6 @@ runInstruction (Call x) = do
         _ -> modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
   where
     tailCall = do
-        -- runInstruction $ Push $ DString "tailcall"
-        -- runInstruction $ Builtin Print
         runInstruction $ Jmp x
 runInstruction (CallLocal x) = do
     nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
@@ -723,6 +712,7 @@ runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
 runInstruction (Jf x) = stackPop >>= \d -> when (d == DBool False) $ runInstruction (Jmp x)
 runInstruction Ret = do
+    -- Might be helpful to do something like:
     -- stackLen >>= \l -> when (l > 1) (error $ "Stack contains more than one item before return. Items: " ++ l)
     -- get >>= \vm -> traceM $ show (stack vm)
     modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
@@ -735,8 +725,7 @@ runInstruction Not = stackPop >>= \d -> stackPush $ DBool $ not $ case d of DBoo
 runInstruction And = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a && b; _ -> error "Not a boolean"
 runInstruction Or = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a || b; _ -> error "Not a boolean"
 -- Label
-runInstruction (Label _) = return () -- modify $ \vm -> vm{labels = (x, pc vm) : labels vm}
-runInstruction (Locate x) = get >>= \vm -> stackPush $ DInt $ fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm
+runInstruction (Label _) = return ()
 -- Stack
 runInstruction Swp = stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
 runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
@@ -799,7 +788,6 @@ runInstruction Length =
         _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; x -> error $ "Invalid type for length (" ++ debugShowData x ++ ")"
 -- Type
 runInstruction Cast = do
-    -- stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
     to <- stackPop
     stackPop >>= \case
         (DInt x) -> stackPush $ case to of
@@ -910,8 +898,6 @@ runInstruction (Mov n dat) = do
     vm <- get
     put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
-
--- runInstruction x = error $ show x ++ ": not implemented"
 
 printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers =

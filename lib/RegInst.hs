@@ -4,7 +4,6 @@
 module RegInst where
 
 import Control.Monad.State
-import Debug.Trace (trace, traceM)
 import VM
 
 data RegInst = RegInst Instruction [Int]

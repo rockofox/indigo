@@ -22,7 +22,6 @@ treeShake prog = do
     hasUsage :: Instruction -> [Instruction] -> Bool
     hasUsage (Label "main") = const True
     hasUsage (Label ln) = do
-        let l = labelBaseName ln
         any
             ( \case
                 Jmp l' -> match l'

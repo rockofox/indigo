@@ -5,8 +5,6 @@
 
 module Parser (Expr (..), Program (..), parseProgram', parseProgramPure, ParserState (..), Type (..), parseProgram, parseFreeUnsafe, CompilerFlags (..), initCompilerFlags, typeOf, compareTypes) where
 
--- module Parser where
-
 import AST
 import Control.Applicative.Combinators (someTill)
 import Control.Monad qualified
@@ -24,7 +22,6 @@ import Control.Monad.Combinators.Expr (Operator (..), makeExprParser)
 import Control.Monad.State
     ( MonadState (get, put)
     , State
-    , StateT (runStateT)
     , runState
     )
 import Data.Char (isUpper)
@@ -32,7 +29,6 @@ import Data.List
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, unpack)
 import Data.Void (Void)
-import Debug.Trace
 import GHC.Char (chr)
 import Text.Megaparsec
     ( MonadParsec (eof, lookAhead, notFollowedBy, takeWhile1P, try, withRecovery)
@@ -59,7 +55,6 @@ import Text.Megaparsec.Char
     )
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Debug (dbg)
-import Text.ParserCombinators.ReadP (many1)
 
 data CompilerFlags = CompilerFlags
     { verboseMode :: Bool
@@ -551,8 +546,7 @@ term =
         , StringLit <$> try stringLit
         , symbol "True" >> return (BoolLit True)
         , symbol "False" >> return (BoolLit False)
-        , -- , letExpr
-          external
+        , external
         , struct
         , import_
         , impl

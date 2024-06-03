@@ -64,7 +64,6 @@ listPatternToBindings (ListPattern exprs) (StructT "String") = do
     let singulars = init exprs
     let Var restName _ = last exprs
     concatMap (\case (Var name _) -> [VBinding{name = name, args = [], ttype = StructT "Char", generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = StructT "String", generics = []}]
--- listPatternToBindings _ _ = error "listPatternToBinding called with non-list-pattern"
 listPatternToBindings x y = error $ "listPatternToBinding called with non-list-pattern: " ++ show x ++ " " ++ show y
 
 typeOf' :: Expr -> StateT VerifierState IO Type
@@ -146,7 +145,6 @@ compareTypes' aT (StructT b) generics = case aT of
             Just (GenericExpr _ _) -> return True
             Nothing -> compStructs a b
     _ -> do
-        -- return $ isJust $ find (\(GenericExpr name _) -> name == b) generics
         let gen = find (\(GenericExpr name _) -> name == b) generics
         case gen of
             Just (GenericExpr _ (Just t)) -> return $ compareTypes aT t
@@ -154,12 +152,12 @@ compareTypes' aT (StructT b) generics = case aT of
             Nothing -> return False
   where
     compStructs :: String -> String -> StateT VerifierState IO Bool
-    compStructs a b = do
+    compStructs structA structB = do
         rootFrame <- gets frames <&> last
         let ttypes' = ttypes rootFrame
-        let a' = Map.findWithDefault (VType{implements = []}) a ttypes'
-        let b' = Map.findWithDefault (VType{implements = []}) b ttypes'
-        return $ b `elem` implements a' || a == b
+        let a' = Map.findWithDefault (VType{implements = []}) structA ttypes'
+        let _b' = Map.findWithDefault (VType{implements = []}) structB ttypes'
+        return $ structB `elem` implements a' || structA == structB
 compareTypes' a b _ = return $ compareTypes a b
 
 allTheSame :: [Type] -> Bool
@@ -173,12 +171,9 @@ functionTypesAcceptable :: [Type] -> [Type] -> [AST.GenericExpr] -> StateT Verif
 functionTypesAcceptable use def generics = do
     let genericNames = map (\(GenericExpr name _) -> name) generics
     let useAndDef = zip use def
-    -- let udStructs = filter (\(a, b) -> case (a, b) of (_, StructT _) -> True; (_, List (StructT _)) -> True; _ -> False) useAndDef
     let udStructs = concatMap (\(a, b) -> case (a, b) of (_, StructT _) -> [(a, b)]; (List c'@(StructT _), List c@(StructT _)) -> [(c', c)]; _ -> []) useAndDef
-    let udStructsGeneric = filter (\case (_, StructT b) -> b `elem` genericNames; (_, List (StructT b)) -> b `elem` genericNames) udStructs
-    -- traceM $ "udStructsGeneric: " ++ show udStructsGeneric
-    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, StructT b) -> b == x; (_, List (StructT b)) -> b == x) udStructsGeneric)) genericNames
-    -- traceM $ "groupedUdStructsGeneric: " ++ show groupedUdStructsGeneric
+    let udStructsGeneric = filter (\case (_, StructT b) -> b `elem` genericNames; (_, List (StructT b)) -> b `elem` genericNames; _ -> error "Impossible") udStructs
+    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, StructT b) -> b == x; (_, List (StructT b)) -> b == x; _ -> error "Impossible") udStructsGeneric)) genericNames
     let genericsMatch = all (\(_, types) -> allTheSame types) groupedUdStructsGeneric
     typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
     return $ typesMatch' && genericsMatch
@@ -248,14 +243,11 @@ verifyMultiple = concatMapM verifyExpr
 verifyExpr :: Expr -> StateT VerifierState IO [ParseError s e]
 verifyExpr (FuncDef name args body) = do
     -- TODO: Position
-    -- currentFrame' <- currentFrame
-    -- modify (\state -> state { frames = currentFrame' { bindings = Set.insert (VBinding { name = name, args = map typeOf args, ttype = Any }) (bindings (head (frames state))) } : tail (frames state) })
     b <- findMatchingBinding name
     case b of
         Just binding -> do
             currentFrame' <- currentFrame
-            modify (\state -> state{frames = currentFrame'{bindings = Set.map (\b -> if Verifier.name b == name && b.ttype == Any then b{ttype = typeOf body} else b) (bindings (head (frames state)))} : tail (frames state)})
-
+            modify (\state -> state{frames = currentFrame'{bindings = Set.map (\b' -> if Verifier.name b' == name && b'.ttype == Any then b'{ttype = typeOf body} else b') (bindings (head (frames state)))} : tail (frames state)})
             let argsAndTypes = zip args binding.args
             let argsAsBindings = concatMap argToBindings argsAndTypes
             let bType = if binding.ttype == Any then typeOf body else binding.ttype
@@ -284,13 +276,12 @@ verifyExpr (FuncDec name dtypes generics) = do
     typeErase = map typeErase'
       where
         typeErase' :: Type -> Type
-        typeErase' (StructT name) =
-            case find (\(GenericExpr name' _) -> name' == name) generics of
+        typeErase' (StructT structName) =
+            case find (\(GenericExpr name' _) -> name' == structName) generics of
                 Just (GenericExpr _ (Just t)) -> t
                 Just (GenericExpr _ Nothing) -> Any
-                _ -> StructT name
+                _ -> StructT structName
         typeErase' t = t
--- verifyExpr (DoBlock exprs) = verifyMultiple exprs
 verifyExpr (DoBlock exprs) = concatMapM verifyExpr' exprs
   where
     verifyExpr' :: Expr -> StateT VerifierState IO [ParseError s e]
@@ -328,10 +319,6 @@ verifyExpr sl@(StructLit structName _ (Position (start, _))) = do
 verifyExpr (Impl trait for _) = do
     rootFrame <- head . frames <$> get
     modify (\state -> state{frames = rootFrame{ttypes = Map.alter (\case Just (VType{implements = impls}) -> Just (VType{implements = trait : impls}); Nothing -> Just (VType{implements = [trait]})) for (ttypes rootFrame)} : tail (frames state)})
-    -- let ttypes' = ttypes rootFrame
-    -- let traitType = Map.findWithDefault (VType { implements = [] }) trait ttypes'
-    -- let vtype = VType { implements = traitType.implements ++ [trait]}
-    -- modify (\state -> state { frames = rootFrame { ttypes = Map.update (\_ -> Just vtype) for (ttypes rootFrame) } : tail (frames state) })
     return []
 verifyExpr (FuncCall name args (Position (start, _))) = do
     currentFrame' <- currentFrame
@@ -351,7 +338,6 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
-    currentFrame' <- currentFrame
     let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}) args
     modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
     bodyErrors <- verifyExpr body
@@ -364,8 +350,6 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
     let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Program exprs) -> exprs
-    -- concatMapM compileExpr (map mangleAST expr)
-    -- error $ show (map mangleAST expr)
     if qualified || isJust as
         then do
             let alias = if qualified then from else fromJust as

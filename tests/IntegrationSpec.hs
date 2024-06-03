@@ -43,7 +43,7 @@ compileAndRun prog = do
             whenErr verifierResult $ \err -> error $ "Verifier error: " ++ errorBundlePretty err
             xxx <- evalStateT (compileProgram program) (initCompilerState program) <&> optimize
             let xxxPoint = locateLabel xxx "main"
-            -- putStrLn $ printAssembly (V.fromList xxx) True
+
             vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
             pure $ output $ ioBuffer vm
 
@@ -331,22 +331,3 @@ spec = do
                     bottles 3
                 |]
                 `shouldReturn` "3 bottles of beer on the wall, 3 bottles of beer.\nTake one down and pass it around, 2 bottles of beer on the wall.\n\n2 bottles of beer on the wall, 2 bottles of beer.\nTake one down and pass it around, 1 bottles of beer on the wall.\n\n1 bottles of beer on the wall, 1 bottles of beer.\nTake one down and pass it around, 0 bottles of beer on the wall.\n\nNo more bottles of beer on the wall, no more bottles of beer.\nGo to the store and buy some more, 99 bottles of beer on the wall.\n"
-
--- describe "Import"
--- it "Can find function based on type with lists, multiple definitions and pattern matching" $ do
---     compileAndRun
---         [r|
---         f :: [Int] -> Int
---         f [] = 0
---         f (x:xs) = x + (f xs)
---         f :: [Float] -> Float
---         # f [] = 0.0
---         f (x:xs) = x + ((f xs) as Float)
---         # f :: [String] -> String
---         # f x = x
---         let main => IO = do
---             println f [1, 2, 3]
---             println f [1.0, 2.0, 3.0]
---             # println f ["test", "test2"]
---         end|]
---         `shouldReturn` "6\n6.0\ntesttest2\n"

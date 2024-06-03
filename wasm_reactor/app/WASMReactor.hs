@@ -50,7 +50,7 @@ runProgramRaw progPtr progLen = do
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
             xxx <- evalStateT (compileProgram program) (initCompilerState program)
-            -- print program
+
             putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}

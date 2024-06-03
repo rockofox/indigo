@@ -71,7 +71,6 @@ spec = do
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right
-                    -- (Program [Impl{trait = "Show", for = "Point", methods = [parseFreeUnsafe "show point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""]}])
                     ( Program
                         [ Impl
                             { trait = "Show"

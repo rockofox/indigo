@@ -1,8 +1,6 @@
 module AST where
 
 import Data.Binary qualified
-import Data.Map qualified
-import Debug.Trace
 import GHC.Generics (Generic)
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
@@ -207,9 +205,9 @@ typeOf (Ge _ _) = StructT "Bool"
 typeOf (And _ _) = StructT "Bool"
 typeOf (Or _ _) = StructT "Bool"
 typeOf (Not _) = StructT "Bool"
-typeOf (FuncCall{}) = Any -- error "Cannot infer type of variable"
+typeOf (FuncCall{}) = Any
 typeOf Placeholder = Any
-typeOf (Var{}) = Any -- error "Cannot infer type of variable"
+typeOf (Var{}) = Any
 typeOf (Let _ _) = error "Cannot infer type of let"
 typeOf (If _ b _) = typeOf b
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
@@ -227,12 +225,12 @@ typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo x _) = typeOf x
 typeOf (Target _ _) = error "Cannot infer type of target"
-typeOf (ListConcat x y) = typeOf x
+typeOf (ListConcat x _) = typeOf x
 typeOf (ListPattern _) = List Any
 typeOf (StructAccess s _) = typeOf s
 typeOf (Pipeline _ b) = typeOf b
 typeOf (Lambda _ _) = Fn [] Any
-typeOf (Cast _ (Var to _)) = StructT to -- TODO
+typeOf (Cast _ (Var to _)) = StructT to
 typeOf (Cast _ b) = typeOf b
 typeOf (TypeLit x) = x
 typeOf (Flexible x) = typeOf x
@@ -243,8 +241,6 @@ typeOf (StrictEval x) = typeOf x
 typeOf (External _ _) = error "Cannot infer type of external"
 typeOf (CharLit _) = StructT "Char"
 typeOf (DoubleLit _) = StructT "Double"
-
--- typeOf x = error $ "Cannot infer type of " ++ show x
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True

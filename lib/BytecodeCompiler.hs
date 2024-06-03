@@ -1,4 +1,3 @@
--- module BytecodeCompiler (runTestProgram, locateLabel, printAssembly, compileProgram, CompilerState (..), Function) where
 module BytecodeCompiler where
 
 import AST (zeroPosition)
@@ -8,14 +7,13 @@ import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
 import Data.Bifunctor (second)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, inits, intercalate, isInfixOf, tails)
+import Data.List (elemIndex, find, inits, intercalate)
 import Data.List.Split qualified
 import Data.Map qualified
 import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -49,8 +47,7 @@ data External = External
 
 data CompilerState a = CompilerState
     { program :: Parser.Program
-    , -- , functions :: [(String, String, [Instruction])]
-      functions :: [Function]
+    , functions :: [Function]
     , funcDecs :: [Parser.Expr]
     , structDecs :: [Parser.Expr]
     , lastLabel :: Int
@@ -115,7 +112,7 @@ findAnyFunction :: String -> [Function] -> Maybe Function
 findAnyFunction funcName xs = do
     -- TODO: I don't like this function
     let candidates = filter (\y -> baseName y == funcName && funame y /= "main") xs
-    -- when (funcName == "name") $ error $ show (map baseName xs)
+
     let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
@@ -131,7 +128,7 @@ findFunction funcName xs typess = do
     let ids = map ((!! 1) . splitOn "#" . Data.Text.pack . funame) candidates'
     let ids' = map (read . Data.Text.unpack) ids :: [Int]
     let minId = minimum ids'
-    -- traceM $ "Looked for " ++ name ++ " with types " ++ show typess ++ " and found " ++ show candidates' ++ "\n"
+
     case find (\y -> funame y == funcName ++ "#" ++ show minId) candidates' of
         Just x -> Just x
         Nothing -> findAnyFunction funcName xs
@@ -163,11 +160,11 @@ preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y op = do
-    id <- allocId
+    id' <- allocId
     functions' <- gets functions
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
-    let aName = "__op_a_" ++ show id
-    let bName = "__op_b_" ++ show id
+    let aName = "__op_a_" ++ show id'
+    let bName = "__op_b_" ++ show id'
     x' <- compileExpr x
     y' <- compileExpr y
 
@@ -290,7 +287,7 @@ compileExpr (Parser.FuncCall funcName args _) = do
             (Just lf) -> lf
             Nothing -> case findFunction funcName functions' argTypes of
                 (Just f) -> f
-                Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = []}
+                Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
     let funcDec = find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
     -- If the funcName starts with curCon@, it's a local function
@@ -383,8 +380,7 @@ compileExpr (Parser.Var x _) = do
     functions' <- gets functions
     curCon <- gets currentContext
     externals' <- gets externals
-    -- traceM $ "Looking for " ++ x ++ " in " ++ show (map baseName functions')
-    -- traceM $ "Looking for " ++ curCon ++ "@" ++ x ++ " in " ++ show (map baseName functions')
+
     let fun = any ((== x) . baseName) functions' || any ((== curCon ++ "@" ++ x) . baseName) functions'
     if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
         then compileExpr (Parser.FuncCall x [] zeroPosition)

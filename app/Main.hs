@@ -141,8 +141,8 @@ main = do
                 i <- inputFile input
                 prog <-
                     if noVerify
-                        then parseNoVerify (fromJust input) i CompilerFlags{verboseMode = verbose}
-                        else parseAndVerify (fromJust input) i CompilerFlags{verboseMode = verbose}
+                        then parseNoVerify (fromJust input) i initCompilerFlags
+                        else parseAndVerify (fromJust input) i initCompilerFlags
                 rprog <- prog
                 expr <- case rprog of
                     Left (err, expr) -> do
