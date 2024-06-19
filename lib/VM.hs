@@ -111,14 +111,20 @@ data Instruction
       Load Int
     | -- | Return to the caller
       Ret
-    | -- | Pop a value off the stack and store it in a local variable with the given name
+    | -- | Pop a value off the stack and store it in a named register with the given name
       LStore String
-    | -- | Push the value of a local variable with the given name onto the stack
+    | -- | Push the value of a named register with the given name onto the stack
       LLoad String
+    | -- | Stow away N values from the stack into a named register
+      LStow Int String
+    | -- | Unstow values from a named register to the stack
+      LUnstow String
     | -- | Pop n values off the stack, concatenate them, and push the result
       Concat Int
     | -- | Construct a list from the top n values of the stack
       PackList Int
+    | -- | Push the contents of the list at the top of the stack onto the stack
+      UnpackList
     | -- | Index into a list
       Index
     | -- | Slice a list
@@ -893,10 +899,13 @@ runInstruction TypeEq =
         (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
         _ -> False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList
+runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
 runInstruction (Mov n dat) = do
     -- Move data into register %n
     vm <- get
     put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
+runInstruction (LStow n l) = [PackList n, LStore l] & mapM_ runInstruction
+runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 printAssembly :: Program -> Bool -> String

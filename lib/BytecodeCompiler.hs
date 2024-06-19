@@ -527,13 +527,8 @@ createVirtualFunctions = do
     createBaseDef (Parser.FuncDec name typess _) trait fors = do
         let traitName = Parser.name trait
         let body =
-                [Label name]
-                    ++ replicate (length typess - 2) Pop
-                    ++ [ DupN (length fors)
-                       ]
-                    -- ++ concatMap (\for -> [TypeOf, Dup, LStore "calledType", Push $ DString for, Eq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
-                    ++ concatMap (\for -> [Dup, TypeOf, LStore "calledType", Push $ DTypeQuery for, TypeEq, Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
-                    ++ [Pop, LLoad "calledType", Push $ DString ("`" ++ name ++ "` from trait `" ++ traitName ++ "` called for unimplemented type "), Concat 2, Panic]
+                Label name
+                    : concatMap (\for -> [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery for, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
         modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess "__outside"]})
         return ()
     createBaseDef _ _ _ = return ()

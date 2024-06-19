@@ -214,6 +214,29 @@ spec = do
                     end
                 |]
                 `shouldReturn` "Woof\nMeow\n"
+        it "Monad" $ do
+            compileAndRun
+                [r|
+                    trait Monad = do
+                      bind :: Any -> Fn{Any => Any} -> Any
+                    end
+
+                    struct Maybe = (some: Any, none: Any)
+
+                    impl Monad for Maybe = do
+                      bind x f = do
+                        f x.some
+                      end
+                    end
+
+                    let call (x: Fn {Any => Any}) = x "test"
+
+                    let main => IO = do
+                      let bla = Maybe { some: "hello", none: "" }
+                      bind bla, print
+                    end
+                |]
+                `shouldReturn` "hello"
     describe "Lambdas" $ do
         it "Can use a lambda in the map function" $ do
             compileAndRun
