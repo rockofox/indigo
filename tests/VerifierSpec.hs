@@ -123,3 +123,15 @@ spec = do
             |]
             unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
                 `shouldFailWith` errFancy 377 (fancy $ ErrorFail "Argument types do not match on xxx, expected: [Int], got: [Number]")
+    describe "Refinement types" $ do
+        it "Can fail on refinement" $ do
+            let prog =
+                    [r|
+                        struct AlcoholConsumer = (age: Int) satisfies (it.age > 18)
+                        let main => IO = do
+                            let a = AlcoholConsumer { age : 19 }
+                            let b = AlcoholConsumer { age : 17 }
+                        end
+                    |]
+            unsafePerformIO (verifyProgram "test.in" prog (AST.exprs $ parseProgramPure prog))
+                `shouldFailWith` errFancy 230 (fancy $ ErrorFail "Refinement failed (it.age > 18)")
