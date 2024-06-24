@@ -432,9 +432,10 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit [x]) = compileType x ++ [PackList 1]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
-compileExpr st@(Parser.Struct{fields}) = do
+compileExpr st@(Parser.Struct{name = structName, fields, is}) = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
+    mapM_ (compileExpr . (\t -> Parser.Impl{methods = [], for = structName, trait = t})) is
     return []
   where
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()

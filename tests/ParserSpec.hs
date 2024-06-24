@@ -59,6 +59,15 @@ spec = do
             parseProgram "bello{}.name" parserCompilerFlags
                 `shouldBe` Right
                     (Program [StructAccess (StructLit "bello" [] anyPosition) (Var "name" anyPosition)])
+        it "Can define" $
+            parseProgram "struct Teacher = ()" parserCompilerFlags
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = []}])
+        it "Can define with is" $ do
+            parseProgram "struct Teacher = () is Person" parserCompilerFlags
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"]}])
+        it "Can define with multiple is" $ do
+            parseProgram "struct Teacher = () is Person, Employee" parserCompilerFlags
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"]}])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags

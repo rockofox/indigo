@@ -38,7 +38,7 @@ data Expr
     | Discard Expr
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
     | Ref Expr
-    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String}
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String]}
     | StructLit String [(String, Expr)] Position
     | StructAccess Expr Expr
     | ListLit [Expr]

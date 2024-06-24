@@ -359,7 +359,10 @@ struct = do
     refinement <- optional $ do
         keyword "satisfies"
         parens expr
-    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc}
+    is <- optional $ do
+        keyword "is"
+        sepBy extra (symbol ",")
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is}
   where
     structField = do
         fieldName <- identifier <?> "field name"

@@ -189,6 +189,14 @@ spec = do
                     println name mauzi
                 end|]
                 `shouldReturn` "Mauzi\n"
+        it "Can use `is` syntax" $ do
+            compileAndRun
+                [r|
+                trait Person
+                trait Human
+                struct Person = (name: String, age: Int) is Person, Human
+                |]
+                `shouldReturn` ""
     describe "Traits" $ do
         it "Can use a trait" $ do
             compileAndRun
