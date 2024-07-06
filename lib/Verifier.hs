@@ -55,6 +55,12 @@ findMatchingBinding name = do
         then return Nothing
         else return $ Just $ head matchingBindings
 
+findMatchingBindings :: String -> StateT VerifierState IO [VBinding]
+findMatchingBindings name = do
+    frames' <- frames <$> get
+    let matchingBindings = concatMap (Set.toList . Set.filter (\binding -> Verifier.name binding == name) . bindings) frames'
+    return matchingBindings
+
 listPatternToBindings :: Expr -> Type -> [VBinding]
 listPatternToBindings (ListPattern exprs) (List t) = do
     let singulars = init exprs
@@ -323,20 +329,26 @@ verifyExpr (Impl trait for _) = do
 verifyExpr (FuncCall name args (Position (start, _))) = do
     currentFrame' <- currentFrame
     topLevel' <- gets topLevel
-    matchingBinding <- findMatchingBinding name
+    matchingBindings <- findMatchingBindings name
     modify (\s -> s{topLevel = False})
     eArgs <- concatMapM verifyExpr args
     argumentTypes <- mapM typeOf' args
-    fta <- case matchingBinding of
-        Just binding -> functionTypesAcceptable argumentTypes binding.args binding.generics
-        Nothing -> return False
-    eNoMatchi <- case matchingBinding of
-        Just binding -> do
-            matchi <- compareTypes' (ftype currentFrame') (ttype binding) binding.generics
-            return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding.ttype ++ "` of `" ++ binding.name ++ "` is incompatible with type `" ++ show currentFrame'.ftype ++ "` of " ++ currentFrame'.fname))) | topLevel' && currentFrame'.fname /= "__lambda" && not matchi]
-        Nothing -> return []
-    let eTypes = ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show (fromJust matchingBinding).args ++ ", got: " ++ show argumentTypes))) | isJust matchingBinding && not fta])
-    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding] ++ eArgs ++ eTypes ++ eNoMatchi
+    fta <- case matchingBindings of
+        [] -> return False
+        bindings -> do
+            let fta' = mapM (\binding -> functionTypesAcceptable argumentTypes binding.args binding.generics) bindings
+            or <$> fta'
+    eNoMatchi <- case matchingBindings of
+        [] -> return []
+        bindings -> do
+            concatMapM
+                ( \binding -> do
+                    matchi <- compareTypes' (ftype currentFrame') (ttype binding) binding.generics
+                    return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding.ttype ++ "` of `" ++ binding.name ++ "` is incompatible with type `" ++ show currentFrame'.ftype ++ "` of " ++ currentFrame'.fname))) | topLevel' && currentFrame'.fname /= "__lambda" && not matchi]
+                )
+                bindings
+    let eTypes = concatMap (\matchingBinding -> ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show matchingBinding.args ++ ", got: " ++ show argumentTypes))) | not fta])) matchingBindings
+    return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | null matchingBindings] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
     let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}) args
     modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
