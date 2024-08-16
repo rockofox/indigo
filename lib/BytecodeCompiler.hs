@@ -158,13 +158,13 @@ findSourceFile fileName = do
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
-doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT (CompilerState a) IO [Instruction]
+doBinOp :: Parser.Expr -> Parser.Expr -> [Instruction] -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y op = do
     id' <- allocId
     functions' <- gets functions
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
-    let aName = "__op_a_" ++ show id'
-    let bName = "__op_b_" ++ show id'
+    -- let aName = "__op_a_" ++ show id'
+    -- let bName = "__op_b_" ++ show id'
     x' <- compileExpr x
     y' <- compileExpr y
 
@@ -177,7 +177,8 @@ doBinOp x y op = do
         (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
-        _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
+        -- _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
+        _ -> return (x' ++ MovReg id' : y' ++ MovReg (id' + 1) : [PushReg id', PushReg (id' + 1)] ++ cast ++ op)
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
 typeOf (Parser.FuncCall funcName _ _) = do
@@ -228,24 +229,24 @@ typeToData (Parser.StructT "Char") = VM.DChar ' '
 typeToData (Parser.StructT "CPtr") = VM.DCPtr 0
 typeToData Parser.StructT{} = VM.DMap Data.Map.empty
 typeToData Parser.Any = VM.DNone
-typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
+typeToData _ = VM.DNone
 
 compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
-compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
@@ -306,7 +307,7 @@ compileExpr (Parser.FuncCall funcName args _) = do
             case funcDec of
                 (Just fd) -> do
                     if length args == length (Parser.types fd) - 1
-                        then concatMapM compileExpr args >>= \args' -> return (args' ++ [callWay])
+                        then concatMapM compileExpr args >>= \args' -> return (args' ++ [PragmaMethodTypes (map typeToData argTypes)] ++ [callWay])
                         else
                             concatMapM compileExpr args >>= \args' ->
                                 return $
@@ -338,7 +339,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     funcDecs'' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs''
-    let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
+    let function = Label funame : PragmaMethodTypes (map typeToData (init funcDec.types)) : args' ++ body' ++ ([Ret | name /= "main"]) -- TODO: Put in actual types
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
     modify (\s -> s{currentContext = previousContext})

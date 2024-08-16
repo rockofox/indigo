@@ -1,0 +1,20 @@
+trait Monad = do
+  bind :: Any -> Fn{Any => Any} -> Any
+end
+
+struct Maybe = (some: Any, none: Any)
+
+impl Monad for Maybe = do
+  bind x f = do
+    f x.some
+  end
+end
+
+let call (x: Fn {Any => Any}) = x "test"
+
+let nop (x: Any) = x
+
+let main => IO = do
+  let bla = Maybe { some: "hello", none: "" }
+  bind bla, print
+end

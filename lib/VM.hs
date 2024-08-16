@@ -105,10 +105,6 @@ data Instruction
       Swp
     | -- | A label
       Label String
-    | -- | Pop a value off the stack and store it in the data memory
-      Store Int
-    | -- | Push a value from the data memory onto the stack
-      Load Int
     | -- | Return to the caller
       Ret
     | -- | Pop a value off the stack and store it in a named register with the given name
@@ -145,6 +141,8 @@ data Instruction
       Comment String
     | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
       Meta String
+    | -- | TODO
+      PragmaMethodTypes [VM.Data]
     | -- | Access a field
       Access String
     | -- | Pack map
@@ -153,6 +151,10 @@ data Instruction
       TypeEq
     | -- | mov
       Mov Int Data
+    | -- | Mov a value from the stack to a register
+      MovReg Int
+    | -- | Push a value out of a register onto the stack
+      PushReg Int
     | -- | Call FFI
       CallFFI String String Int
     | -- | Exit the program
@@ -222,7 +224,7 @@ data VM = VM
     , pc :: Int
     , running :: Bool
     , labels :: [(String, Int)]
-    , memory :: [Data]
+    , memory :: Data.Map Int Data
     , callStack :: [StackFrame]
     , breakpoints :: [Int]
     , ioMode :: IOMode
@@ -235,7 +237,7 @@ data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}}
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = Data.Map.empty, callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}}
 
 type Program = V.Vector Instruction
 
@@ -736,9 +738,6 @@ runInstruction (Label _) = return ()
 runInstruction Swp = stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
 runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
 runInstruction (DupN n) = stackPeek >>= \d -> stackPushN $ replicate n d
--- Memory
-runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
-runInstruction (Store x) = stackPop >>= \d -> modify $ \vm -> vm{memory = take x (memory vm) ++ [d] ++ drop (x + 1) (memory vm)}
 -- Locals
 runInstruction (LStore name) = do
     localsc <- fmap (locals . safeHead) (gets callStack)
@@ -845,6 +844,7 @@ runInstruction Cast = do
                 then stackPush x
                 else error $ "Cast not implemented: " ++ debugShowData x ++ " to " ++ debugShowData to
 runInstruction (Meta _) = return ()
+runInstruction (PragmaMethodTypes _) = return ()
 runInstruction (Comment _) = return ()
 runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "Invalid type for access"
 runInstruction (PackMap n) = do
@@ -901,9 +901,14 @@ runInstruction TypeEq =
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList
 runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
 runInstruction (Mov n dat) = do
-    -- Move data into register %n
-    vm <- get
-    put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
+    modify $ \vm -> vm{memory = Data.Map.insert n dat (memory vm)}
+runInstruction (MovReg n) = do
+    stackPop >>= \x -> modify $ \vm -> vm{memory = Data.Map.insert n x (memory vm)}
+runInstruction (PushReg n) = do
+    value <- gets (Data.Map.lookup n . memory)
+    case value of
+        Just x -> stackPush x
+        Nothing -> error $ "Register " ++ show n ++ " has no value"
 runInstruction (LStow n l) = [PackList n, LStore l] & mapM_ runInstruction
 runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x

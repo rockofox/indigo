@@ -34,3 +34,21 @@ spec = do
                        , RegInst (Mov 1 (DInt 4)) []
                        , RegInst Add [1, 0]
                        ]
+    it "Can work with functions" $
+        toRegInst
+            [ Label "main"
+            , Push (DInt 1)
+            , Push (DInt 2)
+            , Call "bla"
+            , Label "bla"
+            , Add
+            , Ret
+            ]
+            `shouldBe` [ RegInst (Label "main") []
+                       , RegInst (Mov 0 (DInt 1)) []
+                       , RegInst (Mov 1 (DInt 2)) []
+                       , RegInst (Call "bla") []
+                       , RegInst (Label "bla") []
+                       , RegInst Add [1, 0]
+                       , RegInst Ret []
+                       ]
