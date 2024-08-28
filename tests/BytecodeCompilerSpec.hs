@@ -16,7 +16,7 @@ import Test.QuickCheck.Arbitrary.Generic
 import Text.Megaparsec (errorBundlePretty)
 import Text.RawString.QQ (r)
 import Util
-import VM (Action (..), Data (..), Instruction (..))
+import VM (Action (..), Data (..), Instruction (..), MovLValue)
 
 instance Arbitrary WordPtr where
     arbitrary = fromIntegral <$> (arbitrary :: Gen Word64)
@@ -31,6 +31,10 @@ instance Arbitrary VM.Data where
     shrink = genericShrink
 
 instance Arbitrary VM.Action where
+    arbitrary = genericArbitrary
+    shrink = genericShrink
+
+instance Arbitrary VM.MovLValue where
     arbitrary = genericArbitrary
     shrink = genericShrink
 

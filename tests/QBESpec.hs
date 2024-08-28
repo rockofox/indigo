@@ -41,13 +41,30 @@ spec :: Spec
 spec = it "TODO" $ do
     instructions <-
         compile
-            [r|
-                let main = 2 + 3
+            [r| 
+                #let myhead ([]: [Any]) = 0
+                #let myhead ((x:xs): [Any]) = x
+                #let main = print myhead [1,2,3]
+
+                #let add (a: Int b: Int) = a + b
+                #let main = print add 2,3
+
+                #let subt (a: Int b: Int) = (a) - b
+                #let main = print subt 2,3
+                let main = println map (\x->x+1), [1,2,3]
             |]
-    let qbeCode = toQbe instructions
     putStrLn $ "Instructions:\n" ++ printAssembly (Data.Vector.fromList instructions) False
-    putStrLn $ "QBE code: " ++ qbeCode
+    let (qbeCode, regInst) = toQbe instructions
+    putStrLn $ "Instructions 2:\n" ++ printRegInstProgram regInst
+    prettierResult <- readProcess "prettier" ["--parser", "babel"] qbeCode
+    batResult <- readProcess "/run/current-system/sw/bin/bat" ["-l", "javascript", "-n", "-f", "-"] prettierResult
+    _ <- readProcess "pbcopy" [] prettierResult
+    putStrLn $ "QBE code:\n" ++ batResult
     -- result <- readProcess "qbe" ["-o", "-", "-"] qbeCode
-    result <- readProcess "node" ["-"] qbeCode
+
+    result <- readProcess "node" ["-"] prettierResult
     putStrLn $ "Result: " ++ result
+    -- result `shouldBe` "5\n"
     result `shouldNotBe` ""
+
+-- print regInst

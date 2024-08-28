@@ -158,7 +158,7 @@ findSourceFile fileName = do
 preludeFile :: IO String
 preludeFile = findSourceFile "std/prelude.in" >>= readFile
 
-doBinOp :: Parser.Expr -> Parser.Expr -> [Instruction] -> StateT (CompilerState a) IO [Instruction]
+doBinOp :: Parser.Expr -> Parser.Expr -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y op = do
     id' <- allocId
     functions' <- gets functions
@@ -178,7 +178,7 @@ doBinOp x y op = do
         (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
         (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
         -- _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
-        _ -> return (x' ++ MovReg id' : y' ++ MovReg (id' + 1) : [PushReg id', PushReg (id' + 1)] ++ cast ++ op)
+        _ -> return (x' ++ MovReg id' : y' ++ MovReg (id' + 1) : [PushReg id', PushReg (id' + 1)] ++ cast ++ [PragmaMethodTypes [0, 0]] ++ [op])
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
 typeOf (Parser.FuncCall funcName _ _) = do
@@ -232,21 +232,21 @@ typeToData Parser.Any = VM.DNone
 typeToData _ = VM.DNone
 
 compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
-compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y . last
 compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y
-compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y
+compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y . last
+compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y . last
 compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
@@ -318,6 +318,7 @@ compileExpr (Parser.FuncCall funcName args _) = do
                         return $
                             args'
                                 ++ [ LLoad funcName
+                                   , PragmaMethodTypes (map typeToData argTypes)
                                    , CallS
                                    ]
 compileExpr fd@(Parser.FuncDec{}) = do

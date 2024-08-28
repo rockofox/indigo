@@ -62,6 +62,7 @@
             pkgs.wasmtime
             pkgs.wabt
             pkgs.wizer
+            pkgs.qbe
           ];
           withHoogle = false;
           inherit (inputs.self.checks.${system}.pre-commit-check) shellHook;

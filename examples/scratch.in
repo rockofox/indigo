@@ -38,4 +38,5 @@
 # add :: Int -> Int -> Int
 # add a b = a + b
 # let main => IO = println add 3.0, 4.0
-println 14 + 18 / 2 * 18 - 7
+# println 14 + 18 / 2 * 18 - 7
+let main => IO = println map (\x->x+1), [1,2,3]

@@ -6,7 +6,7 @@
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
+module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, printAssembly', runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), MovLValue (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
 import Control.Monad
 import Control.Monad.RWS hiding (local)
@@ -42,6 +42,7 @@ import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
+import Text.Megaparsec (MonadParsec (eof))
 import Util (showSanitized)
 
 data Instruction
@@ -150,16 +151,20 @@ data Instruction
     | -- | Compares two types and pushes T if they are compatible, F otherwise
       TypeEq
     | -- | mov
-      Mov Int Data
+      Mov Int MovLValue
     | -- | Mov a value from the stack to a register
       MovReg Int
     | -- | Push a value out of a register onto the stack
       PushReg Int
     | -- | Call FFI
       CallFFI String String Int
+    | -- | Phi node
+      Phi String MovLValue MovLValue
     | -- | Exit the program
       Exit
     deriving (Show, Eq, Generic)
+
+data MovLValue = Lit Data | Reg Int | None deriving (Show, Eq, Generic)
 
 data Action = Print | GetLine | GetChar | Random deriving (Show, Eq, Generic)
 
@@ -181,6 +186,8 @@ data Data
 instance Binary Instruction
 
 instance Binary Action
+
+instance Binary MovLValue
 
 instance Binary Data
 
@@ -577,7 +584,7 @@ instance FfiRet CChar Data where
   ret (DChar _) = retCChar
   ret _ = error "Invalid return type"
 
-instance FfiRet (Ptr ()) Data where 
+instance FfiRet (Ptr ()) Data where
   ret (DCPtr _) = retPtr retVoid
   ret _ = error "Invalid return type"
 
@@ -596,7 +603,7 @@ runInstruction (CallFFI name from numArgs) = do
     retT <- stackPop
     ffiArgs <- liftIO $ mapM arg args
     let ffiArgs' = map fst ffiArgs
-    let frees = map snd ffiArgs 
+    let frees = map snd ffiArgs
     case retT of
       DInt{} -> do
         let retType = ret retT :: RetType Ghc.Int.Int32
@@ -629,7 +636,7 @@ runInstruction (CallFFI name from numArgs) = do
       DMap x -> do
         let keys = reverse (Data.Map.keys (clearMap x))
         let types = map dataCType (Data.Map.elems (clearMap x))
-        liftIO $ writeIORef globalStructType types 
+        liftIO $ writeIORef globalStructType types
         (_,retType,_) <- liftIO (newStorableStructArgRet types :: IO (Data -> Arg, RetType Data, IO ()))
         (DList values) <- liftIO $ callFFI fun retType ffiArgs'
         let result = DMap $ Data.Map.fromList $ zip keys values
@@ -900,8 +907,16 @@ runInstruction TypeEq =
         _ -> False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList
 runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
-runInstruction (Mov n dat) = do
+runInstruction (Mov n (Lit dat)) = do
     modify $ \vm -> vm{memory = Data.Map.insert n dat (memory vm)}
+runInstruction (Mov n (Reg reg)) = do
+    datAtReg <-
+        gets (Data.Map.lookup reg . memory) >>= \case
+            Just x -> return x
+            Nothing -> error $ "Register " ++ show reg ++ " has no value"
+    modify $ \vm -> vm{memory = Data.Map.insert n datAtReg (memory vm)}
+runInstruction (Mov n None) = do
+    modify $ \vm -> vm{memory = Data.Map.delete n (memory vm)}
 runInstruction (MovReg n) = do
     stackPop >>= \x -> modify $ \vm -> vm{memory = Data.Map.insert n x (memory vm)}
 runInstruction (PushReg n) = do
@@ -912,41 +927,42 @@ runInstruction (PushReg n) = do
 runInstruction (LStow n l) = [PackList n, LStore l] & mapM_ runInstruction
 runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
+runInstruction Phi{} = error "Phi not implemented in VM"
 
 printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers =
     if not showLineNumbers
         then concatMap printAssembly' program
         else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] (V.toList program)
-  where
-    printAssembly' :: Instruction -> String
-    printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
-    printAssembly' (Comment text) = "\t;\ESC[0;33m " <> text <> " \ESC[0m " ++ "\n"
-    printAssembly' (PushPf x y) = asmLine ("push_pf " ++ x ++ " " ++ show y)
-    printAssembly' (Push x) = asmLine $ "push " ++ show x
-    printAssembly' (Call name) = asmLine ("call " <> name)
-    printAssembly' (Jmp name) = asmLine ("jmp " <> name)
-    printAssembly' (Jz name) = asmLine ("jz " <> name)
-    printAssembly' (Jnz name) = asmLine ("jnz " <> name)
-    printAssembly' (Jt name) = asmLine ("jt " <> name)
-    printAssembly' (Jf name) = asmLine ("jf " <> name)
-    printAssembly' (LLoad name) = asmLine ("lload " <> name)
-    printAssembly' a = asmLine $ show a
 
-    asmLine :: String -> String
-    asmLine a = "\t" ++ Data.Text.unpack a'''' ++ "\n"
-      where
-        a' = Data.Text.pack a
-        a'' = Data.Text.replace "\n" "\\n" a'
-        -- lowercase the first word
-        a''' =
-            Data.Text.split (== ' ') a'' & \case
-                [] -> ""
-                (x : xs) -> Data.Text.toLower x <> " " <> Data.Text.unwords xs
-        a'''' =
-            Data.Text.split (== ' ') a''' & \case
-                [] -> ""
-                (x : xs) -> "\ESC[0;34m" <> x <> " \ESC[0m " <> Data.Text.unwords xs
+printAssembly' :: Instruction -> String
+printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
+printAssembly' (Comment text) = "\t;\ESC[0;33m " <> text <> " \ESC[0m " ++ "\n"
+printAssembly' (PushPf x y) = asmLine ("push_pf " ++ x ++ " " ++ show y)
+printAssembly' (Push x) = asmLine $ "push " ++ show x
+printAssembly' (Call name) = asmLine ("call " <> name)
+printAssembly' (Jmp name) = asmLine ("jmp " <> name)
+printAssembly' (Jz name) = asmLine ("jz " <> name)
+printAssembly' (Jnz name) = asmLine ("jnz " <> name)
+printAssembly' (Jt name) = asmLine ("jt " <> name)
+printAssembly' (Jf name) = asmLine ("jf " <> name)
+printAssembly' (LLoad name) = asmLine ("lload " <> name)
+printAssembly' a = asmLine $ show a
+
+asmLine :: String -> String
+asmLine a = "\t" ++ Data.Text.unpack a'''' ++ "\n"
+  where
+    a' = Data.Text.pack a
+    a'' = Data.Text.replace "\n" "\\n" a'
+    -- lowercase the first word
+    a''' =
+        Data.Text.split (== ' ') a'' & \case
+            [] -> ""
+            (x : xs) -> Data.Text.toLower x <> " " <> Data.Text.unwords xs
+    a'''' =
+        Data.Text.split (== ' ') a''' & \case
+            [] -> ""
+            (x : xs) -> "\ESC[0;34m" <> x <> " \ESC[0m " <> Data.Text.unwords xs
 
 toBytecode :: Program -> LazyByteString
 toBytecode = encode . V.toList
