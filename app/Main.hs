@@ -10,6 +10,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.State (StateT (runStateT), evalStateT)
 import Control.Monad.State.Lazy
+import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate, isPrefixOf)
 import Data.Maybe (fromJust, fromMaybe, isNothing)
@@ -43,6 +44,7 @@ data CmdOptions = Options
     , showTime :: Bool
     , showVersion :: Bool
     , noVerify :: Bool
+    , noOptimize :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser CmdOptions
@@ -69,6 +71,7 @@ optionsParser =
         <*> switch (long "profile" <> short 'p' <> help "Show time spent parsing, compiling and running")
         <*> switch (long "version" <> short 'V' <> help "Show version")
         <*> switch (long "no-verify" <> short 'n' <> help "Don't verify the program")
+        <*> switch (long "no-optimize" <> short 'O' <> help "Don't optimize the program")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -121,7 +124,7 @@ parseNoVerify name input compilerFlags = return $ do
 
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify <-
+    Options input output debug verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -154,8 +157,10 @@ main = do
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr
-                potentiallyTimedOperation "Compilation" showTime $ do
-                    optimize <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
+                potentiallyTimedOperation "Compilation" showTime $
+                    do
+                        bool id optimize (not noOptimize)
+                        <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

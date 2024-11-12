@@ -2,15 +2,18 @@ module BytecodeCompiler where
 
 import AST (zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
+import Control.Arrow ((>>>))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
 import Data.Bifunctor (second)
+import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, inits, intercalate)
 import Data.List.Split qualified
 import Data.Map qualified
 import Data.Maybe (fromJust, isJust, isNothing)
+import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
@@ -312,7 +315,9 @@ compileExpr (Parser.FuncCall funcName args _) = do
                                 return $
                                     args'
                                         ++ [PushPf (funame fun) (length args')]
-                Nothing ->
+                Nothing -> do
+                    -- traceM $ "Looking for funcDec " ++ funcName
+                    -- gets funcDecs >>= \x -> traceM $ "\t" ++ show (map Parser.name x)
                     concatMapM compileExpr args >>= \args' ->
                         return $
                             args'
@@ -381,7 +386,10 @@ compileExpr (Parser.Var x _) = do
     curCon <- gets currentContext
     externals' <- gets externals
 
-    let fun = any ((== x) . baseName) functions' || any ((== curCon ++ "@" ++ x) . baseName) functions'
+    let fun =
+            any ((== x) . baseName) functions'
+                || any ((== curCon ++ "@" ++ x) . baseName) functions'
+                || any ((== x) . ((Data.Text.unpack . last . splitOn "::") . fromString . baseName)) functions'
     if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
         then compileExpr (Parser.FuncCall x [] zeroPosition)
         else return [LLoad x]
