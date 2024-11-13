@@ -136,6 +136,7 @@ typeOf' x@Impl{} = return $ typeOf x
 typeOf' x@External{} = return $ typeOf x
 typeOf' x@Placeholder{} = return $ typeOf x
 typeOf' x@Let{} = return $ typeOf x
+typeOf' x@ParenApply{} = return $ typeOf x
 
 compareTypes' :: Type -> Type -> [AST.GenericExpr] -> StateT VerifierState IO Bool
 compareTypes' (List x) (List y) generics = compareTypes' x y generics

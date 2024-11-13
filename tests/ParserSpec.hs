@@ -114,14 +114,27 @@ spec = do
                     (Program [FuncCall "filter" [FuncCall "==" [IntLit 1] anyPosition, ListLit [IntLit 1, IntLit 2, IntLit 3]] anyPosition])
     describe "Unary minus" $ do
         it "Should parse unary minus" $
-            parseProgram "-1" parserCompilerFlags
+            parseProgram "(-1)" parserCompilerFlags
                 `shouldBe` Right
                     (Program [UnaryMinus (IntLit 1)])
         it "Should be able to use negative numbers in multiplication" $
-            parseProgram "1 *-1" parserCompilerFlags
+            parseProgram "1 * (-1)" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Mul (IntLit 1) (UnaryMinus (IntLit 1))])
         it "Should be able to negate expressions in parentheses" $
-            parseProgram "2 * -(3-x*5)" parserCompilerFlags
+            parseProgram "2 * (-(3-x*5))" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Mul (IntLit 2) (UnaryMinus (Sub (IntLit 3) (Mul (Var "x" anyPosition) (IntLit 5))))])
+    describe "Parentheses" $ do
+        it "Should parse parentheses" $
+            parseProgram "(1 + 2) * 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Mul (Add (IntLit 1) (IntLit 2)) (IntLit 3)])
+        it "Should parse parenthesis application correctly" $
+            parseProgram "(x y) z" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [ParenApply (FuncCall "x" [Var "y" anyPosition] anyPosition) [Var "z" anyPosition] anyPosition])
+        it "bottles (i)-1" $
+            parseProgram "bottles (i)-1" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncCall "bottles" [Sub (Var "i" anyPosition) (IntLit 1)] anyPosition])

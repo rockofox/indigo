@@ -17,6 +17,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -381,14 +382,17 @@ compileExpr (Parser.FuncDef origName args body) = do
         return [Dup, Push $ DInt $ fromIntegral x, Eq, Jf nextFunName]
     compileParameter Parser.Placeholder _ = return []
     compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
+compileExpr (Parser.ParenApply x y _) = do
+    fun <- compileExpr x
+    args <- concatMapM compileExpr y
+    return $ args ++ fun ++ [CallS]
 compileExpr (Parser.Var x _) = do
     functions' <- gets functions
     curCon <- gets currentContext
     externals' <- gets externals
-
     let fun =
             any ((== x) . baseName) functions'
-                || any ((== curCon ++ "@" ++ x) . baseName) functions'
+                || any ((\context -> any ((== context ++ "@" ++ x) . baseName) functions') . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
                 || any ((== x) . ((Data.Text.unpack . last . splitOn "::") . fromString . baseName)) functions'
     if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
         then compileExpr (Parser.FuncCall x [] zeroPosition)

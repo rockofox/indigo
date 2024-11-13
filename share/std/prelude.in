@@ -155,7 +155,7 @@ sqrt x = x ** 0.5
 abs :: Float -> Float
 abs x = do
   if x < 0.0 then do
-    -x
+    (-x)
   else do
     x
   end
@@ -187,3 +187,6 @@ let void (x: Any) => Any = _
 
 let head ((x:xs): [Any]) => Any = x
 let tail ((_:xs): [Any]) => [Any] = xs
+
+compose :: Any -> Any -> Any
+compose f g = \x -> f (g x)

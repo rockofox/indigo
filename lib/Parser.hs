@@ -85,7 +85,7 @@ binOpTable =
     , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
-    , [prefix "-" UnaryMinus]
+    -- , [prefix "-" UnaryMinus]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]
@@ -264,6 +264,14 @@ funcCall = do
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     end <- getOffset
     return $ FuncCall name args (Position (start, end))
+
+parenApply :: Parser Expr
+parenApply = do
+    start <- getOffset
+    paren <- parens expr
+    args <- sepBy1 expr (symbol ",") <?> "function arguments"
+    end <- getOffset
+    return $ ParenApply paren args (Position (start, end))
 
 letExpr :: Parser Expr
 letExpr = do
@@ -537,10 +545,17 @@ external = do
     symbol "end"
     return $ External from decs
 
+unaryMinus :: Parser Expr
+unaryMinus = parens $ do
+    symbol "-"
+    UnaryMinus <$> expr
+
 term :: Parser Expr
 term =
     choice
         [ placeholder
+        , try unaryMinus
+        , try parenApply
         , parens expr
         , CharLit <$> try charLit
         , DoubleLit <$> try double

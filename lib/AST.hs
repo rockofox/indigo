@@ -59,6 +59,7 @@ data Expr
     | StrictEval Expr
     | External String [Expr]
     | CharLit Char
+    | ParenApply Expr [Expr] Position
     deriving
         ( Show
         , Generic
@@ -119,6 +120,7 @@ children (StrictEval a) = [a]
 children (External _ a) = a
 children (CharLit _) = []
 children (DoubleLit _) = []
+children (ParenApply a b _) = a : b
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -241,6 +243,7 @@ typeOf (StrictEval x) = typeOf x
 typeOf (External _ _) = error "Cannot infer type of external"
 typeOf (CharLit _) = StructT "Char"
 typeOf (DoubleLit _) = StructT "Double"
+typeOf (ParenApply a _ _) = typeOf a
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True
