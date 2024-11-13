@@ -121,6 +121,14 @@ min x y = do
   end
 end
 
+let floor (x: Float) => Float = do
+  if x < 0.0 then do
+    (x + 0.5) as Int as Float
+  else do
+    ((x) - 0.5) as Int as Float
+  end
+end
+
 randomFloat :: IO
 randomFloat _ = do
   unsafeRandom
@@ -129,7 +137,7 @@ end
 randomInt :: Int -> Int -> Int
 randomInt a b = do
   let r = randomFloat
-  (r * ((((b) - a) + a) as Float)) as Int
+  (floor (r * ((((b) - a) + a) as Float))) as Int
 end
 
 range :: Any -> Any -> Any -> [Any]
