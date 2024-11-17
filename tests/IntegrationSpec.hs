@@ -60,19 +60,40 @@ spec = do
         it "Has working precedence for brackets" $ do
             compileAndRun "let main => IO = println (1 + 2) * 3" `shouldReturn` "9\n"
     describe "Pattern matching" $ do
-        it "Can return the first element of a list" $ do
-            compileAndRun "t :: [Int] -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
-        it "Can return the first two" $ do
-            compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
-        it "Can return the excess" $ do
-            compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
-        it "Can detect zero elements" $ do
+        it "Can match Int" $ do
             compileAndRun
-                [r|t :: [Int] -> Int
-                            t [] = 0
-                            t (x:xs) = x
-                            let main => IO = println (t [] as [Int])|]
-                `shouldReturn` "0\n"
+                [r|
+                t :: Int -> Int
+                t 1 = 2
+                t 2 = 3
+                t _ = 4
+                let main => IO = println (t 1)
+            |]
+                `shouldReturn` "2\n"
+        it "Can match String" $ do
+            compileAndRun
+                [r|
+                t :: String -> Int
+                t "a" = 2
+                t "b" = 3
+                t _ = 4
+                let main => IO = println (t "a")
+            |]
+                `shouldReturn` "2\n"
+        describe "Lists" $ do
+            it "Can return the first element of a list" $ do
+                compileAndRun "t :: [Int] -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
+            it "Can return the first two" $ do
+                compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = x + y\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "3\n"
+            it "Can return the excess" $ do
+                compileAndRun "t :: [Int] -> Int\nt (x:y:xs) = xs\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "[3]\n"
+            it "Can detect zero elements" $ do
+                compileAndRun
+                    [r|t :: [Int] -> Int
+                                t [] = 0
+                                t (x:xs) = x
+                                let main => IO = println (t [] as [Int])|]
+                    `shouldReturn` "0\n"
         it "Can detect one element" $ do
             compileAndRun
                 [r|t :: [Int] -> Int
@@ -81,6 +102,43 @@ spec = do
                             t (x:xs) = x
                             let main => IO = println (t [4])|]
                 `shouldReturn` "1\n"
+        describe "Structs" $ do
+            it "Can match based on what struct" $ do
+                compileAndRun
+                    [r|struct Teacher = ()
+                       struct Student = ()
+                       struct Foo = ()
+
+                       test :: Any -> String
+                       test Teacher{} = "Teacher"
+                        test Student{} = "Student"
+                        test _ = "Unknown"
+
+                        let main => IO = do
+                            println test Teacher{}
+                            println test Student{}
+                            println test Foo{}
+                        end
+                    |]
+                    `shouldReturn` "Teacher\nStudent\nUnknown\n"
+            it "Can match struct fields" $ do
+                compileAndRun
+                    [r|struct Teacher = (name: String)
+                        struct Student = (name: String)
+                        struct Foo = (name: String)
+
+                        test :: Any -> String
+                        test Teacher{name: n} = n
+                        test Student{name: n} = n
+                        test _ = "Unknown"
+
+                        let main => IO = do
+                            println test Teacher{name: "Alice"}
+                            println test Student{name: "Bob"}
+                            println test Foo{name: "Charlie"}
+                        end
+                    |]
+                    `shouldReturn` "Alice\nBob\nUnknown\n"
     describe "Prelude" $ do
         it "Can use map" $ do
             compileAndRun "let main => IO = println (map (`+`1), [1, 2, 3])" `shouldReturn` "[2,3,4]\n"

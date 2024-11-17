@@ -85,8 +85,8 @@ binOpTable =
     , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
-    -- , [prefix "-" UnaryMinus]
-    , [binary "**" Power, binary "*" Mul, binary "/" Div]
+    , -- , [prefix "-" UnaryMinus]
+      [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]
     , [binary ">>" Then]
@@ -239,13 +239,13 @@ charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal
 
 funcDec :: Parser Expr
 funcDec = do
-    name <- identifier <|> gravis
+    name <- (identifier <|> gravis) <?> "function name"
     symbol "::"
-    argTypes <- sepBy1 validType (symbol "->")
+    argTypes <- sepBy1 validType (symbol "->") <?> "function arguments"
     return $ FuncDec name argTypes []
 
 defArg :: Parser Expr
-defArg = var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer
+defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer <|> StringLit <$> stringLit
 
 funcDef :: Parser Expr
 funcDef = do
@@ -268,7 +268,7 @@ funcCall = do
 parenApply :: Parser Expr
 parenApply = do
     start <- getOffset
-    paren <- parens expr
+    paren <- parens expr <?> "parenthesized function expression"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     end <- getOffset
     return $ ParenApply paren args (Position (start, end))
@@ -276,9 +276,9 @@ parenApply = do
 letExpr :: Parser Expr
 letExpr = do
     keyword "let"
-    name <- identifier <|> gravis
+    name <- identifier <|> gravis <?> "variable name"
     symbol "="
-    value <- recover expr
+    value <- recover expr <?> "variable value"
     state <- get
     put state{validLets = name : validLets state}
     return $ Let name value
@@ -286,14 +286,14 @@ letExpr = do
 ifExpr :: Parser Expr
 ifExpr = do
     keyword "if"
-    cond <- expr
+    cond <- expr <?> "condition"
     keyword "then"
     optional newline'
-    thenExpr <- expr
+    thenExpr <- expr <?> "then expression"
     optional newline'
     keyword "else"
     optional newline'
-    elseExpr <- expr
+    elseExpr <- expr <?> "else expression"
     optional newline'
     return $ If cond thenExpr elseExpr
 
@@ -301,14 +301,14 @@ doBlock :: Parser Expr
 doBlock = do
     keyword "do"
     newline'
-    exprs <- lines'
+    exprs <- lines' <?> "do block"
     keyword "end" <|> lookAhead (keyword "else")
     return $ DoBlock exprs
 
 generic :: Parser [GenericExpr]
 generic = do
     symbol "<"
-    args <- sepBy1 typeAndMaybeConstraint (symbol ",")
+    args <- sepBy1 typeAndMaybeConstraint (symbol ",") <?> "generic arguments"
     symbol ">"
     return args
   where
@@ -323,9 +323,9 @@ combinedFunc :: Parser Expr
 combinedFunc = do
     keyword "let"
     name <- identifier <|> gravis <?> "function name"
-    generics <- fromMaybe [] <$> optional generic
-    (args, argTypes) <- parens argsAndTypes <|> argsAndTypes
-    returnType <- optional (symbol "=>" >> validType <?> "return type")
+    generics <- (fromMaybe [] <$> optional generic) <?> "function generics"
+    (args, argTypes) <- (parens argsAndTypes <|> argsAndTypes) <?> "function arguments"
+    returnType <- optional (symbol "=>" >> validType <?> "return type") <?> "return type"
     symbol "="
     body <- recover expr <?> "function body"
     return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics)
@@ -342,7 +342,7 @@ import_ :: Parser Expr
 import_ = do
     keyword "import"
     qualified <- optional (keyword "qualified" >> return True) <?> "qualified"
-    objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",")
+    objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",") <?> "import objects"
     keyword "from"
     from <- many (alphaNumChar <|> char '.' <|> char '@' <|> char '/') <?> "import path"
     alias <- optional (keyword " as" >> extra) <?> "import alias"
@@ -351,25 +351,25 @@ import_ = do
 array :: Parser Expr
 array = do
     symbol "["
-    elements <- sepBy expr (symbol ",")
+    elements <- sepBy expr (symbol ",") <?> "array elements"
     symbol "]"
     return $ ListLit elements
 
 struct :: Parser Expr
 struct = do
     keyword "struct"
-    name <- extra
+    name <- extra <?> "struct name"
     symbol "="
-    fields <- parens $ structField `sepBy` symbol ","
+    fields <- parens (structField `sepBy` symbol ",") <?> "struct fields"
     refinementSrc <- lookAhead $ optional $ do
         keyword "satisfies"
-        parens $ many (noneOf [')'])
+        parens (many (noneOf [')'])) <?> "refinement source"
     refinement <- optional $ do
         keyword "satisfies"
-        parens expr
+        parens expr <?> "refinement"
     is <- optional $ do
         keyword "is"
-        sepBy extra (symbol ",")
+        sepBy extra (symbol ",") <?> "struct interfaces"
     return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is}
   where
     structField = do
@@ -381,14 +381,14 @@ struct = do
 structLit :: Parser Expr
 structLit = do
     start <- getOffset
-    name <- extra
+    name <- extra <?> "struct name"
     symbol "{"
     fields <-
         sepBy
             ( do
-                fieldName <- identifier
+                fieldName <- identifier <?> "field name"
                 symbol ":"
-                fieldValue <- expr
+                fieldValue <- expr <?> "field value"
                 return (fieldName, fieldValue)
             )
             (symbol ",")
@@ -398,9 +398,9 @@ structLit = do
 
 arrayAccess :: Parser Expr
 arrayAccess = do
-    a <- choice [var, array]
+    a <- choice [var, array] <?> "array"
     symbol "["
-    index <- expr
+    index <- expr <?> "array index"
     symbol "]"
     return $ ArrayAccess a index
 
@@ -468,19 +468,19 @@ target :: Parser Expr
 target = do
     symbol "__target"
     target' <- (symbol "wasm" <|> symbol "c") <?> "target"
-    Target (unpack target') <$> expr
+    Target (unpack target') <$> expr <?> "target"
 
 listPattern :: Parser Expr
 listPattern = do
-    elements <- sepBy1 (var <|> placeholder <|> array) (symbol ":")
+    elements <- sepBy1 (var <|> placeholder <|> array) (symbol ":") <?> "list pattern"
     return $ ListPattern elements
 
 lambda :: Parser Expr
 lambda = do
     symbol "\\"
-    args <- some (var <|> parens listPattern <|> array)
+    args <- some (var <|> parens listPattern <|> array) <?> "lambda arguments"
     symbol "->"
-    Lambda args <$> expr
+    Lambda args <$> expr <?> "lambda body"
 
 verbose :: (Show a) => String -> Parser a -> Parser a
 verbose str parser = do
@@ -503,13 +503,13 @@ typeLiteral = do
 trait :: Parser Expr
 trait = do
     keyword "trait"
-    name <- identifier
+    name <- identifier <?> "trait name"
     methods <-
         ( do
                 symbol "="
                 keyword "do"
                 newline'
-                fds <- funcDec `sepEndBy` newline'
+                fds <- funcDec `sepEndBy` newline' <?> "trait methods"
                 keyword "end"
                 return fds
             )
@@ -519,15 +519,15 @@ trait = do
 impl :: Parser Expr
 impl = do
     keyword "impl"
-    name <- identifier
+    name <- identifier <?> "impl name"
     symbol "for"
-    for <- identifier
+    for <- identifier <?> "impl for"
     methods <-
         ( do
                 symbol "="
                 symbol "do"
                 newline'
-                fds <- funcDef `sepEndBy` newline'
+                fds <- funcDef `sepEndBy` newline' <?> "impl methods"
                 symbol "end"
                 return fds
             )
@@ -537,18 +537,18 @@ impl = do
 external :: Parser Expr
 external = do
     keyword "external"
-    from <- stringLit
+    from <- stringLit <?> "external from"
     symbol "="
     symbol "do"
     newline'
-    decs <- funcDec `sepEndBy` newline'
+    decs <- funcDec `sepEndBy` newline' <?> "external declarations"
     symbol "end"
     return $ External from decs
 
 unaryMinus :: Parser Expr
 unaryMinus = parens $ do
     symbol "-"
-    UnaryMinus <$> expr
+    UnaryMinus <$> expr <?> "negatable expression"
 
 term :: Parser Expr
 term =

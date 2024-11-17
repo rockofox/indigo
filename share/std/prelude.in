@@ -1,5 +1,13 @@
 struct IO = (inner: Any)
 
+trait Optional
+struct Some = (value: Any) is Optional
+struct None = () is Optional
+
+maybe :: Any -> Optional -> Any
+maybe x Some{value: y} = y
+maybe x None{} = x
+
 # `+` :: Any -> Any -> Any
 # `+` x y = x + y
 # `-` :: Any -> Any -> Any

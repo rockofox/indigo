@@ -2,12 +2,10 @@ module BytecodeCompiler where
 
 import AST (zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
-import Control.Arrow ((>>>))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
 import Data.Bifunctor (second)
-import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, inits, intercalate)
 import Data.List.Split qualified
@@ -17,7 +15,6 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -376,12 +373,37 @@ compileExpr (Parser.FuncDef origName args body) = do
                 let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
                 let rest = [Push $ DInt (length elements - 1), Push DNone, Slice, last elements']
                 return $ lengthCheck ++ concat xToY ++ rest
-    compileParameter (Parser.IntLit x) funcName = do
-        -- TODO: fix this
+    compileParameter (Parser.StructLit name fields _) funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        return [Dup, Push $ DInt $ fromIntegral x, Eq, Jf nextFunName]
+        let fields' =
+                concatMap
+                    ( \case
+                        (sName, Parser.Var tName _) -> [(sName, tName)]
+                        _ -> []
+                    )
+                    fields
+        let fieldMappings = concatMap (\(sName, tName) -> [Dup, Access sName, LStore tName]) fields'
+        let fields'' =
+                concatMap
+                    ( \case
+                        (_, Parser.Var _ _) -> []
+                        (sName, x) -> [(sName, x)]
+                    )
+                    fields
+        fieldChecks <-
+            concatMapM
+                ( \(sName, x) -> do
+                    let a = [Dup, Access sName]
+                    b <- compileExpr x
+                    return $ a ++ b ++ [Eq, Jf nextFunName]
+                )
+                fields''
+        return $ [Dup, Push $ DTypeQuery name, TypeEq, Jf nextFunName] ++ fieldMappings ++ ([Pop | null fieldChecks]) ++ fieldChecks
     compileParameter Parser.Placeholder _ = return []
-    compileParameter x _ = error $ show x ++ ": not implemented as a function parameter"
+    compileParameter x funcName = do
+        nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
+        x' <- compileExpr x
+        return $ x' ++ [Eq, Jf nextFunName]
 compileExpr (Parser.ParenApply x y _) = do
     fun <- compileExpr x
     args <- concatMapM compileExpr y

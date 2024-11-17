@@ -247,6 +247,10 @@ verifyProgram' name source exprs = do
 verifyMultiple :: [Expr] -> StateT VerifierState IO [ParseError s e]
 verifyMultiple = concatMapM verifyExpr
 
+structLitToBindings :: Expr -> Type -> [VBinding]
+structLitToBindings (StructLit _ fields _) _ = map (\case (_, Var name _) -> VBinding{name = name, ttype = Any, args = [], generics = []}; _ -> error "Impossible") fields
+structLitToBindings x y = error $ "structLitToBindings called with " ++ show x ++ " and " ++ show y
+
 verifyExpr :: Expr -> StateT VerifierState IO [ParseError s e]
 verifyExpr (FuncDef name args body) = do
     -- TODO: Position
@@ -270,6 +274,7 @@ verifyExpr (FuncDef name args body) = do
             argToBindings (Var name' _, Fn args' ret) = [VBinding{name = name', args = args', ttype = ret, generics = []}]
             argToBindings (Var name' _, ttype') = [VBinding{name = name', args = [], ttype = ttype', generics = []}]
             argToBindings (l@ListPattern{}, t) = listPatternToBindings l t
+            argToBindings (s@StructLit{}, t) = structLitToBindings s t
             argToBindings _ = []
         Nothing -> return [FancyError 0 (Set.singleton (ErrorFail $ "Function " ++ name ++ " is missing a declaration"))]
 verifyExpr (FuncDec name dtypes generics) = do
