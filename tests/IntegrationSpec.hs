@@ -80,6 +80,35 @@ spec = do
                 let main => IO = println (t "a")
             |]
                 `shouldReturn` "2\n"
+        it "Can match struct" $
+            do
+                compileAndRun
+                    [r|
+                bind :: Optional -> Any -> Any
+                bind Some{value: x} f = f x
+                bind None{} f = None{}
+                bind _ = "Error: Invalid argument to bind."
+                
+                println (bind Some{value: 5}, \x -> x + 1)
+                println (bind None{}, \x -> x + 1)
+            |]
+                `shouldReturn` "6\nNone{__traits: [Optional]}\n"
+        it "Handles multiple variables correctly" $ do
+            compileAndRun
+                [r|
+                bla :: Int -> Int -> Int
+                bla 1 x = 100 + x
+                bla 2 x = 200 + x
+                bla 3 x = 300 + x
+
+                let main => IO = do
+                    println (bla 1, 1)
+                    println (bla 2, 2)
+                    println (bla 3, 3)
+                end
+                |]
+                `shouldReturn` "101\n202\n303\n"
+
         describe "Lists" $ do
             it "Can return the first element of a list" $ do
                 compileAndRun "t :: [Int] -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"

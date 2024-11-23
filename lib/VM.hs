@@ -17,7 +17,7 @@ import Data.Function ((&))
 import Data.List.Split (chunksOf)
 import Data.Map qualified
 import Data.Map qualified as Data
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text qualified
 import Data.Vector qualified as V
 import Debug.Trace
@@ -33,6 +33,8 @@ import Foreign.LibFFI.Internal (CType)
 
 import Data.Binary qualified (get, put)
 import Data.Char (chr, ord)
+import Data.List qualified
+import Data.Map ((!), (!?))
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
 import Foreign.C.Types (CChar, CFloat, CInt, CUChar)
@@ -115,6 +117,12 @@ data Instruction
       LStore String
     | -- | Push the value of a named register with the given name onto the stack
       LLoad String
+    | -- | Store the stack
+      StoreSideStack
+    | -- | Load the stack
+      LoadSideStack
+    | -- Clear the sidestack
+      ClearSideStack
     | -- | Stow away N values from the stack into a named register
       LStow Int String
     | -- | Unstow values from a named register to the stack
@@ -195,7 +203,14 @@ instance Show Data where
     show DNone = "None"
     show (DChar x) = show x
     show (DFuncRef x args _) = "<" ++ x ++ "(" ++ show args ++ ")>"
-    show (DMap x) = show x
+    show (DMap x) =
+        if isNothing $ x !? "__name" then show x else showStruct (DMap x)
+      where
+        showStruct :: Data -> String
+        showStruct (DMap m) =
+            let (DString name) = m ! "__name"
+             in name ++ "{" ++ Data.List.intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) $ Data.Map.toList $ Data.Map.delete "__name" m) ++ "}"
+        showStruct _ = error "showStruct called with non-map"
     show (DTypeQuery x) = "TypeQuery " ++ x
     show (DCPtr x) = "CPtr " ++ show x
     show (DDouble x) = show x
@@ -227,6 +242,7 @@ data VM = VM
     , breakpoints :: [Int]
     , ioMode :: IOMode
     , ioBuffer :: IOBuffer
+    , sideStack :: [Data]
     }
     deriving (Show)
 
@@ -235,7 +251,7 @@ data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}}
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = []}
 
 type Program = V.Vector Instruction
 
@@ -421,7 +437,7 @@ findLabelFuzzy x = do
             case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
                 [] -> error $ "Label not found: " ++ x
                 [(n, l)] -> return (n, l)
-                xs -> error $ "Multiple labels found: " ++ show xs
+                xs -> return $ head xs
 
 class IntoData a where
     intoData :: a -> Data
@@ -575,7 +591,7 @@ instance FfiRet CChar Data where
   ret (DChar _) = retCChar
   ret _ = error "Invalid return type"
 
-instance FfiRet (Ptr ()) Data where 
+instance FfiRet (Ptr ()) Data where
   ret (DCPtr _) = retPtr retVoid
   ret _ = error "Invalid return type"
 
@@ -594,7 +610,7 @@ runInstruction (CallFFI name from numArgs) = do
     retT <- stackPop
     ffiArgs <- liftIO $ mapM arg args
     let ffiArgs' = map fst ffiArgs
-    let frees = map snd ffiArgs 
+    let frees = map snd ffiArgs
     case retT of
       DInt{} -> do
         let retType = ret retT :: RetType Ghc.Int.Int32
@@ -627,7 +643,7 @@ runInstruction (CallFFI name from numArgs) = do
       DMap x -> do
         let keys = reverse (Data.Map.keys (clearMap x))
         let types = map dataCType (Data.Map.elems (clearMap x))
-        liftIO $ writeIORef globalStructType types 
+        liftIO $ writeIORef globalStructType types
         (_,retType,_) <- liftIO (newStorableStructArgRet types :: IO (Data -> Arg, RetType Data, IO ()))
         (DList values) <- liftIO $ callFFI fun retType ffiArgs'
         let result = DMap $ Data.Map.fromList $ zip keys values
@@ -906,6 +922,9 @@ runInstruction (Mov n dat) = do
     put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
 runInstruction (LStow n l) = [PackList n, LStore l] & mapM_ runInstruction
 runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
+runInstruction StoreSideStack = modify $ \vm -> vm{sideStack = stack vm}
+runInstruction LoadSideStack = modify $ \vm -> vm{stack = if null $ sideStack vm then stack vm else sideStack vm}
+runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 printAssembly :: Program -> Bool -> String

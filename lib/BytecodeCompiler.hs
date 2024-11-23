@@ -327,8 +327,12 @@ compileExpr fd@(Parser.FuncDec{}) = do
     return [] -- Function declarations are only used for compilation
 compileExpr (Parser.FuncDef origName args body) = do
     curCon <- gets currentContext
+    funs <- gets functions
     let previousContext = curCon
     let name = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
+    let origName' = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
+    let isFirst = isNothing $ find (\x -> x.baseName == origName') funs
+    -- when (not isFirst) $ traceM $ "Function " ++ name ++ " already exists"
     -- let argTypes = map Parser.typeOf args
     modify (\s -> s{currentContext = name})
     funcDecs' <- gets funcDecs
@@ -341,7 +345,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     funcDecs'' <- gets funcDecs
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs''
-    let function = Label funame : args' ++ body' ++ ([Ret | name /= "main"])
+    let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
     modify (\s -> s{currentContext = previousContext})
@@ -403,7 +407,7 @@ compileExpr (Parser.FuncDef origName args body) = do
     compileParameter x funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
         x' <- compileExpr x
-        return $ x' ++ [Eq, Jf nextFunName]
+        return $ [Dup] ++ x' ++ [Eq, Jf nextFunName]
 compileExpr (Parser.ParenApply x y _) = do
     fun <- compileExpr x
     args <- concatMapM compileExpr y
