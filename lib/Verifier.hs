@@ -317,7 +317,10 @@ verifyExpr (Var name (Position (start, _))) = do
     matchingBinding <- findMatchingBinding name
     return [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | isNothing matchingBinding]
 verifyExpr (StructAccess _ _) = return [] -- TODO
-verifyExpr s@(Struct{}) = modify (\state -> state{structDecs = s : structDecs state}) >> return []
+verifyExpr s@(Struct{name = name, is = is}) = do
+    rootFrame <- head . frames <$> get
+    modify (\state -> state{frames = rootFrame{ttypes = Map.alter (\case Just (VType{implements = impls}) -> Just (VType{implements = is ++ impls}); Nothing -> Just (VType{implements = is})) name (ttypes rootFrame)} : tail (frames state)})
+    modify (\state -> state{structDecs = s : structDecs state}) >> return []
 verifyExpr sl@(StructLit structName _ (Position (start, _))) = do
     struct <- gets structDecs <&> find (\case Struct{name = name'} -> name' == structName; _ -> False)
     case struct of
