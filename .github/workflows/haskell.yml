@@ -87,6 +87,10 @@ jobs:
       name: Publish Release (${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }})
       needs: create_release
       runs-on: ${{ matrix.os }}
+      strategy:
+        matrix:
+          os: [ubuntu-latest, macOS-latest, windows-latest]
+          ghc-version: ['9.8']
     
       steps:
         - name: Build binary
