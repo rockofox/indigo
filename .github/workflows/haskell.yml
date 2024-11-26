@@ -6,28 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  create_release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: dev-drprasad/delete-older-releases@v0.3.2
-        with:
-          keep_latest: 3
-          delete_tag_pattern: latest-.+
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: ${{ github.ref_name }}
-          tag_name: latest-${{ github.sha }}
-          draft: false
-          prerelease: false
-          generate_release_notes: false
-  build_artifact:
-    needs: create_release
-    name: ${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }}
+  build_and_test:
+    name: Build and test (${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -80,43 +60,71 @@ jobs:
 
       - name: Run tests
         run: cabal test all
-
-      - name: Build binary
-        run: |
-          mkdir dist-${{matrix.os}}
-          cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
-      
-      - name: Set binary extension (Windows)
-        if: matrix.os == 'windows-latest'
-        run: echo "BINARY_EXT=.exe" >> $env:GITHUB_ENV
-      
-      - name: Rename binary
-        run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
-          
-      - name: Set binary path
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
-      
-      - name: Set binary path (Windows)
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $env:GITHUB_ENV
-
-      - name: Arrange release files
-        run: |
-          mkdir indigo-latest-${{matrix.os}}
-          mv ${{env.BINARY_PATH}} indigo-latest-${{matrix.os}}/indigo${{env.BINARY_EXT}}
-          mv share/std indigo-latest-${{matrix.os}}
-
-      - name: Zip (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          Compress-Archive -Path indigo-latest-${{matrix.os}}/* -DestinationPath indigo-latest-${{matrix.os}}.zip
-      
-      - name: Zip
-        if: matrix.os != 'windows-latest'
-        run: |
-          zip -r indigo-latest-${{matrix.os}}.zip indigo-latest-${{matrix.os}}/*
-      
-      - name: Release
+        
+  create_release:
+    name: Create Release
+    needs: build_and_test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: dev-drprasad/delete-older-releases@v0.3.2
+        with:
+          keep_latest: 3
+          delete_tag_pattern: latest-.+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        id: create_release
         uses: softprops/action-gh-release@v1
         with:
+          name: ${{ github.ref_name }}
           tag_name: latest-${{ github.sha }}
-          files: indigo-latest-${{matrix.os}}.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+
+  publish_release:
+      name: Publish Release (${{ matrix.os }}/GHC ${{ matrix.ghc }}/${{ github.ref }})
+      needs: create_release
+      runs-on: ${{ matrix.os }}
+    
+      steps:
+        - name: Build binary
+          run: |
+            mkdir dist-${{matrix.os}}
+            cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
+        
+        - name: Set binary extension (Windows)
+          if: matrix.os == 'windows-latest'
+          run: echo "BINARY_EXT=.exe" >> $env:GITHUB_ENV
+        
+        - name: Rename binary
+          run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
+            
+        - name: Set binary path
+          run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
+        
+        - name: Set binary path (Windows)
+          run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $env:GITHUB_ENV
+  
+        - name: Arrange release files
+          run: |
+            mkdir indigo-latest-${{matrix.os}}
+            mv ${{env.BINARY_PATH}} indigo-latest-${{matrix.os}}/indigo${{env.BINARY_EXT}}
+            mv share/std indigo-latest-${{matrix.os}}
+  
+        - name: Zip (Windows)
+          if: matrix.os == 'windows-latest'
+          run: |
+            Compress-Archive -Path indigo-latest-${{matrix.os}}/* -DestinationPath indigo-latest-${{matrix.os}}.zip
+        
+        - name: Zip
+          if: matrix.os != 'windows-latest'
+          run: |
+            zip -r indigo-latest-${{matrix.os}}.zip indigo-latest-${{matrix.os}}/*
+        
+        - name: Release
+          uses: softprops/action-gh-release@v1
+          with:
+            tag_name: latest-${{ github.sha }}
+            files: indigo-latest-${{matrix.os}}.zip
