@@ -15,6 +15,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -57,6 +58,7 @@ data CompilerState a = CompilerState
     , impls :: [Parser.Expr]
     , currentContext :: String -- TODO: Nested contexts
     , externals :: [External]
+    , currentExpectedReturnType :: Parser.Type
     }
     deriving (Show)
 
@@ -80,6 +82,7 @@ initCompilerState prog =
         []
         "__outside"
         []
+        Parser.Any
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -97,15 +100,15 @@ preludeExpr = do
 compileProgram :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgram (Parser.Program expr) = do
     prelude <- liftIO preludeExpr
-    prelude' <- concatMapM compileExpr prelude
-    freePart <- concatMapM compileExpr expr
+    prelude' <- concatMapM (`compileExpr` Parser.Any) prelude
+    freePart <- concatMapM (`compileExpr` Parser.Any) expr
     createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ prelude' ++ functions' ++ freePart ++ [Exit]
 
 compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgramBare (Parser.Program expr) = do
-    freePart <- concatMapM compileExpr expr
+    freePart <- concatMapM (`compileExpr` Parser.Any) expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     return $ functions' ++ freePart ++ [Exit]
 
@@ -166,8 +169,8 @@ doBinOp x y op = do
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
     let aName = "__op_a_" ++ show id'
     let bName = "__op_b_" ++ show id'
-    x' <- compileExpr x
-    y' <- compileExpr y
+    x' <- compileExpr x Parser.Any
+    y' <- compileExpr y Parser.Any
 
     cast <- case (x, y) of
         (Parser.Flexible _, Parser.Flexible _) -> error "Double cast"
@@ -218,6 +221,19 @@ implsFor structName = do
     let impls'' = filter (\x -> Parser.for x == structName) impls'
     return $ map Parser.trait impls''
 
+methodsForTrait :: String -> StateT (CompilerState a) IO [String]
+methodsForTrait traitName = do
+    traits' <- gets traits
+    let trait = fromJust $ find (\x -> Parser.name x == traitName) traits'
+    return $ map Parser.name $ Parser.methods trait
+
+methodsForStruct :: String -> StateT (CompilerState a) IO [String]
+methodsForStruct structName = do
+    impls' <- gets impls
+    let impls'' = filter (\x -> Parser.for x == structName) impls'
+    let methods = concatMap Parser.methods impls''
+    return $ map Parser.name methods
+
 typeToData :: Parser.Type -> VM.Data
 typeToData (Parser.StructT "Int") = VM.DInt 0
 typeToData (Parser.StructT "Float") = VM.DFloat 0
@@ -231,50 +247,55 @@ typeToData Parser.StructT{} = VM.DMap Data.Map.empty
 typeToData Parser.Any = VM.DNone
 typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 
-compileExpr :: Parser.Expr -> StateT (CompilerState a) IO [Instruction]
-compileExpr (Parser.Add x y) = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Sub x y) = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Mul x y) = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Div x y) = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Modulo x y) = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Power x y) = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Gt x y) = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Lt x y) = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Ge x y) = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Le x y) = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Not x) = compileExpr x >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq x y) = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Neq x y) = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.And x y) = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.Or x y) = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) >>= doBinOp x y . last
-compileExpr (Parser.IntLit x) = return [Push $ DInt $ fromIntegral x]
-compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) = return [Push $ DFloat (-x)]
-compileExpr (Parser.UnaryMinus (Parser.IntLit x)) = return [Push $ DInt $ -fromInteger x]
-compileExpr (Parser.StringLit x) = return [Push $ DString x]
-compileExpr (Parser.DoBlock exprs) = concatMapM compileExpr exprs
-compileExpr Parser.Placeholder = return []
-compileExpr (Parser.FuncCall "unsafeAdd" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Add])
-compileExpr (Parser.FuncCall "unsafeSub" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Sub])
-compileExpr (Parser.FuncCall "unsafeMul" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mul])
-compileExpr (Parser.FuncCall "unsafeDiv" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Div])
-compileExpr (Parser.FuncCall "unsafeMod" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Mod])
-compileExpr (Parser.FuncCall "unsafePow" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Pow])
-compileExpr (Parser.FuncCall "unsafeGt" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Gt])
-compileExpr (Parser.FuncCall "unsafeLt" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Lt])
-compileExpr (Parser.FuncCall "unsafeGe" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Lt, Not])
-compileExpr (Parser.FuncCall "unsafeLe" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Gt, Not])
-compileExpr (Parser.FuncCall "unsafeEq" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Eq])
-compileExpr (Parser.FuncCall "unsafeNeq" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Eq, Not])
-compileExpr (Parser.FuncCall "unsafeAnd" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [And])
-compileExpr (Parser.FuncCall "unsafeOr" [x, y] _) = compileExpr x >>= \x' -> compileExpr y >>= \y' -> return (x' ++ y' ++ [Or])
-compileExpr (Parser.FuncCall "unsafePrint" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Builtin Print])
-compileExpr (Parser.FuncCall "unsafeGetLine" _ _) = return [Builtin GetLine]
-compileExpr (Parser.FuncCall "unsafeGetChar" _ _) = return [Builtin GetChar]
-compileExpr (Parser.FuncCall "unsafeRandom" _ _) = return [Builtin Random]
-compileExpr (Parser.FuncCall "abs" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Abs])
-compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
-compileExpr (Parser.FuncCall "sqrt" [x] _) = compileExpr x >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
-compileExpr (Parser.FuncCall funcName args _) = do
+typeToString :: Parser.Type -> String
+typeToString (Parser.StructT x) = x
+typeToString x = show x
+
+compileExpr :: Parser.Expr -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
+compileExpr (Parser.Add x y) _ = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Sub x y) _ = compileExpr (Parser.FuncCall "-" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Mul x y) _ = compileExpr (Parser.FuncCall "*" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Div x y) _ = compileExpr (Parser.FuncCall "/" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Modulo x y) _ = compileExpr (Parser.FuncCall "%" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Power x y) _ = compileExpr (Parser.FuncCall "^" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Gt x y) _ = compileExpr (Parser.FuncCall ">" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Lt x y) _ = compileExpr (Parser.FuncCall "<" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Ge x y) _ = compileExpr (Parser.FuncCall ">=" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Le x y) _ = compileExpr (Parser.FuncCall "<=" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Not x) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Not])
+compileExpr (Parser.Eq x y) _ = compileExpr (Parser.FuncCall "==" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Neq x y) _ = compileExpr (Parser.FuncCall "!=" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.And x y) _ = compileExpr (Parser.FuncCall "&&" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.Or x y) _ = compileExpr (Parser.FuncCall "||" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
+compileExpr (Parser.IntLit x) _ = return [Push $ DInt $ fromIntegral x]
+compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) _ = return [Push $ DFloat (-x)]
+compileExpr (Parser.UnaryMinus (Parser.IntLit x)) _ = return [Push $ DInt $ -fromInteger x]
+compileExpr (Parser.StringLit x) _ = return [Push $ DString x]
+compileExpr (Parser.DoBlock exprs) expectedType = concatMapM (`compileExpr` expectedType) exprs
+compileExpr Parser.Placeholder _ = return []
+compileExpr (Parser.FuncCall "unsafeAdd" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Add])
+compileExpr (Parser.FuncCall "unsafeSub" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Sub])
+compileExpr (Parser.FuncCall "unsafeMul" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Mul])
+compileExpr (Parser.FuncCall "unsafeDiv" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Div])
+compileExpr (Parser.FuncCall "unsafeMod" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Mod])
+compileExpr (Parser.FuncCall "unsafePow" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Pow])
+compileExpr (Parser.FuncCall "unsafeGt" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Gt])
+compileExpr (Parser.FuncCall "unsafeLt" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Lt])
+compileExpr (Parser.FuncCall "unsafeGe" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Lt, Not])
+compileExpr (Parser.FuncCall "unsafeLe" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Gt, Not])
+compileExpr (Parser.FuncCall "unsafeEq" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Eq])
+compileExpr (Parser.FuncCall "unsafeNeq" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Eq, Not])
+compileExpr (Parser.FuncCall "unsafeAnd" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [And])
+compileExpr (Parser.FuncCall "unsafeOr" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Or])
+compileExpr (Parser.FuncCall "unsafePrint" [x] _) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Builtin Print])
+compileExpr (Parser.FuncCall "unsafeGetLine" _ _) _ = return [Builtin GetLine]
+compileExpr (Parser.FuncCall "unsafeGetChar" _ _) _ = return [Builtin GetChar]
+compileExpr (Parser.FuncCall "unsafeRandom" _ _) _ = return [Builtin Random]
+compileExpr (Parser.FuncCall "abs" [x] _) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Abs])
+compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
+compileExpr (Parser.FuncCall "sqrt" [x] _) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
+compileExpr (Parser.FuncCall funcName args _) expectedType = do
+    implsForExpectedType <- implsFor (typeToString expectedType)
     argTypes <- mapM typeOf args
     functions' <- gets functions
     funcDecs' <- gets funcDecs
@@ -283,13 +304,24 @@ compileExpr (Parser.FuncCall funcName args _) = do
     let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
     -- Find the function in any context using firstM
     let contextFunctions = firstJust (\context -> findFunction (Data.Text.unpack context ++ "@" ++ funcName) functions' argTypes) contexts
+    let implsForExpectedTypePrefixes = map (\x -> x ++ "." ++ typeToString expectedType ++ "::" ++ funcName) implsForExpectedType
 
-    let fun = case contextFunctions of
-            (Just lf) -> lf
-            Nothing -> case findFunction funcName functions' argTypes of
-                (Just f) -> f
-                Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
-    let funcDec = find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
+    let fun = case find (\(Function{baseName}) -> baseName `elem` implsForExpectedTypePrefixes) functions' of
+            Just funf -> funf
+            Nothing -> case contextFunctions of
+                (Just lf) -> lf
+                Nothing -> case findFunction funcName functions' argTypes of
+                    (Just f) -> f
+                    Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
+    -- traceM $ "Looking for " ++ funcName ++ " with types " ++ show argTypes ++ " in " ++ show implsForExpectedTypePrefixes
+    --    when (funcName == "return") $ traceM $ "Expected type: " ++ show expectedType
+    --    when (funcName == "return") $ traceM $ "Find " ++ show implsForExpectedTypePrefixes  ++ " in " ++ (show $ map (\x -> x.baseName) functions')
+    -- Find in impls
+    let funcDec = case find (\(Function{baseName}) -> baseName `elem` implsForExpectedTypePrefixes) functions' of
+            Just funf -> do
+                --                traceM $ "Found " ++ baseName funf ++ " in impls"
+                Just Parser.FuncDec{Parser.name = baseName funf, Parser.types = funf.types, Parser.generics = []}
+            Nothing -> find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
     -- If the funcName starts with curCon@, it's a local function
     let callWay = (if T.pack (curCon ++ "@") `isPrefixOf` T.pack fun.funame then CallLocal (funame fun) else Call (funame fun))
@@ -301,31 +333,31 @@ compileExpr (Parser.FuncCall funcName args _) = do
                     fields <- getStructFields from
                     return $ DMap $ Data.Map.fromList $ map (second typeToData) fields
                 _ -> return $ typeToData ereturnType
-            args' <- concatMapM compileExpr (reverse args)
+            args' <- concatMapM (`compileExpr` Parser.Any) (reverse args)
             return $ [Push retT] ++ args' ++ [CallFFI funcName from (length args)]
         Nothing ->
             case funcDec of
                 (Just fd) -> do
                     if length args == length (Parser.types fd) - 1
-                        then concatMapM compileExpr args >>= \args' -> return (args' ++ [callWay])
+                        then concatMapM (\arg -> typeOf arg >>= compileExpr arg) args >>= \args' -> return (args' ++ [callWay])
                         else
-                            concatMapM compileExpr args >>= \args' ->
+                            concatMapM (\arg -> typeOf arg >>= compileExpr arg) args >>= \args' ->
                                 return $
                                     args'
                                         ++ [PushPf (funame fun) (length args')]
                 Nothing -> do
                     -- traceM $ "Looking for funcDec " ++ funcName
                     -- gets funcDecs >>= \x -> traceM $ "\t" ++ show (map Parser.name x)
-                    concatMapM compileExpr args >>= \args' ->
+                    concatMapM (\arg -> typeOf arg >>= compileExpr arg) args >>= \args' ->
                         return $
                             args'
                                 ++ [ LLoad funcName
                                    , CallS
                                    ]
-compileExpr fd@(Parser.FuncDec{}) = do
+compileExpr fd@(Parser.FuncDec{}) _ = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
-compileExpr (Parser.FuncDef origName args body) = do
+compileExpr (Parser.FuncDef origName args body) expectedType = do
     curCon <- gets currentContext
     funs <- gets functions
     let previousContext = curCon
@@ -340,11 +372,12 @@ compileExpr (Parser.FuncDef origName args body) = do
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
     modify (\s -> s{functions = Function name funame [] [] curCon : functions s})
-
-    body' <- compileExpr body
     funcDecs'' <- gets funcDecs
-    args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
+
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs''
+
+    body' <- compileExpr body (last $ Parser.types funcDec)
+    args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
@@ -358,7 +391,7 @@ compileExpr (Parser.FuncDef origName args body) = do
         if null l
             then return [Dup, Push $ DList [], Eq, Jf nextFunName, Pop]
             else do
-                lex' <- compileExpr lex
+                lex' <- compileExpr lex Parser.Any
                 return $ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
     compileParameter (Parser.ListPattern elements) n = do
         nextFunName <- ((n ++ "#") ++) . show . (+ 1) <$> allocId
@@ -368,7 +401,7 @@ compileExpr (Parser.FuncDef origName args body) = do
                 elements' <- concatMapM (`compileParameter` n) (init elements)
                 let paramsWithIndex = zip elements' [0 ..]
                 let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
-                l' <- compileExpr (Parser.ListLit l)
+                l' <- compileExpr (Parser.ListLit l) Parser.Any
                 let listThing = [Comment "List thing", Dup, Push $ DInt (length elements - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextFunName]
                 return $ lengthCheck ++ concat xToY ++ listThing
             _ -> do
@@ -398,7 +431,7 @@ compileExpr (Parser.FuncDef origName args body) = do
             concatMapM
                 ( \(sName, x) -> do
                     let a = [Dup, Access sName]
-                    b <- compileExpr x
+                    b <- compileExpr x Parser.Any
                     return $ a ++ b ++ [Eq, Jf nextFunName]
                 )
                 fields''
@@ -406,13 +439,13 @@ compileExpr (Parser.FuncDef origName args body) = do
     compileParameter Parser.Placeholder _ = return []
     compileParameter x funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        x' <- compileExpr x
+        x' <- compileExpr x Parser.Any
         return $ [Dup] ++ x' ++ [Eq, Jf nextFunName]
-compileExpr (Parser.ParenApply x y _) = do
-    fun <- compileExpr x
-    args <- concatMapM compileExpr y
+compileExpr (Parser.ParenApply x y _) _ = do
+    fun <- compileExpr x Parser.Any
+    args <- concatMapM (`compileExpr` Parser.Any) y
     return $ args ++ fun ++ [CallS]
-compileExpr (Parser.Var x _) = do
+compileExpr (Parser.Var x _) _ = do
     functions' <- gets functions
     curCon <- gets currentContext
     externals' <- gets externals
@@ -421,22 +454,23 @@ compileExpr (Parser.Var x _) = do
                 || any ((\context -> any ((== context ++ "@" ++ x) . baseName) functions') . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
                 || any ((== x) . ((Data.Text.unpack . last . splitOn "::") . fromString . baseName)) functions'
     if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
-        then compileExpr (Parser.FuncCall x [] zeroPosition)
+        then (`compileExpr` Parser.Any) (Parser.FuncCall x [] zeroPosition)
         else return [LLoad x]
-compileExpr (Parser.Let name value) = do
+compileExpr (Parser.Let name value) _ = do
     curCon <- gets currentContext
     typeOf value >>= \v -> modify (\s -> s{lets = Let{name, vtype = v, context = curCon} : lets s})
-    value' <- compileExpr value
+    value' <- typeOf value >>= compileExpr value
     return $ value' ++ [LStore name]
-compileExpr (Parser.Function [Parser.FuncDef{body = Parser.StrictEval e}] dec) = do
+compileExpr (Parser.Function [Parser.FuncDef{body = Parser.StrictEval e}] dec) _ = do
     let name = dec.name
-    evaledExpr <- compileExpr e
+    evaledExpr <- compileExpr e Parser.Any
     return $ evaledExpr ++ [LStore name]
-compileExpr (Parser.Function a b) = mapM_ compileExpr a >> compileExpr b >> return []
-compileExpr (Parser.Flexible a) = compileExpr a >>= \a' -> return $ Meta "flex" : a'
-compileExpr (Parser.ListConcat a b) = do
-    a' <- compileExpr a
-    b' <- compileExpr b
+compileExpr (Parser.Function a b@Parser.FuncDec{types}) _ =
+    mapM_ (`compileExpr` last types) a >> compileExpr b Parser.Any >> return []
+compileExpr (Parser.Flexible a) _ = compileExpr a Parser.Any >>= \a' -> return $ Meta "flex" : a'
+compileExpr (Parser.ListConcat a b) _ = do
+    a' <- compileExpr a Parser.Any
+    b' <- compileExpr b Parser.Any
     let a'' = case a' of
             [Meta "flex", a'''] -> [a'''] ++ b' ++ [Cast]
             _ -> a'
@@ -444,19 +478,19 @@ compileExpr (Parser.ListConcat a b) = do
             [Meta "flex", b'''] -> [b'''] ++ a' ++ [Cast]
             _ -> b'
     return (b'' ++ a'' ++ [Concat 2])
-compileExpr (Parser.ListLit elements) = concatMapM compileExpr elements >>= \elements' -> return (reverse elements' ++ [PackList $ length elements])
-compileExpr (Parser.If ifCond ifThen ifElse) = do
-    cond' <- compileExpr ifCond
-    then' <- compileExpr ifThen
-    else' <- compileExpr ifElse
+compileExpr (Parser.ListLit elements) _ = concatMapM (`compileExpr` Parser.Any) elements >>= \elements' -> return (reverse elements' ++ [PackList $ length elements])
+compileExpr (Parser.If ifCond ifThen ifElse) _ = do
+    cond' <- compileExpr ifCond Parser.Any
+    then' <- compileExpr ifThen Parser.Any
+    else' <- compileExpr ifElse Parser.Any
     elseLabel <- allocId >>= \x -> return $ "else" ++ show x
     endLabel <- allocId >>= \x -> return $ "end" ++ show x
     return $ cond' ++ [Jf elseLabel] ++ then' ++ [Jmp endLabel, Label elseLabel] ++ else' ++ [Label endLabel]
-compileExpr (Parser.FloatLit x) = return [Push (DFloat x)]
-compileExpr (Parser.DoubleLit x) = return [Push (DDouble x)]
-compileExpr (Parser.BoolLit x) = return [Push (DBool x)]
-compileExpr (Parser.Cast from to) = do
-    from' <- compileExpr from
+compileExpr (Parser.FloatLit x) _ = return [Push (DFloat x)]
+compileExpr (Parser.DoubleLit x) _ = return [Push (DDouble x)]
+compileExpr (Parser.BoolLit x) _ = return [Push (DBool x)]
+compileExpr (Parser.Cast from to) _ = do
+    from' <- compileExpr from Parser.Any
     let to' = compileType to
     return $ from' ++ to' ++ [Cast]
   where
@@ -470,10 +504,10 @@ compileExpr (Parser.Cast from to) = do
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit [x]) = compileType x ++ [PackList 1]
     compileType x = error $ "Type " ++ show x ++ " is not implemented"
-compileExpr st@(Parser.Struct{name = structName, fields, is}) = do
+compileExpr st@(Parser.Struct{name = structName, fields, is}) _ = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
-    mapM_ (compileExpr . (\t -> Parser.Impl{methods = [], for = structName, trait = t})) is
+    mapM_ ((`compileExpr` Parser.Any) . (\t -> Parser.Impl{methods = [], for = structName, trait = t})) is
     return []
   where
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
@@ -481,19 +515,19 @@ compileExpr st@(Parser.Struct{name = structName, fields, is}) = do
         let traitName = "__field_" ++ name
         let trait = Parser.Trait traitName [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = []}]
         let impl = Parser.Impl traitName (Parser.name st) [Parser.FuncDef{name = name, args = [Parser.Var "self" zeroPosition], body = Parser.StructAccess (Parser.Var "self" zeroPosition) (Parser.Var name zeroPosition)}]
-        _ <- compileExpr trait
-        _ <- compileExpr impl
+        _ <- compileExpr trait Parser.Any
+        _ <- compileExpr impl Parser.Any
         return ()
-compileExpr (Parser.StructLit name fields _) = do
-    fields' <- mapM (compileExpr . snd) fields
+compileExpr (Parser.StructLit name fields _) _ = do
+    fields' <- mapM ((`compileExpr` Parser.Any) . snd) fields
     let names = map (DString . fst) fields
     let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
     implsForStruct <- implsFor name
     return $ instructions ++ [Push $ DString name, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length fields * 2 + 4]
-compileExpr (Parser.StructAccess struct (Parser.Var field _)) = do
-    struct' <- compileExpr struct
+compileExpr (Parser.StructAccess struct (Parser.Var field _)) _ = do
+    struct' <- compileExpr struct Parser.Any
     return $ struct' ++ [Access field]
-compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) = do
+compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) _ = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     let convertedPath = map (\x -> if x == '@' then '/' else x) from
     i <- liftIO $ readFile $ convertedPath ++ ".in"
@@ -504,8 +538,8 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
             if qualified || isJust as
                 then do
                     let alias = if qualified then from else fromJust as
-                    concatMapM compileExpr (map (`mangleAST` alias) expr)
-                else concatMapM compileExpr expr
+                    concatMapM (`compileExpr` Parser.Any) (map (`mangleAST` alias) expr)
+                else concatMapM (`compileExpr` Parser.Any) expr
     p >>= \p' -> return $ p' ++ [Label "__sep"]
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
@@ -513,42 +547,42 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     mangleAST (Parser.Function fdef dec) alias = Parser.Function (map (`mangleAST` alias) fdef) (mangleAST dec alias)
     mangleAST (Parser.FuncDef name args body) alias = Parser.FuncDef (alias ++ "@" ++ name) args (mangleAST body alias)
     mangleAST x _ = x
-compileExpr (Parser.Trait name methods) = do
+compileExpr (Parser.Trait name methods) _ = do
     let methods' = map (\(Parser.FuncDec name' types _) -> Parser.FuncDec name' types []) methods
     modify (\s -> s{traits = Parser.Trait name methods : traits s})
-    mapM_ compileExpr methods'
+    mapM_ (`compileExpr` Parser.Any) methods'
     return []
-compileExpr (Parser.Impl name for methods) = do
+compileExpr (Parser.Impl name for methods) _ = do
     let methods' = map (\(Parser.FuncDef name' args body) -> Parser.FuncDef (name ++ "." ++ for ++ "::" ++ name') args body) methods
     modify (\s -> s{impls = Parser.Impl name for methods : impls s})
-    mapM_ compileExpr methods'
+    mapM_ (`compileExpr` Parser.Any) methods'
     return []
-compileExpr (Parser.Lambda args body) = do
+compileExpr (Parser.Lambda args body) _ = do
     fId <- allocId
     curCon <- gets currentContext
     let name = "__lambda" ++ show fId
     let def = Parser.FuncDef name args body
     let dec = Parser.FuncDec name (replicate (length args + 1) Parser.Any) []
     let fun = Parser.Function [def] dec
-    _ <- compileExpr fun
+    _ <- compileExpr fun Parser.Any
     lets' <- gets functions
     let fullName = (fromJust $ findAnyFunction (curCon ++ "@" ++ name) lets').funame
     return [PushPf fullName 0]
-compileExpr (Parser.Pipeline a (Parser.Var b _)) = compileExpr (Parser.FuncCall b [a] zeroPosition)
-compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) = compileExpr (Parser.FuncCall f (a : args) zeroPosition)
-compileExpr (Parser.Pipeline a (Parser.Then b c)) = compileExpr (Parser.Then (Parser.Pipeline a b) c)
-compileExpr (Parser.Then a b) = do
-    a' <- compileExpr a
-    b' <- compileExpr b
+compileExpr (Parser.Pipeline a (Parser.Var b _)) _ = compileExpr (Parser.FuncCall b [a] zeroPosition) Parser.Any
+compileExpr (Parser.Pipeline a (Parser.FuncCall f args _)) _ = compileExpr (Parser.FuncCall f (a : args) zeroPosition) Parser.Any
+compileExpr (Parser.Pipeline a (Parser.Then b c)) _ = compileExpr (Parser.Then (Parser.Pipeline a b) c) Parser.Any
+compileExpr (Parser.Then a b) _ = do
+    a' <- compileExpr a Parser.Any
+    b' <- compileExpr b Parser.Any
     return $ a' ++ b'
-compileExpr (Parser.UnaryMinus x) = compileExpr x >>= \x' -> return (x' ++ [Push $ DInt (-1), Mul])
-compileExpr (Parser.External _ []) = return []
-compileExpr (Parser.External from ((Parser.FuncDec name types _) : xs)) = do
+compileExpr (Parser.UnaryMinus x) _ = compileExpr x Parser.Any >>= \x' -> return (x' ++ [Push $ DInt (-1), Mul])
+compileExpr (Parser.External _ []) _ = return []
+compileExpr (Parser.External from ((Parser.FuncDec name types _) : xs)) _ = do
     modify (\s -> s{externals = External{name, returnType = last types, args = init types, from} : externals s})
-    _ <- compileExpr (Parser.External from xs)
+    _ <- compileExpr (Parser.External from xs) Parser.Any
     return []
-compileExpr (Parser.CharLit x) = return [Push $ DChar x]
-compileExpr x = error $ show x ++ " is not implemented"
+compileExpr (Parser.CharLit x) _ = return [Push $ DChar x]
+compileExpr x _ = error $ show x ++ " is not implemented"
 
 createVirtualFunctions :: StateT (CompilerState a) IO ()
 createVirtualFunctions = do
@@ -568,6 +602,7 @@ createVirtualFunctions = do
         let body =
                 Label name
                     : concatMap (\for -> [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery for, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
+                    ++ [Push $ DString $ "panic: No matching implementation of " ++ traitName, Builtin Print, Exit]
         modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess "__outside"]})
         return ()
     createBaseDef _ _ _ = return ()

@@ -89,15 +89,23 @@ binOpTable =
       [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
     , [binary "+" Add, binary "-" Sub]
-    , [binary ">>" Then]
-    , [binary "|>" Pipeline]
+    , --    , [binary ">>" Then]
+      [binary "|>" Pipeline]
     , [binary ":" ListConcat]
+    , [binary ">>=" bindExpr]
+    , [binary ">>" sequenceExpr]
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
     , [binaryAny binaryFunctionCall]
     -- , [prefixAny pFunctionCall]
     -- , [postfixAny pFunctionCall]
     ]
+
+sequenceExpr :: Expr -> Expr -> Expr
+sequenceExpr a b = FuncCall "sequence" [a, b] anyPosition
+
+bindExpr :: Expr -> Expr -> Expr
+bindExpr a b = FuncCall "bind" [a, b] anyPosition
 
 binaryFunctionCall :: String -> Expr -> Expr -> Expr
 binaryFunctionCall f a b = FuncCall f [a, b] anyPosition

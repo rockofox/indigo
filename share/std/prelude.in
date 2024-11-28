@@ -8,6 +8,25 @@ maybe :: Any -> Optional -> Any
 maybe x Some{value: y} = y
 maybe x None{} = x
 
+trait Monad = do
+  bind :: Self -> Fn{Any => Self} -> Self
+  return :: Any -> Self
+  sequence :: Self -> Self -> Self
+end
+
+impl Monad for Optional = do
+  bind Some{value: x} f = Some{value: f x}
+  bind None{} f = None{}
+  return x = Some{value: x}
+  sequence Some{value: x} Some{value: y} = Some{value: y}
+end
+
+impl Monad for IO = do
+  bind IO{inner: x} f = f x
+  return x = IO{inner: x}
+  sequence IO{inner: x} IO{inner: y} = IO{inner: y}
+end
+
 # `+` :: Any -> Any -> Any
 # `+` x y = x + y
 # `-` :: Any -> Any -> Any
@@ -93,6 +112,7 @@ sum (x:xs) = x + sum xs
 print :: Any -> IO
 print s = do
   unsafePrint s
+  IO{inner: 0}
 end
 
 println :: Any -> IO
