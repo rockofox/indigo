@@ -1,41 +1,33 @@
-# # let split ([]: String sep: String) => [String] = [""]
-# # let split ((c:cs): String sep: String) => [String] = do
-# #     let rest = split cs, sep
-# #     if c == sep then do
-# #         "" : (split cs, sep)
-# #     else do
-# #         (c : (head rest)) : (tail rest)
-# #     end
-# # end
-# trait Number
-# impl Number for Int
-# impl Number for Float
+### println (maybe (-1), (bind Some{value: 5}, \x -> x + 1))
+### println (maybe (-1), (bind None{}, \x -> x + 1))
+##
+###let x => Optional = return 12
+##let xxx => Optional = Some{value: 12}
+###println x
+##println (bind Some{value: 5}, \x -> x + 1)
+##println (bind xxx, \x -> x + 1)
+##println (sequence Some{value: 5}, Some{value: 6})
 #
-# # let add<N: Number> (a: N b: N) => N = a + b
+#bla :: IO
+#bla = (println 1) >> (println 2)
 #
-# let split<T> ([]: [T] sep: T) => [T] = [""]
-#
-# let printNumList<N: Number> (l: [N] n: N) => IO = do
-#     
-# end
-#
-# let xxx (a: Int) => Int = a
-#
-#
-# struct Child = (name: String, age: Int) satisfies (it.age < 18)
-# let a+ (a: Int b: Int) => Int = a
-# let main => IO = do
-#     println 1 a+ 2
-#     # println Child {name: "John", age: 13}
-#     # println Child {name: "Abram", age: 20}
-# end
+printNumbersAndSum :: IO
+printNumbersAndSum _ = (println "x") >> (return 2)
 
-# `+` :: Int -> Int -> Int
-# struct Cat = (name: String, age: Int)
-# # let + (a: Cat b: Cat) => Cat = Cat {name: a.name : b.name, age: a.age + b.age}
-# # let add (a: Int b: Int) => Int = a + b
-# # let add (a: Float b: Float) => Float = a - b
-# add :: Int -> Int -> Int
-# add a b = a + b
-# let main => IO = println add 3.0, 4.0
-2+5
+main :: IO
+main _ = do
+    println printNumbersAndSum
+end
+# let main => IO = println printNumbersAndSum
+#
+#trait Number
+#impl Number for Int
+#impl Number for Float
+#
+#let add<N: Number> (a: N b: N) => N = do
+#  a + b
+#end
+#
+#let main => IO = do
+#  println add 1.2, 2.2
+#end

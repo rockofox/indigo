@@ -332,6 +332,18 @@ spec = do
                     end
                 |]
                 `shouldReturn` "hello"
+        it "Static dispatch" $ do
+            compileAndRun
+                [r|
+                    printNumbersAndSum :: IO
+                    printNumbersAndSum _ = (println "x") >> (return 2)
+
+                    main :: IO
+                    main _ = do
+                        println printNumbersAndSum
+                    end
+                |]
+                `shouldReturn` "x\nIO{__traits: [Monad,__field_inner], inner: 2}\n"
     describe "Lambdas" $ do
         it "Can use a lambda in the map function" $ do
             compileAndRun

@@ -138,3 +138,23 @@ spec = do
             parseProgram "bottles (i)-1" parserCompilerFlags
                 `shouldBe` Right
                     (Program [FuncCall "bottles" [Sub (Var "i" anyPosition) (IntLit 1)] anyPosition])
+
+    describe "Generics" $ do
+        it "Should parse let generics" $ do
+            parseProgram
+                [r|
+                let add<N: Number> (a: N b: N) => N = do
+                  a + b
+                end
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var "a" anyPosition, Var "b" anyPosition], body = DoBlock [Add (Var "a" anyPosition) (Var "b" anyPosition)]}], dec = FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")]}}])
+        it "Should parse classic decleration generics" $ do
+            parseProgram
+                [r|
+                add<N: Number> :: N -> N -> N
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")]}])

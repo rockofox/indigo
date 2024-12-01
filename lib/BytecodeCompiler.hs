@@ -15,7 +15,6 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -58,7 +57,7 @@ data CompilerState a = CompilerState
     , impls :: [Parser.Expr]
     , currentContext :: String -- TODO: Nested contexts
     , externals :: [External]
-    , currentExpectedReturnType :: Parser.Type
+    , functionsByTrait :: [(String, String, String, Parser.Expr)]
     }
     deriving (Show)
 
@@ -82,7 +81,7 @@ initCompilerState prog =
         []
         "__outside"
         []
-        Parser.Any
+        []
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -234,6 +233,12 @@ methodsForStruct structName = do
     let methods = concatMap Parser.methods impls''
     return $ map Parser.name methods
 
+findBaseDecInTraits :: String -> StateT (CompilerState a) IO (Maybe Parser.Expr)
+findBaseDecInTraits funcName = do
+    traits' <- gets traits
+    let baseDecs = map (find (\y -> Parser.name y == funcName) . Parser.methods) traits'
+    return $ firstJust id baseDecs
+
 typeToData :: Parser.Type -> VM.Data
 typeToData (Parser.StructT "Int") = VM.DInt 0
 typeToData (Parser.StructT "Float") = VM.DFloat 0
@@ -250,6 +255,10 @@ typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 typeToString :: Parser.Type -> String
 typeToString (Parser.StructT x) = x
 typeToString x = show x
+
+typesEqual :: Parser.Type -> Parser.Type -> Bool
+typesEqual (Parser.StructT x) (Parser.StructT y) = x == y
+typesEqual x y = x == y
 
 compileExpr :: Parser.Expr -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
 compileExpr (Parser.Add x y) _ = compileExpr (Parser.FuncCall "+" [x, y] zeroPosition) Parser.Any >>= doBinOp x y . last
@@ -301,6 +310,7 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
     funcDecs' <- gets funcDecs
     curCon <- gets currentContext
     externals' <- gets externals
+    fbt <- gets functionsByTrait
     let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
     -- Find the function in any context using firstM
     let contextFunctions = firstJust (\context -> findFunction (Data.Text.unpack context ++ "@" ++ funcName) functions' argTypes) contexts
@@ -313,14 +323,12 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
                 Nothing -> case findFunction funcName functions' argTypes of
                     (Just f) -> f
                     Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
-    -- traceM $ "Looking for " ++ funcName ++ " with types " ++ show argTypes ++ " in " ++ show implsForExpectedTypePrefixes
-    --    when (funcName == "return") $ traceM $ "Expected type: " ++ show expectedType
-    --    when (funcName == "return") $ traceM $ "Find " ++ show implsForExpectedTypePrefixes  ++ " in " ++ (show $ map (\x -> x.baseName) functions')
-    -- Find in impls
-    let funcDec = case find (\(Function{baseName}) -> baseName `elem` implsForExpectedTypePrefixes) functions' of
-            Just funf -> do
-                --                traceM $ "Found " ++ baseName funf ++ " in impls"
-                Just Parser.FuncDec{Parser.name = baseName funf, Parser.types = funf.types, Parser.generics = []}
+    let funcDec = case find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs' of
+            Just fd -> do
+                case find (\(_, n, _, newDec) -> n == funcName && take (length args) (Parser.types newDec) == argTypes) fbt of
+                    Just (_, _, fqn, newDec) -> do
+                        Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = []}
+                    Nothing -> Just fd
             Nothing -> find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
     -- If the funcName starts with curCon@, it's a local function
@@ -339,9 +347,9 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
             case funcDec of
                 (Just fd) -> do
                     if length args == length (Parser.types fd) - 1
-                        then concatMapM (\arg -> typeOf arg >>= compileExpr arg) args >>= \args' -> return (args' ++ [callWay])
+                        then concatMapM (uncurry compileExpr) (zip args fd.types) >>= \args' -> return (args' ++ [callWay])
                         else
-                            concatMapM (\arg -> typeOf arg >>= compileExpr arg) args >>= \args' ->
+                            concatMapM (uncurry compileExpr) (zip args fd.types) >>= \args' ->
                                 return $
                                     args'
                                         ++ [PushPf (funame fun) (length args')]
@@ -357,7 +365,7 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
 compileExpr fd@(Parser.FuncDec{}) _ = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
-compileExpr (Parser.FuncDef origName args body) expectedType = do
+compileExpr (Parser.FuncDef origName args body) _ = do
     curCon <- gets currentContext
     funs <- gets functions
     let previousContext = curCon
@@ -439,7 +447,7 @@ compileExpr (Parser.FuncDef origName args body) expectedType = do
     compileParameter Parser.Placeholder _ = return []
     compileParameter x funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        x' <- compileExpr x Parser.Any
+        x' <- compileExpr x Parser.Unknown
         return $ [Dup] ++ x' ++ [Eq, Jf nextFunName]
 compileExpr (Parser.ParenApply x y _) _ = do
     fun <- compileExpr x Parser.Any
@@ -553,10 +561,25 @@ compileExpr (Parser.Trait name methods) _ = do
     mapM_ (`compileExpr` Parser.Any) methods'
     return []
 compileExpr (Parser.Impl name for methods) _ = do
-    let methods' = map (\(Parser.FuncDef name' args body) -> Parser.FuncDef (name ++ "." ++ for ++ "::" ++ name') args body) methods
+    methods' <-
+        mapM
+            ( \(Parser.FuncDef name' args body) -> do
+                let fullyQualifiedName = name ++ "." ++ for ++ "::" ++ name'
+                trait <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == name) traits'
+                let dec = fromJust $ find (\x -> Parser.name x == name') (Parser.methods trait)
+                let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself dec.types for, generics = dec.generics}
+                _ <- compileExpr newDec Parser.Any
+                modify (\s -> s{functionsByTrait = (for, name', fullyQualifiedName, newDec) : functionsByTrait s})
+                return $ Parser.FuncDef fullyQualifiedName args body
+            )
+            methods
+    --    gets functionsByTrait >>= traceShowM
     modify (\s -> s{impls = Parser.Impl name for methods : impls s})
     mapM_ (`compileExpr` Parser.Any) methods'
     return []
+  where
+    unself :: [Parser.Type] -> String -> [Parser.Type]
+    unself types self = map (\case Parser.Self -> Parser.StructT self; x -> x) types
 compileExpr (Parser.Lambda args body) _ = do
     fId <- allocId
     curCon <- gets currentContext

@@ -248,9 +248,10 @@ charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal
 funcDec :: Parser Expr
 funcDec = do
     name <- (identifier <|> gravis) <?> "function name"
+    generics <- fromMaybe [] <$> optional generic <?> "function generics"
     symbol "::"
     argTypes <- sepBy1 validType (symbol "->") <?> "function arguments"
-    return $ FuncDec name argTypes []
+    return $ FuncDec name argTypes generics
 
 defArg :: Parser Expr
 defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer <|> StringLit <$> stringLit
