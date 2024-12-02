@@ -1,6 +1,6 @@
 module BytecodeCompiler where
 
-import AST (zeroPosition)
+import AST (anyPosition, zeroPosition)
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (when, (>=>))
 import Control.Monad.Loops (firstM)
@@ -15,6 +15,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -281,6 +282,34 @@ compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) _ = return [Push $ DFloat (-
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) _ = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit x) _ = return [Push $ DString x]
 compileExpr (Parser.DoBlock exprs) expectedType = concatMapM (`compileExpr` expectedType) exprs
+-- compileExpr (Parser.DoBlock (x:y:xs)) expectedType = do
+-- a <- compileExpr x Parser.Any
+-- b <- compileExpr y Parser.Any
+-- c <- compileExpr (Parser.DoBlock xs) expectedType
+-- return $ a ++ b ++ c
+-- Fold funcCalls into `sequence` funcCalls calls
+-- case (x,y) of
+--     (Parser.FuncCall{}, Parser.FuncCall{}) -> do
+--         a <- compileExpr (Parser.FuncCall "sequence" [x, y] zeroPosition) Parser.Any
+--         b <- compileExpr (Parser.DoBlock xs) expectedType
+--         return $ a ++ b
+--     (Parser.FuncCall{}, _) -> do
+--         a <- compileExpr (Parser.FuncCall "sequence" [x, Parser.FuncCall "nop" [] zeroPosition] zeroPosition) Parser.Any
+--         b <- compileExpr y expectedType
+--         c <- compileExpr (Parser.DoBlock xs) expectedType
+--         return $ a ++ b ++ c
+--     (_, Parser.FuncCall{}) -> do
+--         a <- compileExpr x Parser.Any
+--         b <- compileExpr (Parser.FuncCall "sequence" [y, Parser.FuncCall "nop" [] zeroPosition] zeroPosition) Parser.Any
+--         c <- compileExpr (Parser.DoBlock xs) expectedType
+--         return $ a ++ b ++ c
+--     _ -> do
+--         x' <- compileExpr x Parser.Any
+--         y' <- compileExpr y Parser.Any
+--         c <- compileExpr (Parser.DoBlock xs) expectedType
+--         return $ x' ++ y' ++ c
+-- compileExpr (Parser.DoBlock [x]) expectedType = compileExpr x expectedType
+-- compileExpr (Parser.DoBlock []) expectedType = return []
 compileExpr Parser.Placeholder _ = return []
 compileExpr (Parser.FuncCall "unsafeAdd" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Add])
 compileExpr (Parser.FuncCall "unsafeSub" [x, y] _) _ = compileExpr x Parser.Any >>= \x' -> compileExpr y Parser.Any >>= \y' -> return (x' ++ y' ++ [Sub])
@@ -486,7 +515,19 @@ compileExpr (Parser.ListConcat a b) _ = do
             [Meta "flex", b'''] -> [b'''] ++ a' ++ [Cast]
             _ -> b'
     return (b'' ++ a'' ++ [Concat 2])
-compileExpr (Parser.ListLit elements) _ = concatMapM (`compileExpr` Parser.Any) elements >>= \elements' -> return (reverse elements' ++ [PackList $ length elements])
+compileExpr (Parser.ListAdd a b) _ = do
+    a' <- compileExpr a Parser.Any
+    b' <- compileExpr b Parser.Any
+    let a'' = case a' of
+            [Meta "flex", a'''] -> [a'''] ++ b' ++ [Cast]
+            _ -> a'
+    let b'' = case b' of
+            [Meta "flex", b'''] -> [b'''] ++ a' ++ [Cast]
+            _ -> b'
+    return (b'' ++ a'' ++ [ListAdd 2])
+compileExpr (Parser.ListLit elements) _ = do
+    elems <- concatMapM (`compileExpr` Parser.Any) elements
+    return $ elems ++ [PackList $ length elements]
 compileExpr (Parser.If ifCond ifThen ifElse) _ = do
     cond' <- compileExpr ifCond Parser.Any
     then' <- compileExpr ifThen Parser.Any

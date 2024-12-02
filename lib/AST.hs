@@ -44,6 +44,7 @@ data Expr
     | ListLit [Expr]
     | ListPattern [Expr]
     | ListConcat Expr Expr
+    | ListAdd Expr Expr
     | ArrayAccess Expr Expr
     | Modulo Expr Expr
     | Power Expr Expr
@@ -121,6 +122,7 @@ children (External _ a) = a
 children (CharLit _) = []
 children (DoubleLit _) = []
 children (ParenApply a b _) = a : b
+children (ListAdd a b) = [a, b]
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -214,7 +216,7 @@ typeOf (Let _ _) = error "Cannot infer type of let"
 typeOf (If _ b _) = typeOf b
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
 typeOf x@(FuncDec{}) = error $ "Cannot infer type of function declaration " ++ show x
-typeOf (Function _ _) = error "Cannot infer type of modern function"
+typeOf (Function _ _) = Unknown -- error "Cannot infer type of modern function"
 typeOf (DoBlock x) = if null x then None else typeOf $ last x
 typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
 typeOf (Discard _) = error "Cannot infer type of discard"
@@ -244,6 +246,7 @@ typeOf (External _ _) = error "Cannot infer type of external"
 typeOf (CharLit _) = StructT "Char"
 typeOf (DoubleLit _) = StructT "Double"
 typeOf (ParenApply a _ _) = typeOf a
+typeOf (ListAdd x _) = typeOf x
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True

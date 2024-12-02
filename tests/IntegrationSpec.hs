@@ -232,7 +232,7 @@ spec = do
                 struct Point = (x: Int, y: Int)
 
                 let main => IO = do
-                    let p = Point { x : 1, y : 2 }
+                    let p = Point { x: 1, y: 2 }
                     println p.x
                     println p.y
                 end|]
@@ -244,8 +244,8 @@ spec = do
                 struct Cat = (name: String)
 
                 let main => IO = do
-                    let bello = Dog { name : "Bello" }
-                    let mauzi = Cat { name : "Mauzi" }
+                    let bello = Dog { name: "Bello" }
+                    let mauzi = Cat { name: "Mauzi" }
                     println bello.name
                     println mauzi.name
                 end|]
@@ -259,7 +259,7 @@ spec = do
                 getName self = self.name
 
                 let main => IO = do
-                    let mauzi = Cat { name : "Mauzi" }
+                    let mauzi = Cat { name: "Mauzi" }
                     println (getName mauzi)
                 end|]
                 `shouldReturn` "Mauzi\n"
@@ -270,8 +270,8 @@ spec = do
                 struct Cat = (name: String)
 
                 let main => IO = do
-                    let bello = Dog { name : "Bello" }
-                    let mauzi = Cat { name : "Mauzi" }
+                    let bello = Dog { name: "Bello" }
+                    let mauzi = Cat { name: "Mauzi" }
                     println name bello
                     println name mauzi
                 end|]
@@ -461,7 +461,7 @@ spec = do
                 [r|
                     struct Person = (name: String, age: Int)
                     let peter = Person { name: "Peter", age: 24 }
-                    println peter.name : " is " : (peter.age) as String : " years old"
+                    println peter.name ++ " is " ++ (peter.age) as String ++ " years old"
                 |]
                 `shouldReturn` "Peter is 24 years old\n"
         it "Pattern matching" $ do
@@ -477,8 +477,8 @@ spec = do
                 [r|
                     let bottles (i: Int) => IO = do
                         if i > 0 then do
-                            println ^i : " bottles of beer on the wall, " : ^i : " bottles of beer."
-                            println "Take one down and pass it around, " : ((i) - 1) as String : " bottles of beer on the wall.\n"
+                            println ^i ++ " bottles of beer on the wall, " ++ ^i ++ " bottles of beer."
+                            println "Take one down and pass it around, " ++ ((i) - 1) as String ++ " bottles of beer on the wall.\n"
                             bottles (i)-1
                         else do
                             println "No more bottles of beer on the wall, no more bottles of beer."

@@ -1,3 +1,6 @@
+nop :: IO
+nop _ = IO{inner: 0}
+
 struct IO = (inner: Any)
 
 trait Optional
@@ -218,3 +221,10 @@ let tail ((_:xs): [Any]) => [Any] = xs
 
 compose :: Any -> Any -> Any
 compose f g = \x -> f (g x)
+
+concat :: [Any] -> [Any]
+concat [] = []
+concat (x:xs) = x ++ (concat xs)
+
+concatMap :: Fn{Any => [Any]} -> [Any] -> [Any]
+concatMap f xs = concat (map f, xs)

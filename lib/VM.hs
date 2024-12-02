@@ -129,6 +129,8 @@ data Instruction
       LUnstow String
     | -- | Pop n values off the stack, concatenate them, and push the result
       Concat Int
+    | -- | Pop a value off the stack, add it to the list at the top of the stack, and push the result
+      ListAdd Int
     | -- | Construct a list from the top n values of the stack
       PackList Int
     | -- | Push the contents of the list at the top of the stack onto the stack
@@ -777,9 +779,20 @@ runInstruction (LLoad name) = do
 runInstruction (Concat 0) = stackPush $ DList []
 runInstruction (Concat n) =
     -- TODO: make this more efficient, it's yucky
-    stackPopN n >>= \x -> do
-        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> (map DChar string); el -> [el]) x
-        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
+    -- Do what : does in Haskell
+    stackPopN n >>= \l -> do
+        stackPush $
+            DList $
+                concat $
+                    zipWith
+                        ( \x y ->
+                            ( case (x, y) of
+                                (a, DList b) -> a : b
+                                _ -> error "Invalid types for concat"
+                            )
+                        )
+                        l
+                        (tail l)
 runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ list !! index; [DInt index, DString str] -> stackPush $ DChar $ str !! index; x -> error $ "Invalid types for index: " ++ show x
 runInstruction Slice = do
     start <- stackPop
@@ -914,7 +927,7 @@ runInstruction TypeEq =
         (DChar _, DTypeQuery s) -> s == "Char"
         (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
         _ -> False
-runInstruction (PackList n) = stackPopN n >>= stackPush . DList
+runInstruction (PackList n) = stackPopN n >>= stackPush . DList . reverse
 runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
 runInstruction (Mov n dat) = do
     -- Move data into register %n
@@ -925,6 +938,10 @@ runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
 runInstruction StoreSideStack = modify $ \vm -> vm{sideStack = stack vm}
 runInstruction LoadSideStack = modify $ \vm -> vm{stack = if null $ sideStack vm then stack vm else sideStack vm}
 runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
+runInstruction (ListAdd n) = do
+    stackPopN n >>= \x -> do
+        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> (map DChar string); el -> [el]) x
+        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 printAssembly :: Program -> Bool -> String
