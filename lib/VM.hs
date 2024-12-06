@@ -680,7 +680,7 @@ runInstruction (Builtin Print) = do
     vm <- get
     case ioMode vm of
         HostDirect -> stackPop >>= liftIO . putStr . show
-        VMBuffer -> stackPop >>= \x -> put $ vm{ioBuffer = (ioBuffer vm){output = output (ioBuffer vm) ++ show x}}
+        VMBuffer -> stackPop >>= \x -> modify $ \v -> v{ioBuffer = (ioBuffer vm){output = output (ioBuffer vm) ++ show x}}
 runInstruction (Builtin GetLine) = do
     vm <- get
     case ioMode vm of
@@ -688,7 +688,7 @@ runInstruction (Builtin GetLine) = do
         VMBuffer -> do
             let input = (ioBuffer vm).input
             let (line, rest) = break (== '\n') input
-            put $ vm{ioBuffer = (ioBuffer vm){input = rest}}
+            modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
             stackPush $ DString line
 runInstruction (Builtin GetChar) = do
     vm <- get
@@ -697,7 +697,7 @@ runInstruction (Builtin GetChar) = do
         VMBuffer -> do
             let input = (ioBuffer vm).input
             let (char, rest) = (head input, tail input)
-            put $ vm{ioBuffer = (ioBuffer vm){input = rest}}
+            modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
             stackPush $ DChar char
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)

@@ -28,6 +28,7 @@ import VM
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, ioBuffer, ioMode, pc)
     , initVM
+    , printAssembly
     , runVMVM
     )
 import Verifier
@@ -44,6 +45,7 @@ compileAndRun prog = do
             xxx <- evalStateT (compileProgram program) (initCompilerState program) <&> optimize
             let xxxPoint = locateLabel xxx "main"
 
+            -- putStrLn $ printAssembly (V.fromList xxx) False
             vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
             pure $ output $ ioBuffer vm
 
@@ -312,14 +314,14 @@ spec = do
         it "Monad" $ do
             compileAndRun
                 [r|
-                    trait Monad = do
-                      bind :: Any -> Fn{Any => Any} -> Any
+                    trait MMonad = do
+                      mbind :: Any -> Fn{Any => Any} -> Any
                     end
 
-                    struct Maybe = (some: Any, none: Any)
+                    struct MMaybe = (some: Any, none: Any)
 
-                    impl Monad for Maybe = do
-                      bind x f = do
+                    impl MMonad for MMaybe = do
+                      mbind x f = do
                         f x.some
                       end
                     end
@@ -327,10 +329,10 @@ spec = do
                     let call (x: Fn {Any => Any}) = x "test"
 
                     let main => IO = do
-                      let bla = Maybe { some: "hello", none: "" }
-                      bind bla, print
+                      let bla = MMaybe { some: "hello", none: "" }
+                      mbind bla, print
                     end
-                |]
+                    |]
                 `shouldReturn` "hello"
         it "Static dispatch" $ do
             compileAndRun
