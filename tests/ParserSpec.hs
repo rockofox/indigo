@@ -21,6 +21,15 @@ parserCompilerFlags = initCompilerFlags{needsMain = False}
 
 spec :: Spec
 spec = do
+    describe "Function definitions" $ do
+        it "Should parse a simple function" $
+            parseProgram "add a b = a + b" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDef{name = "add", args = [Var "a" anyPosition, Var "b" anyPosition], body = Add (Var "a" anyPosition) (Var "b" anyPosition)}])
+        it "Should prase a function with 0 parameters" $
+            parseProgram "thunk = 1" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDef{name = "thunk", args = [], body = IntLit 1}])
     describe "compareTypes" $ do
         it "Should be true for exact matches" $
             property $

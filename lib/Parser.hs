@@ -260,7 +260,7 @@ defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder 
 funcDef :: Parser Expr
 funcDef = do
     name <- identifier <|> gravis <?> "function name"
-    args <- some defArg <?> "function arguments"
+    args <- many defArg <?> "function arguments"
     symbol "="
     FuncDef name args <$> expr <?> "function body"
 
