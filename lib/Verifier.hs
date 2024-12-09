@@ -13,7 +13,7 @@ import Data.Functor ((<&>))
 import Data.List (find)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map qualified as Map
-import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
 import Data.Set qualified as Set
 import Data.Text (Text, pack)
 import Data.Text qualified as T
@@ -94,9 +94,17 @@ typeOf' (UnaryMinus x) = typeOf' x
 typeOf' (If _ b _) = typeOf' b
 typeOf' (Modulo x _) = typeOf' x
 typeOf' (ListConcat x _) = typeOf' x
-typeOf' (StructAccess s _) = typeOf' s
+typeOf' (StructAccess n@(Var{}) (Var fieldName _)) = do
+    (StructT s) <- typeOf' n
+    -- (Struct _ fields _ _ _) <- gets structDecs <&> fromJust . find (\case Struct{name = name'} -> name' == s; _ -> False)
+    structDecs' <- gets structDecs
+    case find (\case Struct{name = name'} -> name' == s; _ -> False) structDecs' of
+        Just (Struct _ fields _ _ _) ->
+            return $ fromMaybe Unknown (lookup fieldName fields)
+        Nothing -> return Unknown
+        _ -> error "Impossible"
 typeOf' (Pipeline _ b) = typeOf' b
-typeOf' (Flexible x) = typeOf' x
+typeOf' (Flexible _) = return Unknown
 typeOf' (Then _ b) = typeOf' b
 typeOf' (StrictEval x) = typeOf' x
 typeOf' x@ListPattern{} = return $ typeOf x
@@ -138,6 +146,7 @@ typeOf' x@Placeholder{} = return $ typeOf x
 typeOf' x@Let{} = return $ typeOf x
 typeOf' x@ParenApply{} = return $ typeOf x
 typeOf' x@ListAdd{} = return $ typeOf x
+typeOf' x = error $ "typeOf' called with " ++ show x
 
 compareTypes' :: Type -> Type -> [AST.GenericExpr] -> StateT VerifierState IO Bool
 compareTypes' (List x) (List y) generics = compareTypes' x y generics
@@ -152,6 +161,7 @@ compareTypes' aT (StructT b) generics = case aT of
             Just (GenericExpr _ (Just (StructT t))) -> compStructs a t
             Just (GenericExpr _ _) -> return True
             Nothing -> compStructs a b
+    Unknown -> return True
     _ -> do
         let gen = find (\(GenericExpr name _) -> name == b) generics
         case gen of

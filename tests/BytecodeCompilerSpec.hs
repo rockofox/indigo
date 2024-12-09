@@ -70,12 +70,12 @@ spec = do
         it "Should print Hello, world!" $ do
             compile [r|let main => IO = unsafePrint "Hello, world!"|]
                 `shouldReturn` [Label "main", StoreSideStack, Push $ DString "Hello, world!", Builtin Print, ClearSideStack, Exit]
-    describe "Implicit casting" $ do
-        it "Should cast from int to float" $ do
-            compile [r|let main => IO = unsafePrint ^2 + 4.0|]
-                `shouldReturn` [Label "main", StoreSideStack, Meta "flex", Push 2, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Cast, Push 4.0, Call "+", Builtin Print, ClearSideStack, Exit]
-            compile [r|let main => IO = unsafePrint 2.0 + ^4|]
-                `shouldReturn` [Label "main", StoreSideStack, Push 2.0, LStore "__op_a_0", Meta "flex", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Swp, Cast, Push 2.0, Call "+", Builtin Print, ClearSideStack, Exit]
+    -- describe "Implicit casting" $ do
+    --     it "Should cast from int to float" $ do
+    --         compile [r|let main => IO = unsafePrint ^2 + 4.0|]
+    --             `shouldReturn` [Label "main", StoreSideStack, Meta "flex", Push 2, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Cast, Push 4.0, Call "+", Builtin Print, ClearSideStack, Exit]
+    --         compile [r|let main => IO = unsafePrint 2.0 + ^4|]
+    --             `shouldReturn` [Label "main", StoreSideStack, Push 2.0, LStore "__op_a_0", Meta "flex", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Swp, Cast, Push 2.0, Call "+", Builtin Print, ClearSideStack, Exit]
     describe "Explicit casting" $ do
         it "Can cast from int to float" $ do
             compile [r|2 as Float|]

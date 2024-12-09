@@ -66,11 +66,12 @@ let `<` (x: Int y: Int) => Int = unsafeLt x, y
 let `>` (x: Int y: Int) => Int = unsafeGt x, y
 let `<=` (x: Int y: Int) => Int = unsafeLe x, y
 let `>=` (x: Int y: Int) => Int = unsafeGe x, y
-let == (x: Int y: Int) => Int = unsafeEq x, y
-let != (x: Int y: Int) => Int = unsafeNe x, y
+let == (x: Any y: Any) => Int = unsafeEq x, y
+let != (x: Int y: Int) => Int = unsafeNeq x, y
 let && (x: Int y: Int) => Int = unsafeAnd x, y
 let || (x: Int y: Int) => Int = unsafeOr x, y
 let % (x: Int y: Int) => Int = unsafeMod x, y
+let ++ (x: String y: String) => String = unsafeListAdd x, y
 
 let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
 
@@ -219,6 +220,20 @@ let void (x: Any) => Any = _
 
 let head ((x:xs): [Any]) => Any = x
 let tail ((_:xs): [Any]) => [Any] = xs
+
+# Broken pattern matching
+let length (x: [Any]) => Int = unsafeListLength x
+let last (x: [Any]) => Any = unsafeListIndex x, (length x) - 1
+
+let slice (x: [Any] i: Int j: Int) => [Any] = unsafeListSlice x, i, j
+
+let `!!` (x: [Any] i: Int) => Any = unsafeListIndex x, i
+let `!!!` (x: Any n: String) => Any = unsafeStructAccess x, n
+let keys (x: Any) => [String] = unsafeKeys x
+
+let update (strucct: Any field: String v: Any) => Any = unsafeUpdate strucct, field, v
+
+let mergeStructs (xx: Any yy: Any) => Any = foldl (\acc key -> update acc, key, (yy !!! key)), xx, keys yy
 
 compose :: Any -> Any -> Any
 compose f g = \x -> f (g x)

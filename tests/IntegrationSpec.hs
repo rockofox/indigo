@@ -91,8 +91,10 @@ spec = do
                 bind None{} f = None{}
                 bind _ = "Error: Invalid argument to bind."
                 
-                println (bind Some{value: 5}, \x -> x + 1)
-                println (bind None{}, \x -> x + 1)
+                let main => IO = do
+                    println (bind Some{value: 5}, \x -> x + 1)
+                    println (bind None{}, \x -> x + 1)
+                end
             |]
                 `shouldReturn` "6\nNone{__traits: [Optional]}\n"
         it "Handles multiple variables correctly" $ do
@@ -110,7 +112,25 @@ spec = do
                 end
                 |]
                 `shouldReturn` "101\n202\n303\n"
-
+        it "Can match a list" $ do
+            compileAndRun
+                [r|
+                t :: [Int] -> Int
+                t [] = 0
+                t (x:xs) = x
+                let main => IO = println (t [1, 2, 3])
+            |]
+                `shouldReturn` "1\n"
+        -- it "Can match last element of a list" $ do
+        --     compileAndRun
+        --         [r|
+        --         t :: [Int] -> Int
+        --         t [] = 0
+        --         t [x] = x
+        --         t (x:xs) = t xs
+        --         let main => IO = println (t [1, 2, 3])
+        --     |]
+        --         `shouldReturn` "3\n"
         describe "Lists" $ do
             it "Can return the first element of a list" $ do
                 compileAndRun "t :: [Int] -> Int\nt (x:xs) = x\nlet main => IO = println (t [1, 2, 3])" `shouldReturn` "1\n"
@@ -427,7 +447,7 @@ spec = do
                 increase :: Int -> Int
                 increase x = x + 1
 
-                println (compose increase, increase) 2
+                let main => IO = println (compose increase, increase) 2
                 |]
                 `shouldReturn` "4\n"
         it "Indirect" $
@@ -442,20 +462,20 @@ spec = do
                 increaseByTwo :: Int -> Int
                 increaseByTwo x = (compose increase, increase) x
 
-                println increaseByTwo 2
+                let main => IO = println increaseByTwo 2
                 |]
                 `shouldReturn` "4\n"
     describe "No main" $ do
         it "Hello World" $ do
             compileAndRun
                 [r|
-                    println "Hello, World!"
+                    let main => IO = println "Hello, World!"
                 |]
                 `shouldReturn` "Hello, World!\n"
         it "Functional" $ do
             compileAndRun
                 [r|
-                    print (map (`*`3), [2, 4, 6, 8])
+                    let main => IO = print (map (`*`3), [2, 4, 6, 8])
                 |]
                 `shouldReturn` "[6,12,18,24]"
         it "Structured" $ do
@@ -463,7 +483,7 @@ spec = do
                 [r|
                     struct Person = (name: String, age: Int)
                     let peter = Person { name: "Peter", age: 24 }
-                    println peter.name ++ " is " ++ (peter.age) as String ++ " years old"
+                    let main => IO = println peter.name ++ " is " ++ (peter.age) as String ++ " years old"
                 |]
                 `shouldReturn` "Peter is 24 years old\n"
         it "Pattern matching" $ do
@@ -471,7 +491,7 @@ spec = do
                 [r|
                     let head ([]: [Any]) = 0
                     let head ((x:xs): [Any]) = x
-                    print head [1,2,3]
+                    let main => IO = print head [1,2,3]
                 |]
                 `shouldReturn` "1"
         it "\"99\" bottles of beer" $ do
@@ -479,7 +499,7 @@ spec = do
                 [r|
                     let bottles (i: Int) => IO = do
                         if i > 0 then do
-                            println ^i ++ " bottles of beer on the wall, " ++ ^i ++ " bottles of beer."
+                            println i as String ++ " bottles of beer on the wall, " ++ i as String ++ " bottles of beer."
                             println "Take one down and pass it around, " ++ ((i) - 1) as String ++ " bottles of beer on the wall.\n"
                             bottles (i)-1
                         else do
@@ -488,6 +508,6 @@ spec = do
                         end
                     end
 
-                    bottles 3
+                    let main => IO = bottles 3
                 |]
                 `shouldReturn` "3 bottles of beer on the wall, 3 bottles of beer.\nTake one down and pass it around, 2 bottles of beer on the wall.\n\n2 bottles of beer on the wall, 2 bottles of beer.\nTake one down and pass it around, 1 bottles of beer on the wall.\n\n1 bottles of beer on the wall, 1 bottles of beer.\nTake one down and pass it around, 0 bottles of beer on the wall.\n\nNo more bottles of beer on the wall, no more bottles of beer.\nGo to the store and buy some more, 99 bottles of beer on the wall.\n"

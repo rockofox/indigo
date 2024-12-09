@@ -157,6 +157,12 @@ data Instruction
       Meta String
     | -- | Access a field
       Access String
+    | -- | Access a field TODO: Remove!
+      AAccess
+    | -- | Get all keys of a struct
+      Keys
+    | -- | Update a field
+      Update
     | -- | Pack map
       PackMap Int
     | -- | Compares two types and pushes T if they are compatible, F otherwise
@@ -876,6 +882,9 @@ runInstruction Cast = do
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
 runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "Invalid type for access"
+runInstruction AAccess = stackPopN 2 >>= \(DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m
+runInstruction Keys = stackPop >>= \case DMap m -> stackPush $ DList $ map DString $ Data.Map.keys m; _ -> error "Invalid type for keys"
+runInstruction Update = stackPopN 3 >>= \(value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m
 runInstruction (PackMap n) = do
     elems <- stackPopN n
     stackPush $ DMap $ Data.Map.fromList $ map (\[DString x, y] -> (x, y)) $ chunksOf 2 elems

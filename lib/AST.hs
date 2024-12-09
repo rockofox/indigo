@@ -136,6 +136,7 @@ anyPosition :: Position
 anyPosition = Position (-1, -1)
 
 instance Eq Position where
+    (Position (-1, -1)) == (Position (-1, -1)) = True
     (Position (start1, end1)) == Position (-1, -1) = start1 >= 0 && end1 >= 0
     (Position (-1, -1)) == (Position (start2, end2)) = start2 >= 0 && end2 >= 0
     (Position (start1, end1)) == (Position (start2, end2)) = start1 == start2 && end1 == end2
@@ -187,6 +188,8 @@ compareTypes Self Self = True
 compareTypes Self StructT{} = True
 compareTypes StructT{} Self = True
 compareTypes (List x) (List y) = compareTypes x y
+compareTypes Unknown _ = True
+compareTypes _ Unknown = True
 compareTypes x y = x == y || x == Any || y == Any
 
 typeOf :: Expr -> Type
@@ -231,7 +234,7 @@ typeOf (Modulo x _) = typeOf x
 typeOf (Target _ _) = error "Cannot infer type of target"
 typeOf (ListConcat x _) = typeOf x
 typeOf (ListPattern _) = List Any
-typeOf (StructAccess s _) = typeOf s
+typeOf (StructAccess _ s) = typeOf s
 typeOf (Pipeline _ b) = typeOf b
 typeOf (Lambda _ _) = Fn [] Any
 typeOf (Cast _ (Var to _)) = StructT to

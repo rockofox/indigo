@@ -85,6 +85,7 @@ binOpTable =
     , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
+    , [binaryAny binaryFunctionCall]
     , -- , [prefix "-" UnaryMinus]
       [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "%" Modulo]
@@ -97,7 +98,6 @@ binOpTable =
     , [binary ">>" sequenceExpr]
     , [binary "==" Eq, binary "!=" Neq, binary "<=" Le, binary ">=" Ge, binary "<" Lt, binary ">" Gt]
     , [binary "&&" And, binary "||" Or]
-    , [binaryAny binaryFunctionCall]
     -- , [prefixAny pFunctionCall]
     -- , [postfixAny pFunctionCall]
     ]
@@ -118,7 +118,7 @@ binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
 
 binaryAny :: (String -> Expr -> Expr -> Expr) -> Operator Parser Expr
-binaryAny f = InfixL (f <$> identifier)
+binaryAny f = InfixL (f <$> freeOperator)
 
 binaryR :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binaryR name f = InfixR (f <$ symbol name)
@@ -199,6 +199,9 @@ float = lexeme (L.float <* optional (char 'f'))
 
 double :: Parser Double
 double = lexeme (L.float <* char 'd')
+
+freeOperator :: Parser String
+freeOperator = try $ lexeme $ some (oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '$', '%', '^', '~', ':']) >>= \x -> if length x > 1 then return x else fail "Operator must be at least two characters"
 
 extra :: Parser String
 extra = do
@@ -434,7 +437,7 @@ parseProgram t cf = do
             -- If theres no main function, add one
             let foundMain = any (\case FuncDef "main" _ _ -> True; _ -> False) program'.exprs || any (\case Function defs _ -> any (\case FuncDef "main" _ _ -> True; _ -> False) defs; _ -> False) program'.exprs
             let (outside, inside) = partition shouldBeOutside program'.exprs
-            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [StructT "IO"] [], FuncDef "main" [] (DoBlock inside)]
+            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [Any] [], FuncDef "main" [] (DoBlock inside)]
             if foundMain || not cf.needsMain
                 then Right program'
                 else Right artificialMainProgram

@@ -21,6 +21,11 @@ parserCompilerFlags = initCompilerFlags{needsMain = False}
 
 spec :: Spec
 spec = do
+    describe "Binary operations" $ do
+        it "Can parse free operators" $
+            parseProgram "x := 2" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncCall ":=" [Var "x" (Position (0, 2)), IntLit 2] anyPosition])
     describe "Function definitions" $ do
         it "Should parse a simple function" $
             parseProgram "add a b = a + b" parserCompilerFlags

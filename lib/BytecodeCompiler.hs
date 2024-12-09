@@ -15,6 +15,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace (traceM, traceShowM)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -282,6 +283,7 @@ compileExpr (Parser.UnaryMinus (Parser.IntLit x)) _ = return [Push $ DInt $ -fro
 compileExpr (Parser.StringLit x) _ = return [Push $ DString x]
 compileExpr (Parser.DoBlock [expr]) expectedType = compileExpr expr expectedType
 compileExpr (Parser.DoBlock exprs) expectedType = do
+    -- traceM $ "Compiling do block " ++ show exprs ++ " with expected type " ++ show expectedType
     let grouped = groupBy (\a b -> isFuncCall a && isFuncCall b) exprs
     let nestedSequence = concatMap (\case [] -> []; [x] -> if isFuncCall x then [Parser.FuncCall "sequence" [x, Parser.FuncCall "nop" [] anyPosition] anyPosition] else [x]; xs -> if all isFuncCall xs then [foldl1 (\a b -> Parser.FuncCall "sequence" [a, b] anyPosition) xs] else xs) grouped
     concatMapM (`compileExpr` expectedType) nestedSequence
@@ -308,6 +310,13 @@ compileExpr (Parser.FuncCall "unsafePrint" [x] _) expectedType = compileExpr x e
 compileExpr (Parser.FuncCall "unsafeGetLine" _ _) _ = return [Builtin GetLine]
 compileExpr (Parser.FuncCall "unsafeGetChar" _ _) _ = return [Builtin GetChar]
 compileExpr (Parser.FuncCall "unsafeRandom" _ _) _ = return [Builtin Random]
+compileExpr (Parser.FuncCall "unsafeListAdd" [y, x] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [ListAdd 2])
+compileExpr (Parser.FuncCall "unsafeListIndex" [x, y] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Index])
+compileExpr (Parser.FuncCall "unsafeListLength" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Length])
+compileExpr (Parser.FuncCall "unsafeListSlice" [x, y, z] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> compileExpr z expectedType >>= \z' -> return (x' ++ y' ++ z' ++ [Slice])
+compileExpr (Parser.FuncCall "unsafeStructAccess" [x, y] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [AAccess])
+compileExpr (Parser.FuncCall "unsafeKeys" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Keys])
+compileExpr (Parser.FuncCall "unsafeUpdate" [x, y, z] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> compileExpr z expectedType >>= \z' -> return (x' ++ y' ++ z' ++ [Update])
 compileExpr (Parser.FuncCall "abs" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
@@ -331,6 +340,8 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
                 Nothing -> case findFunction funcName functions' argTypes of
                     (Just f) -> f
                     Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
+    -- traceShowM $ "Looking for function " ++ funcName ++ " in context " ++ curCon ++ " with types " ++ show argTypes ++ " and expected type " ++ show expectedType
+    -- traceShowM fbt
     let funcDec = case find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs' of
             Just fd -> do
                 case find (\(_, n, _, newDec) -> n == funcName && take (length args) (Parser.types newDec) == argTypes) fbt of
@@ -392,7 +403,8 @@ compileExpr (Parser.FuncDef origName args body) expectedType = do
 
     let funcDec = fromJust $ find (\(Parser.FuncDec name' _ _) -> name' == name) funcDecs''
 
-    body' <- compileExpr body if expectedType == Parser.Any then last $ Parser.types funcDec else expectedType
+    body' <- compileExpr body (last $ Parser.types funcDec)
+
     args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
     let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})

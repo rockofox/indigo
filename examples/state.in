@@ -1,0 +1,26 @@
+struct State = (x: Int, y: Int)
+
+impl Monad for State = do
+  bind State{x: x, y: y} f = f x
+  return x = State{x: x, y: 0}
+  sequence aaa bbb = mergeStructs aaa, bbb
+end
+
+`:=` :: String -> Any -> State
+`:=` n v = do
+  if n == "x" then do
+    State{x: v}
+  else do
+    State{y: v}
+  end
+end
+
+testState :: State
+testState = do
+   "x" := 123
+   "y" := 4562
+   "x" := 1232
+end
+
+main :: IO
+main = println testState
