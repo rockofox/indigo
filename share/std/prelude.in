@@ -30,34 +30,6 @@ impl Monad for IO = do
   sequence IO{inner: x} IO{inner: y} = IO{inner: y}
 end
 
-# `+` :: Any -> Any -> Any
-# `+` x y = x + y
-# `-` :: Any -> Any -> Any
-# `-` x y = (x) - y
-# `*` :: Any -> Any -> Any
-# `*` x y = x * y
-# `/` :: Any -> Any -> Any
-# `/` x y = x / y
-# `<` :: Any -> Any -> Any
-# `<` x y = x < y
-# `>` :: Any -> Any -> Any
-# `>` x y = x > y
-# `<=` :: Any -> Any -> Any
-# `<=` x y = x <= y
-# `>=` :: Any -> Any -> Any
-# `>=` x y = x >= y
-# `==` :: Any -> Any -> Any
-# `==` x y = x == y
-# `!=` :: Any -> Any -> Any
-# `!=` x y = x != y
-# `&&` :: Any -> Any -> Any
-# `&&` x y = x && y
-# `||` :: Any -> Any -> Any
-# `||` x y = x || y
-# `%` :: Any -> Any -> Any
-# `%` x y = x % y
-# `!` :: Any -> Any
-# `!` x = !x
 let + (x: Int y: Int) => Int = unsafeAdd x, y
 let - (x: Int y: Int) => Int = unsafeSub x, y
 let * (x: Int y: Int) => Int = unsafeMul x, y
@@ -216,7 +188,7 @@ let times (n: Int f: Fn{Int => Any}) => Any = do
   end
 end
 
-let void (x: Any) => Any = _
+let void<A: Any> (x: A) => A = _
 
 let head ((x:xs): [Any]) => Any = x
 let tail ((_:xs): [Any]) => [Any] = xs
@@ -234,6 +206,13 @@ let keys (x: Any) => [String] = unsafeKeys x
 let update (strucct: Any field: String v: Any) => Any = unsafeUpdate strucct, field, v
 
 let mergeStructs (xx: Any yy: Any) => Any = foldl (\acc key -> update acc, key, (yy !!! key)), xx, keys yy
+
+let exit (x: Int) => IO = unsafeExit x
+
+let error (x: String) => IO = do
+  println ("\x1b[31m" ++ x ++ "\x1b[0m")
+  exit 1
+end
 
 compose :: Any -> Any -> Any
 compose f g = \x -> f (g x)

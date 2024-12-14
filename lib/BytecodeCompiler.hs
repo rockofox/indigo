@@ -59,6 +59,7 @@ data CompilerState a = CompilerState
     , currentContext :: String -- TODO: Nested contexts
     , externals :: [External]
     , functionsByTrait :: [(String, String, String, Parser.Expr)]
+    , sourcePath :: String
     }
     deriving (Show)
 
@@ -71,6 +72,22 @@ data Let = Let
 
 initCompilerState :: Parser.Program -> CompilerState a
 initCompilerState prog =
+    CompilerState
+        prog
+        []
+        []
+        []
+        0
+        []
+        []
+        []
+        "__outside"
+        []
+        []
+        "no file"
+
+initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
+initCompilerStateWithFile prog =
     CompilerState
         prog
         []
@@ -104,13 +121,13 @@ compileProgram (Parser.Program expr) = do
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ prelude' ++ functions' ++ freePart ++ [Exit]
+    return $ prelude' ++ functions' ++ freePart ++ [Push $ DInt 0, Exit]
 
 compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
 compileProgramBare (Parser.Program expr) = do
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ functions' ++ freePart ++ [Exit]
+    return $ functions' ++ freePart ++ [Push $ DInt 0, Exit]
 
 findAnyFunction :: String -> [Function] -> Maybe Function
 findAnyFunction funcName xs = do
@@ -149,18 +166,21 @@ typesMatchExactly fun typess = all (uncurry (==)) (zip fun.types typess) && leng
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
 
-findSourceFile :: String -> IO String
-findSourceFile fileName = do
+findSourceFile :: String -> [String] -> IO String
+findSourceFile fileName paths = do
     dataFile <- Paths_indigo.getDataFileName fileName
     executablePathFile <- getExecutablePath >>= \x -> return $ takeDirectory x </> fileName
-    let pathsToTry = map (</> fileName) ["/usr/local/lib/indigo/", "/usr/lib/indigo/"] ++ [executablePathFile, dataFile]
+    let pathsToTry = map (</> fileName) (["/usr/local/lib/indigo/", "/usr/lib/indigo/"] ++ paths) ++ [executablePathFile, dataFile]
     firstThatExists <- firstM doesFileExist pathsToTry
     case firstThatExists of
         Just x -> return x
         Nothing -> error $ "Source file " ++ fileName ++ " not found. Tried:\n* " ++ intercalate "\n* " pathsToTry
 
+findSourceFile' :: String -> IO String
+findSourceFile' fileName = findSourceFile fileName []
+
 preludeFile :: IO String
-preludeFile = findSourceFile "std/prelude.in" >>= readFile
+preludeFile = findSourceFile' "std/prelude.in" >>= readFile
 
 doBinOp :: Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp x y expectedType op = do
@@ -317,6 +337,7 @@ compileExpr (Parser.FuncCall "unsafeListSlice" [x, y, z] _) expectedType = compi
 compileExpr (Parser.FuncCall "unsafeStructAccess" [x, y] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [AAccess])
 compileExpr (Parser.FuncCall "unsafeKeys" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Keys])
 compileExpr (Parser.FuncCall "unsafeUpdate" [x, y, z] _) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> compileExpr z expectedType >>= \z' -> return (x' ++ y' ++ z' ++ [Update])
+compileExpr (Parser.FuncCall "unsafeExit" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Exit])
 compileExpr (Parser.FuncCall "abs" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
@@ -569,9 +590,10 @@ compileExpr (Parser.StructAccess struct (Parser.Var field _)) expectedType = do
     return $ struct' ++ [Access field]
 compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) expectedType = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
-    let convertedPath = map (\x -> if x == '@' then '/' else x) from
-    i <- liftIO $ readFile $ convertedPath ++ ".in"
-    let expr = case parseProgram (T.pack i) Parser.initCompilerFlags of -- FIXME: pass on flags
+    sourcePath' <- gets sourcePath
+    let sourcePath = takeDirectory sourcePath'
+    i <- liftIO (findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
+    let expr = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program exprs) -> exprs
     let p =
@@ -580,7 +602,7 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
                     let alias = if qualified then from else fromJust as
                     concatMapM (`compileExpr` expectedType) (map (`mangleAST` alias) expr)
                 else concatMapM (`compileExpr` expectedType) expr
-    p >>= \p' -> return $ p' ++ [Label "__sep"]
+    p >>= \p' -> return p'
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
     mangleAST (Parser.FuncDec name types _) alias = Parser.FuncDec (alias ++ "@" ++ name) types []

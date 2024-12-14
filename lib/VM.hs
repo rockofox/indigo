@@ -44,6 +44,7 @@ import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
+import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import Util (showSanitized)
 
 data Instruction
@@ -251,6 +252,7 @@ data VM = VM
     , ioMode :: IOMode
     , ioBuffer :: IOBuffer
     , sideStack :: [Data]
+    , shouldExit :: Bool
     }
     deriving (Show)
 
@@ -259,7 +261,7 @@ data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = []}
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True}
 
 type Program = V.Vector Instruction
 
@@ -708,7 +710,14 @@ runInstruction (Builtin GetChar) = do
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)
     stackPush $ DFloat num
-runInstruction Exit = modify $ \vm -> vm{running = False}
+runInstruction Exit = do
+    modify $ \vm -> vm{running = False}
+    actuallyExit <- gets shouldExit
+    when actuallyExit do
+        stackPop >>= \case DInt 0 -> liftIO exitSuccess; DInt x -> liftIO $ exitWith (ExitFailure x); _ -> error "Exit called with non-integer"
+    unless actuallyExit $ do
+        _ <- stackPop
+        modify $ \vm -> vm{running = False}
 -- Control flow
 runInstruction (Call x) = do
     nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)

@@ -355,11 +355,10 @@ import_ :: Parser Expr
 import_ = do
     keyword "import"
     qualified <- optional (keyword "qualified" >> return True) <?> "qualified"
-    objects <- sepBy (extra <|> (symbol "*" >> return "*")) (symbol ",") <?> "import objects"
-    keyword "from"
+    optional $ keyword "from"
     from <- many (alphaNumChar <|> char '.' <|> char '@' <|> char '/') <?> "import path"
     alias <- optional (keyword " as" >> extra) <?> "import alias"
-    return $ Import{objects = objects, from = from, qualified = fromMaybe False qualified, as = alias}
+    return $ Import{objects = ["*"], from = from, qualified = fromMaybe False qualified, as = alias}
 
 array :: Parser Expr
 array = do

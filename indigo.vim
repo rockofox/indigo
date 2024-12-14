@@ -35,7 +35,7 @@ syn keyword inImport import contained nextgroup=inImportModuleName
 syn match   inImportModuleName '\<[A-Z][A-Za-z.]*' contained
 syn region  inImportList start='(' skip='([^)]\{-})' end=')' keepend contained contains=ConId,VarId,inDelimiter,inBlockComment,inTypedef,@NoSpell
 
-syn keyword inImportMod contained as qualified hiding
+syn keyword inImportMod contained as qualified hiding from
 syn keyword inInfix as satisfies is
 syn keyword inStructure struct trait impl for let external
 syn keyword inTypedef type

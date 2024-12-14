@@ -102,7 +102,7 @@ inputFileBinary input = case input of
 potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = if showTime then timeItNamed msg action else action
 
-parseAndVerify name input compilerFlags =
+parseAndVerify name input compilerFlags path =
     return
         ( do
             let result = parseProgram (T.pack input) initCompilerFlags
@@ -110,7 +110,7 @@ parseAndVerify name input compilerFlags =
                 Left err -> return $ Left (err, Nothing)
                 Right program' -> do
                     let (Program exprs) = program'
-                    verifierResult <- verifyProgram name (T.pack input) exprs
+                    verifierResult <- verifyProgramWithPath name (T.pack input) exprs path
                     case verifierResult of
                         Left err -> return $ Left (err, Just program')
                         Right _ -> return $ Right program'
@@ -145,7 +145,7 @@ main = do
                 prog <-
                     if noVerify
                         then parseNoVerify (fromJust input) i initCompilerFlags
-                        else parseAndVerify (fromJust input) i initCompilerFlags
+                        else parseAndVerify (fromJust input) i initCompilerFlags (fromJust input)
                 rprog <- prog
                 expr <- case rprog of
                     Left (err, expr) -> do
@@ -160,7 +160,7 @@ main = do
                 potentiallyTimedOperation "Compilation" showTime $
                     do
                         bool id optimize (not noOptimize)
-                        <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerState expr)
+                        <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr (fromJust input))
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode

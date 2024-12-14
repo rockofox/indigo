@@ -30,6 +30,7 @@ import VM
     , initVM
     , printAssembly
     , runVMVM
+    , shouldExit
     )
 import Verifier
 
@@ -46,7 +47,7 @@ compileAndRun prog = do
             let xxxPoint = locateLabel xxx "main"
 
             -- putStrLn $ printAssembly (V.fromList xxx) False
-            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer}
+            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, shouldExit = False}
             pure $ output $ ioBuffer vm
 
 spec = do

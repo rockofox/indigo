@@ -1,0 +1,31 @@
+struct TestResult = (name: String, result: Bool)
+struct TestSuite = (name: String, results: [TestResult])
+
+impl Monad for TestSuite = do
+  bind _ f = error "Bind not implemented for TestSuite"
+  return _ = error "Return not implemented for TestSuite"
+  sequence TestSuite{name: n, results: r} TestSuite{name: n2, results: r2} = TestSuite{name: n, results: r ++ r2}
+end
+
+let testCase (n: String f: Fn{Any => Bool}) => TestSuite = TestSuite{results: [TestResult{name: n, result: f 1}]}
+
+let evalTestSuite (suite: TestSuite) => IO = do
+  let resultss = suite.results
+  let failed = filter (\x -> !(x.result)), suite.results
+  let passed = filter (\x -> x.result), suite.results
+
+  map (\r-> do
+    if r.result then do
+      println ("\x1b[32m✓\x1b[0m " ++ r.name)
+    else do
+      println ("\x1b[31m✗\x1b[0m " ++ r.name)
+    end
+  end), suite.results
+
+  println ("Passed: " ++ ((length passed) as String) ++ "/" ++ ((length suite.results) as String))
+  if (length failed) > 0 then do
+    exit 1
+  else do
+    exit 0
+  end
+end

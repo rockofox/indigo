@@ -20,11 +20,12 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void
 import Parser
+import System.FilePath
 import Text.Megaparsec hiding (State)
 import Util
 import VM qualified
 
-data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool, structDecs :: [Expr]} deriving (Show)
+data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool, structDecs :: [Expr], sourcePath :: String} deriving (Show)
 
 data VerifierFrame = VerifierFrame
     { bindings :: Set.Set VBinding
@@ -95,14 +96,16 @@ typeOf' (If _ b _) = typeOf' b
 typeOf' (Modulo x _) = typeOf' x
 typeOf' (ListConcat x _) = typeOf' x
 typeOf' (StructAccess n@(Var{}) (Var fieldName _)) = do
-    (StructT s) <- typeOf' n
-    -- (Struct _ fields _ _ _) <- gets structDecs <&> fromJust . find (\case Struct{name = name'} -> name' == s; _ -> False)
-    structDecs' <- gets structDecs
-    case find (\case Struct{name = name'} -> name' == s; _ -> False) structDecs' of
-        Just (Struct _ fields _ _ _) ->
-            return $ fromMaybe Unknown (lookup fieldName fields)
-        Nothing -> return Unknown
-        _ -> error "Impossible"
+    n' <- typeOf' n
+    case n' of
+        StructT s -> do
+            structDecs' <- gets structDecs
+            case find (\case Struct{name = name'} -> name' == s; _ -> False) structDecs' of
+                Just (Struct _ fields _ _ _) ->
+                    return $ fromMaybe Unknown (lookup fieldName fields)
+                Nothing -> return Unknown
+                _ -> return Unknown
+        _ -> return Unknown
 typeOf' (Pipeline _ b) = typeOf' b
 typeOf' (Flexible _) = return Unknown
 typeOf' (Then _ b) = typeOf' b
@@ -202,6 +205,7 @@ initVerifierState =
         { frames = [VerifierFrame{bindings = Set.fromList [], ttypes = Map.empty, ftype = Any, fname = "__outside"}] -- TODO: actually import prelude
         , topLevel = True
         , structDecs = []
+        , sourcePath = "none"
         }
 
 currentFrame :: StateT VerifierState IO VerifierFrame
@@ -224,13 +228,16 @@ runRefinement refinement value = do
                 ]
     compiled <- evalStateT (BytecodeCompiler.compileProgram prog) (BytecodeCompiler.initCompilerState prog)
     let mainPc = BytecodeCompiler.locateLabel compiled "main"
-    result <- VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    result <- VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}], VM.shouldExit = False}
     return $ case VM.stack result of
         [VM.DBool b] -> b
         _ -> error $ "Refinement did not return a boolean, but " ++ show (VM.stack result) ++ " instead"
 
 verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram name input exprs = evalStateT (verifyProgram' name input exprs) initVerifierState
+
+verifyProgramWithPath :: String -> Text -> [Expr] -> String -> IO (Either (ParseErrorBundle Text Void) ())
+verifyProgramWithPath name input exprs path = evalStateT (verifyProgram' name input exprs) (initVerifierState{sourcePath = path})
 
 verifyProgram' :: String -> Text -> [Expr] -> StateT VerifierState IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram' name source exprs = do
@@ -377,8 +384,9 @@ verifyExpr (Lambda args body) = do
     return bodyErrors
 verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
-    let convertedPath = map (\x -> if x == '@' then '/' else x) from
-    i <- liftIO $ readFile $ convertedPath ++ ".in"
+    sourcePath' <- gets sourcePath
+    let sourcePath = takeDirectory sourcePath'
+    i <- liftIO (BytecodeCompiler.findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
     let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Program exprs) -> exprs
