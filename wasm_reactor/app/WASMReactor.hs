@@ -38,6 +38,7 @@ import VM
     , printAssembly
     , runVM
     , runVMVM
+    , shouldExit
     )
 import Verifier (verifyProgram)
 
@@ -69,7 +70,7 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
                 Right _ -> do
                     xxx <- evalStateT (compileProgram program) (initCompilerState program)
                     let xxxPoint = locateLabel xxx "main"
-                    vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}}
+                    vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
                     let output' = BS.pack $ output $ ioBuffer vm
                     BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
                         outputPtr <- mallocBytes len
