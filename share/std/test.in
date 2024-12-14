@@ -14,13 +14,13 @@ let evalTestSuite (suite: TestSuite) => IO = do
   let failed = filter (\x -> !(x.result)), suite.results
   let passed = filter (\x -> x.result), suite.results
 
-  map (\r-> do
+  void (map (\r-> do
     if r.result then do
       println ("\x1b[32m✓\x1b[0m " ++ r.name)
     else do
       println ("\x1b[31m✗\x1b[0m " ++ r.name)
     end
-  end), suite.results
+  end), suite.results)
 
   println ("Passed: " ++ ((length passed) as String) ++ "/" ++ ((length suite.results) as String))
   if (length failed) > 0 then do
