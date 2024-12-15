@@ -65,7 +65,7 @@ spec = do
                 \t -> compareTypes (StructT t) (StructT t) `shouldBe` True
     describe "Basic" $ do
         it "Should parse a simple program" $
-            parseProgram "let main => IO = print \"Hello, world!\"" parserCompilerFlags
+            parseProgram "let main : IO = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"], generics = []}}])
     describe "Struct" $ do
@@ -157,7 +157,7 @@ spec = do
         it "Should parse let generics" $ do
             parseProgram
                 [r|
-                let add<N: Number> (a: N b: N) => N = do
+                let add<N: Number> (a: N b: N) : N = do
                   a + b
                 end
             |]

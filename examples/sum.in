@@ -3,7 +3,7 @@ mysum :: [Float] -> Float
 mysum [] = 0.0
 mysum (x:xs) = x + mysum xs
 
-let main => IO = do
+let main : IO = do
     let xs = range 1.0,100.0,2.0
     # print (sum xs)
     print mysum xs

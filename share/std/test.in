@@ -7,9 +7,9 @@ impl Monad for TestSuite = do
   sequence TestSuite{name: n, results: r} TestSuite{name: n2, results: r2} = TestSuite{name: n, results: r ++ r2}
 end
 
-let testCase (n: String f: Fn{Any => Bool}) => TestSuite = TestSuite{results: [TestResult{name: n, result: f 1}]}
+let testCase (n: String f: (Any -> Bool)) : TestSuite = TestSuite{results: [TestResult{name: n, result: f 1}]}
 
-let evalTestSuite (suite: TestSuite) => IO = do
+let evalTestSuite (suite: TestSuite) : IO = do
   let resultss = suite.results
   let failed = filter (\x -> !(x.result)), suite.results
   let passed = filter (\x -> x.result), suite.results

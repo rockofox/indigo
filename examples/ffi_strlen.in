@@ -2,6 +2,6 @@ external "__default" = do
     strlen :: String -> Int
 end
 
-let main => IO = do
+let main : IO = do
     println strlen "Hello, World!\n"
 end

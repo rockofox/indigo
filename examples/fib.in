@@ -1,9 +1,9 @@
-let fib (0: Int) => Int = 0
-let fib (1: Int) => Int = 1
-let fib (n: Int) => Int = (fib ((n) - 1)) + (fib ((n) - 2))
+let fib (0: Int) : Int = 0
+let fib (1: Int) : Int = 1
+let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
 
 #
-# let fib (n:Int) => Int = do
+# let fib (n:Int) : Int = do
 #     if n == 0 then
 #         0
 #     else if n == 1 then
@@ -16,6 +16,6 @@ let fib (n: Int) => Int = (fib ((n) - 1)) + (fib ((n) - 2))
 #         end
 # end
 
-let main => IO = do
+let main : IO = do
     println fib 12
 end

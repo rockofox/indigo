@@ -1,4 +1,4 @@
-let bottles (i: Int) => IO = do
+let bottles (i: Int) : IO = do
     if i > 0 then do
         println ^i : " bottles of beer on the wall, " : ^i : " bottles of beer."
         println "Take one down and pass it around, " : ((i) - 1) as String : " bottles of beer on the wall.\n"
@@ -9,6 +9,6 @@ let bottles (i: Int) => IO = do
     end
 end
 
-let main => IO = do
+let main : IO = do
     bottles 99
 end

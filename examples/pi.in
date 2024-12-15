@@ -19,6 +19,6 @@ pi n = do
   4.0 * rsum
 end
 
-let main => IO = do
+let main : IO = do
   println pi 4000.0
 end

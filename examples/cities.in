@@ -1,4 +1,4 @@
-# let main => IO = do
+# let main : IO = do
   let cities = ["London", "Oslo", "Paris", "Amsterdam", "Berlin"]
   let visited = ["Berlin", "Oslo"]
   println map (\a -> "I still need to visit " : a : "!" : "\n"), ((cities)-(visited))

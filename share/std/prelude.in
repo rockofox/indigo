@@ -12,7 +12,7 @@ maybe x Some{value: y} = y
 maybe x None{} = x
 
 trait Monad = do
-  bind :: Self -> Fn{Any => Self} -> Self
+  bind :: Self -> (Any -> Self) -> Self
   return :: Any -> Self
   sequence :: Self -> Self -> Self
 end
@@ -21,44 +21,44 @@ impl Monad for Optional = do
   bind Some{value: x} f = Some{value: f x}
   bind None{} f = None{}
   return x = Some{value: x}
-  sequence Some{value: x} Some{value: y} = Some{value: y}
+  sequence Some{value: x} Some{value: y}= Some{value: y}
 end
 
 impl Monad for IO = do
-  bind IO{inner: x} f = f x
+  bind IO{inner: x}f = f x
   return x = IO{inner: x}
   sequence IO{inner: x} IO{inner: y} = IO{inner: y}
 end
 
-let + (x: Int y: Int) => Int = unsafeAdd x, y
-let - (x: Int y: Int) => Int = unsafeSub x, y
-let * (x: Int y: Int) => Int = unsafeMul x, y
-let / (x: Int y: Int) => Int = unsafeDiv x, y
-let `<` (x: Int y: Int) => Int = unsafeLt x, y
-let `>` (x: Int y: Int) => Int = unsafeGt x, y
-let `<=` (x: Int y: Int) => Int = unsafeLe x, y
-let `>=` (x: Int y: Int) => Int = unsafeGe x, y
-let == (x: Any y: Any) => Int = unsafeEq x, y
-let != (x: Int y: Int) => Int = unsafeNeq x, y
-let && (x: Int y: Int) => Int = unsafeAnd x, y
-let || (x: Int y: Int) => Int = unsafeOr x, y
-let % (x: Int y: Int) => Int = unsafeMod x, y
-let ++ (x: String y: String) => String = unsafeListAdd x, y
+let + (x: Int y: Int) : Int = unsafeAdd x, y
+let - (x: Int y: Int) : Int = unsafeSub x, y
+let * (x: Int y: Int) : Int = unsafeMul x, y
+let / (x: Int y: Int) : Int = unsafeDiv x, y
+let `<` (x: Int y: Int) : Int = unsafeLt x, y
+let `>` (x: Int y: Int) : Int = unsafeGt x, y
+let `<=` (x: Int y: Int) : Int = unsafeLe x, y
+let `>=` (x: Int y: Int) : Int = unsafeGe x, y
+let == (x: Any y: Any) : Int = unsafeEq x, y
+let != (x: Int y: Int) : Int = unsafeNeq x, y
+let && (x: Int y: Int) : Int = unsafeAnd x, y
+let || (x: Int y: Int) : Int = unsafeOr x, y
+let % (x: Int y: Int) : Int = unsafeMod x, y
+let ++ (x: String y: String) : String = unsafeListAdd x, y
 
-let flip f: Fn{Any -> Any => Any} -> x: Any -> y: Any => Fn{Any -> Any => Any} = f y, x
+let flip (f: (Any -> Any -> Any) x: Any y: Any): (Any -> Any -> Any) = f y, x
 
-map :: Fn{Any => Any} -> [Any] -> [Any]
+map :: (Any -> Any) -> [Any] -> [Any]
 map fun [] = []
 map fun (x:xs) = (fun x) : (map fun, xs)
 
-mapM :: Fn{Any => IO} -> [Any] -> IO
+mapM :: (Any -> IO) -> [Any] -> IO
 mapM fun [] = []
 mapM fun (x:xs) = do
     fun x
     mapM fun, xs
 end
 
-filter :: Fn{Any => Bool} -> [Any] -> [Any]
+filter :: (Any -> Bool) -> [Any] -> [Any]
 filter fun [] = []
 filter fun (x:xs) = do
     if fun x then
@@ -67,11 +67,11 @@ filter fun (x:xs) = do
         filter fun, xs
 end
 
-foldl :: Fn{Any -> Any => Any} -> Any -> [Any] -> Any
+foldl :: (Any -> Any -> Any) -> Any -> [Any] -> Any
 foldl fun acc [] = acc
 foldl fun acc (x:xs) = foldl (fun), (fun acc, x), xs
 
-foldr :: Fn{Any -> Any => Any} -> Any -> [Any] -> Any
+foldr :: (Any -> Any -> Any) -> Any -> [Any] -> Any
 foldr fun acc [] = acc
 foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
 
@@ -95,7 +95,7 @@ println :: Any -> IO
 println s = do
   print s
   print "\n"
-  IO {inner: 0}
+  IO{inner: 0}
 end
 
 getLine :: IO
@@ -126,7 +126,7 @@ min x y = do
   end
 end
 
-let floor (x: Float) => Float = do
+let floor (x: Float) : Float = do
   if x < 0.0 then do
     (x + 0.5) as Int as Float
   else do
@@ -172,7 +172,7 @@ cPtr x = x as CPtr
 cNullPtr :: CPtr
 cNullPtr _ = 0 as CPtr
 
-# timesM :: Int -> Fn{Int -> IO => IO} -> IO
+# timesM :: Int -> (Int -> IO -> IO) -> IO
 # timesM n f = do
 #   if n <= 0 then do
 #   else do
@@ -180,7 +180,7 @@ cNullPtr _ = 0 as CPtr
 #     timesM (n - 1), f
 #   end
 # end
-let times (n: Int f: Fn{Int => Any}) => Any = do
+let times (n: Int f: (Int -> Any)) : Any = do
   if n < 0 then do
   else do
     f n
@@ -188,28 +188,28 @@ let times (n: Int f: Fn{Int => Any}) => Any = do
   end
 end
 
-let void<A: Any> (x: A) => A = _
+let void<A: Any> (x: A) : A = _
 
-let head ((x:xs): [Any]) => Any = x
-let tail ((_:xs): [Any]) => [Any] = xs
+let head ((x:xs): [Any]) : Any = x
+let tail ((_:xs): [Any]) : [Any] = xs
 
 # Broken pattern matching
-let length (x: [Any]) => Int = unsafeListLength x
-let last (x: [Any]) => Any = unsafeListIndex x, (length x) - 1
+let length (x: [Any]) : Int = unsafeListLength x
+let last (x: [Any]) : Any = unsafeListIndex x, (length x) - 1
 
-let slice (x: [Any] i: Int j: Int) => [Any] = unsafeListSlice x, i, j
+let slice (x: [Any] i: Int j: Int) : [Any] = unsafeListSlice x, i, j
 
-let `!!` (x: [Any] i: Int) => Any = unsafeListIndex x, i
-let `!!!` (x: Any n: String) => Any = unsafeStructAccess x, n
-let keys (x: Any) => [String] = unsafeKeys x
+let `!!` (x: [Any] i: Int) : Any = unsafeListIndex x, i
+let `!!!` (x: Any n: String) : Any = unsafeStructAccess x, n
+let keys (x: Any) : [String] = unsafeKeys x
 
-let update (strucct: Any field: String v: Any) => Any = unsafeUpdate strucct, field, v
+let update (strucct: Any field: String v: Any) : Any = unsafeUpdate strucct, field, v
 
-let mergeStructs (xx: Any yy: Any) => Any = foldl (\acc key -> update acc, key, (yy !!! key)), xx, keys yy
+let mergeStructs (xx: Any yy: Any) : Any = foldl (\acc key -> update acc, key, (yy !!! key)), xx, keys yy
 
-let exit (x: Int) => IO = unsafeExit x
+let exit (x: Int) : IO = unsafeExit x
 
-let error (x: String) => IO = do
+let error (x: String) : IO = do
   println ("\x1b[31m" ++ x ++ "\x1b[0m")
   exit 1
 end
@@ -221,5 +221,5 @@ concat :: [Any] -> [Any]
 concat [] = []
 concat (x:xs) = x ++ (concat xs)
 
-concatMap :: Fn{Any => [Any]} -> [Any] -> [Any]
+concatMap :: (Any -> [Any]) -> [Any] -> [Any]
 concatMap f xs = concat (map f, xs)

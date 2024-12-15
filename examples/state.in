@@ -8,11 +8,7 @@ end
 
 `:=` :: String -> Any -> State
 `:=` n v = do
-  if n == "x" then do
-    State{x: v}
-  else do
-    State{y: v}
-  end
+  update State{}, n, v
 end
 
 testState :: State
@@ -20,7 +16,13 @@ testState = do
    "x" := 123
    "y" := 4562
    "x" := 1232
+   # liftM (println "Hello, world!")
 end
 
 main :: IO
-main = println testState
+# main = println testState
+main = do
+  testCase "abc", (\x -> do
+    assertEquals "x", "y"
+  end)
+end

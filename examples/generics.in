@@ -10,15 +10,15 @@ trait Number
 impl Number for Int
 impl Number for Float
 
-let kiss<T: Animal> (a: T b: T) => IO = do
+let kiss<T: Animal> (a: T b: T) : IO = do
     println a.name
 end
 
-let bla<T: Number> (a: T b: T) => T = do
+let bla<T: Number> (a: T b: T) : T = do
     a + b
 end
 
-let main => IO = do
+let main : IO = do
     let a = Dog { name: "dog" }
     let b = Cat { name: "cat" }
     let square (x: Int) = x * x

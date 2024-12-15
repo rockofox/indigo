@@ -226,12 +226,10 @@ validType =
             keyword "Any"
             return Any
         <|> do
-            keyword "Fn"
-            curlyBrackets $ do
+            parens $ do
                 args <- sepBy validType (symbol "->")
-                symbol "=>"
-                ret <- validType
-                return Fn{args = args, ret = ret}
+                let ret = last args
+                return $ Fn args ret
         <|> do
             squareBrackets $ do
                 List <$> validType
@@ -338,7 +336,7 @@ combinedFunc = do
     name <- identifier <|> gravis <?> "function name"
     generics <- (fromMaybe [] <$> optional generic) <?> "function generics"
     (args, argTypes) <- (parens argsAndTypes <|> argsAndTypes) <?> "function arguments"
-    returnType <- optional (symbol "=>" >> validType <?> "return type") <?> "return type"
+    returnType <- optional (symbol ":" >> validType <?> "return type") <?> "return type"
     symbol "="
     body <- recover expr <?> "function body"
     return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics)

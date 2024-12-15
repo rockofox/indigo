@@ -596,13 +596,11 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     let expr = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
             Right (Parser.Program exprs) -> exprs
-    let p =
-            if qualified || isJust as
-                then do
-                    let alias = if qualified then from else fromJust as
-                    concatMapM (`compileExpr` expectedType) (map (`mangleAST` alias) expr)
-                else concatMapM (`compileExpr` expectedType) expr
-    p >>= \p' -> return p'
+    if qualified || isJust as
+        then do
+            let alias = if qualified then from else fromJust as
+            concatMapM (`compileExpr` expectedType) (map (`mangleAST` alias) expr)
+        else concatMapM (`compileExpr` expectedType) expr
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
     mangleAST (Parser.FuncDec name types _) alias = Parser.FuncDec (alias ++ "@" ++ name) types []

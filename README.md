@@ -6,8 +6,8 @@ Inspired by F# and Haskell, it aims to deliver satisfactory functional programmi
 ```julia
 struct Person = (name: String, age: Int)
 
-let greet (p: Person) => IO = println "Hello " : p.name
-let main => IO = do
+let greet (p: Person): IO = println "Hello " : p.name
+let main: IO = do
     let person = Person { name: "Lily", age: 22 }
     greet person
 end

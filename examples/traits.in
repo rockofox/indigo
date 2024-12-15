@@ -10,7 +10,7 @@ impl Animal for Cat = do
     makeNoise self = println "Meow"
 end
 
-let main => IO = do
+let main : IO = do
     makeNoise (Dog {})
     makeNoise (Cat {})
 end
