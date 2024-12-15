@@ -85,13 +85,13 @@ binOpTable =
     , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
+    , [binary "++" ListAdd]
+    , [binary "**" Power, binary "*" Mul, binary "/" Div]
+    , [binary "+" Add, binary "-" Sub]
     , [binaryAny binaryFunctionCall]
     , -- , [prefix "-" UnaryMinus]
-      [binary "**" Power, binary "*" Mul, binary "/" Div]
-    , [binary "%" Modulo]
+      [binary "%" Modulo]
     , [binary ":" ListConcat]
-    , [binary "++" ListAdd]
-    , [binary "+" Add, binary "-" Sub]
     , --    , [binary ">>" Then]
       [binary "|>" Pipeline]
     , [binary ">>=" bindExpr]
@@ -488,7 +488,7 @@ listPattern = do
 lambda :: Parser Expr
 lambda = do
     symbol "\\"
-    args <- some (var <|> parens listPattern <|> array) <?> "lambda arguments"
+    args <- some (var <|> parens listPattern <|> array <|> placeholder) <?> "lambda arguments"
     symbol "->"
     Lambda args <$> expr <?> "lambda body"
 

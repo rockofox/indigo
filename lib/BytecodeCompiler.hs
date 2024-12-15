@@ -634,9 +634,10 @@ compileExpr (Parser.Impl name for methods) expectedType = do
 compileExpr (Parser.Lambda args body) expectedType = do
     fId <- allocId
     curCon <- gets currentContext
+    let args' = if args == [Parser.Placeholder] then [] else args
     let name = "__lambda" ++ show fId
-    let def = Parser.FuncDef name args body
-    let dec = Parser.FuncDec name (replicate (length args + 1) expectedType) []
+    let def = Parser.FuncDef name args' body
+    let dec = Parser.FuncDec name (replicate (length args' + 1) Parser.Any) []
     let fun = Parser.Function [def] dec
     _ <- compileExpr fun expectedType
     lets' <- gets functions

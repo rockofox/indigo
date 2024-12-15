@@ -377,7 +377,7 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     let eTypes = concatMap (\matchingBinding -> ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show matchingBinding.args ++ ", got: " ++ show argumentTypes))) | not fta])) matchingBindings
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | null matchingBindings] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
-    let argsAsBindings = map (\(Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}) args
+    let argsAsBindings = map (\case (Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}; Placeholder -> VBinding{name = "__placeholder", args = [], ttype = Any, generics = []}; _ -> error "Invalid lambda argument") args
     modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
     bodyErrors <- verifyExpr body
     modify (\state -> state{frames = tail (frames state)})

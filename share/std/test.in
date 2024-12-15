@@ -7,7 +7,7 @@ impl Monad for TestSuite = do
   sequence TestSuite{name: n, results: r} TestSuite{name: n2, results: r2} = TestSuite{name: n, results: r ++ r2}
 end
 
-let testCase (n: String f: (Any -> Bool)) : TestSuite = TestSuite{results: [TestResult{name: n, result: f 1}]}
+let testCase (n: String f: (Bool)) : TestSuite = TestSuite{results: [TestResult{name: n, result: f _}]}
 
 let evalTestSuite (suite: TestSuite) : IO = do
   let resultss = suite.results
