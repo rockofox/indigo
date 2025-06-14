@@ -1,0 +1,21 @@
+struct Parser = (remaining: String, result: Any)
+
+let parseNumber (input: String): Parser = do
+    let number = takeWhile (\c -> (c >= '0') && (c <= '9')), input
+    Parser{remaining: (safeDrop ((length number) + 1), input), result: number as String as Int}
+end
+
+let parse (input: String parser: (String -> Parser)): Parser = do
+    let p: Parser = parser input
+    if (length p.remaining) == 0 then do
+        p
+    else do
+        let p2: Parser = parse p.remaining, parser
+        Parser{remaining: p2.remaining, result: [p.result] ++ p2.result}
+    end
+end
+
+let main: IO = do
+    let pn: Parser = parse "123,456,789", parseNumber
+    println pn.result
+end

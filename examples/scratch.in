@@ -1,33 +1,16 @@
-### println (maybe (-1), (bind Some{value: 5}, \x -> x + 1))
-### println (maybe (-1), (bind None{}, \x -> x + 1))
-##
-###let x => Optional = return 12
-##let xxx => Optional = Some{value: 12}
-###println x
-##println (bind Some{value: 5}, \x -> x + 1)
-##println (bind xxx, \x -> x + 1)
-##println (sequence Some{value: 5}, Some{value: 6})
-#
-#bla :: IO
-#bla = (println 1) >> (println 2)
-#
-printNumbersAndSum :: IO
-printNumbersAndSum _ = (println "x") >> (return 2)
+struct Number = (value: Int)
 
-main :: IO
-main _ = do
-    println printNumbersAndSum
+let addd (a: Int b: Int): Int = a + b
+
+let numbaz (n: Number): Number = Number{value: n.value + 1}
+
+let bla (fn: (Number -> Number) n: Number): Number = do
+    let x: Number = fn n
+    let y: Number = numbaz x
+    Number{value: y.value}
 end
-# let main => IO = println printNumbersAndSum
-#
-#trait Number
-#impl Number for Int
-#impl Number for Float
-#
-#let add<N: Number> (a: N b: N) => N = do
-#  a + b
-#end
-#
-#let main => IO = do
-#  println add 1.2, 2.2
-#end
+
+
+let main: IO = do
+    println (bla numbaz, Number{value: 1})
+end

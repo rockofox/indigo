@@ -232,6 +232,7 @@ instance Ord Data where
     (DList x) `compare` (DList y) = x `compare` y
     (DString x) `compare` (DList y) = x `compare` show y
     (DList x) `compare` (DString y) = show x `compare` y
+    (DChar x) `compare` (DChar y) = x `compare` y
     x `compare` y = error $ "Cannot compare " ++ show x ++ " and " ++ show y
 
 data StackFrame = StackFrame
@@ -353,7 +354,10 @@ run' program = do
     breakpoints <- gets breakpoints
     let inst = program V.! pc
     modify $ \vm -> vm{program = program, labels = locateLabels program}
-    when (not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints) $ showDebugInfo >>= traceM
+    -- when (not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints) $ showDebugInfo >>= traceM
+    let atBreakpoint = not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints
+     in when atBreakpoint do
+            showDebugInfo >>= liftIO . putStrLn
     runInstruction inst
     modify $ \vm -> vm{pc = vm.pc + 1}
     gets running >>= flip when (run' program)
@@ -884,19 +888,24 @@ runInstruction Cast = do
         (DList []) -> stackPush $ case to of
             DList _ -> DList []
             type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
+        (DList x) -> stackPush $ case to of
+            DList _ -> DList x
+            DString _ -> if all (\case DChar{} -> True; _ -> False) x then DString $ map (\(DChar c) -> c) x else DString $ show x
+            DNone -> DNone
+            type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
         x -> do
-            if x == to
+            if x == to || x == DNone
                 then stackPush x
                 else error $ "Cast not implemented: " ++ debugShowData x ++ " to " ++ debugShowData to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
-runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "Invalid type for access"
+runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; m -> error $ "Invalid type for access. Tried to access " ++ show m ++ " on " ++ show x
 runInstruction AAccess = stackPopN 2 >>= \(DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m
 runInstruction Keys = stackPop >>= \case DMap m -> stackPush $ DList $ map DString $ Data.Map.keys m; _ -> error "Invalid type for keys"
 runInstruction Update = stackPopN 3 >>= \(value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m
 runInstruction (PackMap n) = do
     elems <- stackPopN n
-    stackPush $ DMap $ Data.Map.fromList $ map (\[DString x, y] -> (x, y)) $ chunksOf 2 elems
+    stackPush $ DMap $ Data.Map.fromList $ map (\case [DString x, y] -> (x, y); x -> error $ "Invalid type for map: " ++ show x) $ chunksOf 2 elems
 runInstruction TypeOf =
     stackPop >>= \case
         DInt _ -> stackPush $ DString "Int"

@@ -301,12 +301,10 @@ compileExpr (Parser.IntLit x) _ = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus (Parser.FloatLit x)) _ = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus (Parser.IntLit x)) _ = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit x) _ = return [Push $ DString x]
-compileExpr (Parser.DoBlock [expr]) expectedType = compileExpr expr expectedType
 compileExpr (Parser.DoBlock exprs) expectedType = do
-    -- traceM $ "Compiling do block " ++ show exprs ++ " with expected type " ++ show expectedType
     let grouped = groupBy (\a b -> isFuncCall a && isFuncCall b) exprs
     let nestedSequence = concatMap (\case [] -> []; [x] -> if isFuncCall x then [Parser.FuncCall "sequence" [x, Parser.FuncCall "nop" [] anyPosition] anyPosition] else [x]; xs -> if all isFuncCall xs then [foldl1 (\a b -> Parser.FuncCall "sequence" [a, b] anyPosition) xs] else xs) grouped
-    concatMapM (`compileExpr` expectedType) nestedSequence
+    if length (filter isFuncCall exprs) == 1 then concatMapM (`compileExpr` expectedType) exprs else concatMapM (`compileExpr` expectedType) nestedSequence
   where
     isFuncCall :: Parser.Expr -> Bool
     isFuncCall (Parser.FuncCall fn _ _) = fn `notElem` internalFunctions
@@ -371,8 +369,10 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
                     Nothing -> Just fd
             Nothing -> find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
-    -- If the funcName starts with curCon@, it's a local function
-    let callWay = (if T.pack (curCon ++ "@") `isPrefixOf` T.pack fun.funame then CallLocal (funame fun) else Call (funame fun))
+
+    let isLocal = T.pack ((takeWhile (/= '@') curCon) ++ "@") `isPrefixOf` T.pack fun.funame
+    -- traceM $ "Local check: " ++ (takeWhile (/='@') curCon) ++ " " ++ fun.funame
+    let callWay = (if isLocal then CallLocal (funame fun) else Call (funame fun))
 
     case external of
         Just (External _ ereturnType _ from) -> do
@@ -489,7 +489,7 @@ compileExpr (Parser.FuncDef origName args body) expectedType = do
     compileParameter x funcName = do
         nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
         x' <- compileExpr x expectedType
-        return $ [Dup] ++ x' ++ [Eq, Jf nextFunName]
+        return $ x' ++ [Eq, Jf nextFunName]
 compileExpr (Parser.ParenApply x y _) expectedType = do
     fun <- compileExpr x expectedType
     args <- concatMapM (`compileExpr` expectedType) y
@@ -564,7 +564,8 @@ compileExpr (Parser.Cast from to) _ = do
     compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit [x]) = compileType x ++ [PackList 1]
-    compileType x = error $ "Type " ++ show x ++ " is not implemented"
+    compileType (Parser.Var{}) = [Push $ DNone]
+    compileType x = error $ "Cannot cast to type " ++ show x
 compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields

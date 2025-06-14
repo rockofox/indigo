@@ -1,0 +1,7 @@
+struct Bla = (fn: Any)
+
+let foo: Bla = Bla{fn: \x -> x + 1}
+
+let main: IO = do
+  println (foo.fn 1)
+end
