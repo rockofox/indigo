@@ -1,0 +1,4 @@
+baba :: Int -> Int -> Int
+baba x y = x + y
+
+println 2 baba 4

@@ -1,0 +1,61 @@
+struct Parser = (remaining: String, result: [Any], failed: Bool)
+
+trait Expr
+
+struct Number = (value: Int) is Expr
+struct Word = (value: String) is Expr
+
+let parseNumber (input: String): Parser = do
+    let number = takeWhile (\c -> (c >= '0') && (c <= '9')), input
+    if (length number) == 0 then do
+        Parser{remaining: input, result: 0 as Int, failed: True}
+    else do
+        Parser{remaining: (safeDrop ((length number) + 0), input), result: Number{value: number as String as Int}}
+    end
+end
+
+let parseWord (input: String): Parser = do
+    let word = takeWhile (\c -> (c >= 'a') && (c <= 'z')), input
+    if (length word) == 0 then do
+        Parser{remaining: input, result: "", failed: True}
+    else do
+        Parser{remaining: (safeDrop ((length word) + 0), input), result: Word{value: word}}
+    end
+end
+
+tryParsers :: String -> [(String -> Parser)] -> Parser
+tryParsers input (px:ps) = do
+    let p: Parser = px input
+    if p.failed == True then do
+        tryParsers input, ps
+    else do
+        if ((length p.remaining) == 0) then do
+            p
+        else do
+            let p2: Parser = tryParsers p.remaining, ps
+            Parser{remaining: p2.remaining, result: [p.result] ++ p2.result, failed: p2.failed}
+        end
+    end
+end
+tryParsers input [] = Parser{remaining: input, result: [], failed: True}
+
+tryParsersN :: String -> [(String -> Parser)] -> Parser
+tryParsersN input parsers = do
+    let results: Parser = tryParsers input, parsers
+    if (length results.remaining) == 0 then do
+        results
+    else do
+        let r: Parser = tryParsersN results.remaining, parsers
+        Parser{remaining: r.remaining, result: results.result ++ r.result, failed: r.failed}
+    end
+end
+
+showExpr :: Expr -> String
+showExpr Number{value: v} = "Number(" ++ (v as String) ++ ")"
+showExpr Word{value: v} = "Word(" ++ v ++ ")"
+showExpr x = x as String
+
+let main: IO = do
+    let pw: Parser = tryParsersN "abc123efg2", [parseWord, parseNumber]
+    println (map showExpr, pw.result)
+end

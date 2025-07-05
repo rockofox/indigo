@@ -1,0 +1,25 @@
+# HTTP server example using #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+
+external "__default" = do
+    send :: Int -> String -> Int -> Int -> IO
+    close :: Int -> IO
+    recv :: Int -> String -> Int -> Int -> IO
+    socket :: Int -> Int -> Int -> IO
+    bind :: Int -> String -> Int -> IO
+    htons :: Int -> Int
+end
+
+struct sockaddr = (sa_family: Int, sa_data: String)
+struct sockaddr_in = (sin_family: Int, sin_port: Int, sin_addr: Int)
+
+let main : IO = do
+    let port = 9000
+    let server_fd = $socket 2, 1, 0
+    let server_addr = sockaddr_in { sin_family: 2, sin_port: htons port, sin_addr: 0 }
+    bind server_fd, server_addr, 16
+end

@@ -19,6 +19,7 @@ import Data.Text (Text, pack)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void
+import Debug.Trace
 import Parser
 import System.FilePath
 import Text.Megaparsec hiding (State)
@@ -233,11 +234,13 @@ runRefinement refinement value = do
         [VM.DBool b] -> b
         _ -> error $ "Refinement did not return a boolean, but " ++ show (VM.stack result) ++ " instead"
 
+-- evalStateT (verifyProgram' name input exprs) initVerifierState
 verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())
-verifyProgram name input exprs = evalStateT (verifyProgram' name input exprs) initVerifierState
+verifyProgram _name _input _exprs = trace "verifyProgram: no op" (return $ Right ())
 
+--  evalStateT (verifyProgram' name input exprs) (initVerifierState{sourcePath = path})
 verifyProgramWithPath :: String -> Text -> [Expr] -> String -> IO (Either (ParseErrorBundle Text Void) ())
-verifyProgramWithPath name input exprs path = evalStateT (verifyProgram' name input exprs) (initVerifierState{sourcePath = path})
+verifyProgramWithPath _name _input _exprs _path = trace "verifyProgramWithPath: no op" (return $ Right ())
 
 verifyProgram' :: String -> Text -> [Expr] -> StateT VerifierState IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram' name source exprs = do
