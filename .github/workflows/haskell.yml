@@ -11,55 +11,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ubuntu-latest]
         ghc-version: ['9.8']
 
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         
-      - name: Set up GHC ${{ matrix.ghc-version }}
-        uses: haskell-actions/setup@v2
-        id: setup
-        with:
-          ghc-version: ${{ matrix.ghc-version }}
-          # Defaults, added for clarity:
-          cabal-version: 'latest'
-          cabal-update: true
 
-      - name: Configure the build
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Set up Cachix (optional)
+        uses: cachix/cachix-action@v14
+        with:
+          name: indigo
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        continue-on-error: true
+
+
+      - name: Build with Nix
         run: |
-          cabal configure --enable-tests --enable-benchmarks --disable-documentation
-          cabal build --dry-run
-        # The last step generates dist-newstyle/cache/plan.json for the cache key.
+          nix build .
 
-      - name: Restore cached dependencies
-        uses: actions/cache/restore@v3
-        id: cache
-        env:
-          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-cabal-${{ steps.setup.outputs.cabal-version }}
-        with:
-          path: ${{ steps.setup.outputs.cabal-store }}
-          key: ${{ env.key }}-plan-${{ hashFiles('**/plan.json') }}
-          restore-keys: ${{ env.key }}-
 
-      - name: Install dependencies
-        run: cabal build all --only-dependencies
-
-      # Cache dependencies already here, so that we do not have to rebuild them should the subsequent steps fail.
-      - name: Save cached dependencies
-        uses: actions/cache/save@v3
-        # Caches are immutable, trying to save with the same key would error.
-        if: ${{ steps.cache.outputs.cache-primary-key != steps.cache.outputs.cache-matched-key }}
-        with:
-          path: ${{ steps.setup.outputs.cabal-store }}
-          key: ${{ steps.cache.outputs.cache-primary-key }}
-          
-      - name: Build
-        run: cabal build all
-
-      - name: Run tests
-        run: cabal test all
+      - name: Run tests with Nix
+        run: |
+          nix develop --command bash -c "cabal update && cabal test all"
         
       - uses: dev-drprasad/delete-older-releases@v0.3.2
         with:
@@ -68,35 +48,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Build release
-        run: |
-          mkdir dist-${{matrix.os}}
-          cabal install exe:indigo --install-method=copy --overwrite-policy=always --installdir=dist-${{matrix.os}}
-      
-      - name: Set binary extension (Windows)
-        if: matrix.os == 'windows-latest'
-        run: echo "BINARY_EXT=.exe" >> $env:GITHUB_ENV
-      
-      - name: Rename release binary
-        run: mv dist-${{matrix.os}}/indigo${{env.BINARY_EXT}} dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}
-          
-      - name: Set release binary path
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $GITHUB_ENV
-      
-      - name: Set release binary path (Windows)
-        run: echo "BINARY_PATH=./dist-${{matrix.os}}/indigo-${{matrix.os}}${{env.BINARY_EXT}}" >> $env:GITHUB_ENV
 
-      - name: Arrange release files
+      - name: Prepare release directory
         run: |
-          mkdir indigo-latest-${{matrix.os}}
-          mv ${{env.BINARY_PATH}} indigo-latest-${{matrix.os}}/indigo${{env.BINARY_EXT}}
-          mv share/std indigo-latest-${{matrix.os}}
+          mkdir -p indigo-latest-${{matrix.os}}
+          # Debug: Show what's in the result directory
+          echo "Contents of result directory:"
+          find ./result -type f -ls || echo "No result directory found"
+          ls -la ./result/ || echo "Cannot list result directory"
+          
+          # Find the built binary from nix build output
+          BIN_PATH=$(find ./result/bin -type f -executable -name 'indigo*' | head -n1)
+          if [ -z "$BIN_PATH" ]; then
+            # Try alternative patterns
+            BIN_PATH=$(find ./result -type f -name 'indigo' | head -n1)
+          fi
+          if [ -z "$BIN_PATH" ]; then
+            # Try any executable file
+            BIN_PATH=$(find ./result -type f -executable | head -n1)
+          fi
+          if [ -z "$BIN_PATH" ]; then 
+            echo "Binary not found in nix build output!"
+            echo "Available files:"
+            find ./result -type f
+            exit 1
+          fi
+          echo "Found binary at: $BIN_PATH"
+          cp "$BIN_PATH" indigo-latest-${{matrix.os}}/indigo
+          cp -r share/std indigo-latest-${{matrix.os}}
 
       - name: Zip release (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          Compress-Archive -Path indigo-latest-${{matrix.os}}/* -DestinationPath indigo-latest-${{matrix.os}}.zip
-      
+          powershell Compress-Archive -Path indigo-latest-${{matrix.os}}/* -DestinationPath indigo-latest-${{matrix.os}}.zip
+
       - name: Zip release
         if: matrix.os != 'windows-latest'
         run: |
@@ -111,3 +96,46 @@ jobs:
           prerelease: false
           generate_release_notes: false
           files: indigo-latest-${{matrix.os}}.zip
+
+  build_wasm:
+    name: Build WASM reactor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Set up Cachix (optional)
+        uses: cachix/cachix-action@v14
+        with:
+          name: indigo
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        continue-on-error: true
+
+      - name: Build WASM reactor
+        run: |
+          nix build .#build-wasm-reactor
+
+      - name: Prepare WASM release
+        run: |
+          mkdir -p indigo-wasm-latest
+          cp result/indigo-init.wasm indigo-wasm-latest/
+          cp -r share/std indigo-wasm-latest/
+
+      - name: Zip WASM release
+        run: |
+          zip -r indigo-wasm-latest.zip indigo-wasm-latest/*
+
+      - name: Release WASM
+        uses: softprops/action-gh-release@v1
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: latest-${{ github.sha }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          files: indigo-wasm-latest.zip

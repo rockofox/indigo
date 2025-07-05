@@ -12,11 +12,12 @@
       inputs.flake-utils.follows = "flake-utils";
       inputs.flake-compat.follows = "flake-compat";
     };
+    ghc-wasm-meta.url = "https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/archive/master/ghc-wasm-meta-master.tar.gz";
   };
 
   description = "";
 
-  outputs = inputs@{ self, nixpkgs, flake-utils, ... }:
+  outputs = inputs@{ self, nixpkgs, flake-utils, ghc-wasm-meta, ... }:
     let
       overlay = se: su: {
         haskellPackages = su.haskellPackages.override {
@@ -25,6 +26,42 @@
           };
         };
         indigo = se.haskell.lib.justStaticExecutables se.haskellPackages.indigo;
+        build-wasm-reactor = se.stdenv.mkDerivation {
+          pname = "indigo-wasm-reactor";
+          version = "0.1.0.0";
+          src = se.lib.cleanSource ./.;
+          nativeBuildInputs = [
+            se.cabal-install
+            se.wizer
+            se.curl
+            se.cacert
+            ghc-wasm-meta.packages.${se.stdenv.hostPlatform.system}.default
+          ];
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export CABAL_DIR=$TMPDIR/.cabal
+            export SSL_CERT_FILE=${se.cacert}/etc/ssl/certs/ca-bundle.crt
+            export CURL_CA_BUNDLE=${se.cacert}/etc/ssl/certs/ca-bundle.crt
+            mkdir -p $CABAL_DIR
+            export CABAL_CONFIG=$CABAL_DIR/config
+            cd wasm_reactor
+            # Initialize cabal config (no --config-file here)
+            cabal user-config init
+            # Use regular cabal to update the package index first
+            # cabal update --config-file=$CABAL_CONFIG
+            cabal update
+            # Copy the package index to the wasm cabal directory
+            cp -r $HOME/.cabal/packages $CABAL_DIR/ || true
+            wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer='base' -f '-ffi'
+          '';
+          installPhase = ''
+            INDIGO_WASM=$(wasm32-wasi-cabal list-bin exe:indigo-wasm-reactor --allow-newer=base | tail -n 1)
+            mkdir -p "$out"
+            cp "$INDIGO_WASM" "$out/indigo-wasm-reactor.wasm"
+            ${se.wizer}/bin/wizer --allow-wasi --wasm-bulk-memory true "$out/indigo-wasm-reactor.wasm" -o "$out/indigo-init.wasm"
+          '';
+          dontFixup = true;
+        };
       };
     in
     flake-utils.lib.eachDefaultSystem (system:
@@ -51,6 +88,11 @@
           };
         };
         defaultPackage = pkgs.indigo;
+        packages = {
+          default = pkgs.indigo;
+          indigo = pkgs.indigo;
+          build-wasm-reactor = pkgs.build-wasm-reactor;
+        };
         devShell = pkgs.haskellPackages.shellFor {
           packages = p: [ p."indigo" ];
           buildInputs = [
@@ -62,6 +104,7 @@
             pkgs.wasmtime
             pkgs.wabt
             pkgs.wizer
+            ghc-wasm-meta.packages.${system}.default
           ];
           withHoogle = false;
           inherit (inputs.self.checks.${system}.pre-commit-check) shellHook;
