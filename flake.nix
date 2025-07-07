@@ -32,7 +32,7 @@
           allowNetwork = true;
           src = se.lib.cleanSource ./.;
           nativeBuildInputs = [
-            se.cabal-install
+            # se.cabal-install
             se.wizer
             ghc-wasm-meta.packages.${se.stdenv.hostPlatform.system}.default
           ];
@@ -43,13 +43,13 @@
             export CABAL_CONFIG=$CABAL_DIR/config
             cd wasm_reactor
             # Initialize cabal config (no --config-file here)
-            cabal user-config init
+            # wasm32-wasi-cabal user-config init
             # Use regular cabal to update the package index first
             # cabal update --config-file=$CABAL_CONFIG
-            cabal update
+            wasm32-wasi-cabal --http-transport=plain-http update
             # Copy the package index to the wasm cabal directory
             cp -r $HOME/.cabal/packages $CABAL_DIR/ || true
-            wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer='base' -f '-ffi'
+            wasm32-wasi-cabal --http-transport=plain-http build exe:indigo-wasm-reactor --allow-newer='base' -f '-ffi'
           '';
           installPhase = ''
             INDIGO_WASM=$(wasm32-wasi-cabal list-bin exe:indigo-wasm-reactor --allow-newer=base | tail -n 1)
