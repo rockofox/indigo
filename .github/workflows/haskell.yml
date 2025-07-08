@@ -124,7 +124,7 @@ jobs:
 
       - name: Upload WASM zip to Google Cloud Storage
         run: |
-          gsutil cp -a public-read -o GSUtil:parallel_composite_upload_threshold=150M -q indigo-wasm-latest.zip gs://indigolang/indigo-wasm-latest.zip
+          gcloud storage cp indigo-wasm-latest.zip gs://indigolang/indigo-wasm-latest.zip
 
       - name: Release (WASM)
         uses: softprops/action-gh-release@v1
