@@ -112,6 +112,18 @@ jobs:
         run: |
           zip -r indigo-wasm-latest.zip indigo-wasm-latest/*
 
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: Upload WASM zip to Google Cloud Storage
+        run: |
+          gsutil cp -a public-read -o GSUtil:parallel_composite_upload_threshold=150M -q indigo-wasm-latest.zip gs://indigolang/indigo-wasm-latest.zip
+
       - name: Release (WASM)
         uses: softprops/action-gh-release@v1
         with:
