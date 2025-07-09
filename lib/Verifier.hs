@@ -236,11 +236,13 @@ runRefinement refinement value = do
 
 -- evalStateT (verifyProgram' name input exprs) initVerifierState
 verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())
-verifyProgram _name _input _exprs = trace "verifyProgram: no op" (return $ Right ())
+-- no op
+verifyProgram _name _input _exprs = return $ Right ()
 
 --  evalStateT (verifyProgram' name input exprs) (initVerifierState{sourcePath = path})
 verifyProgramWithPath :: String -> Text -> [Expr] -> String -> IO (Either (ParseErrorBundle Text Void) ())
-verifyProgramWithPath _name _input _exprs _path = trace "verifyProgramWithPath: no op" (return $ Right ())
+-- no op
+verifyProgramWithPath _name _input _exprs _path = return $ Right ()
 
 verifyProgram' :: String -> Text -> [Expr] -> StateT VerifierState IO (Either (ParseErrorBundle Text Void) ())
 verifyProgram' name source exprs = do
