@@ -106,10 +106,8 @@ jobs:
           cd wasm_reactor
           INDIGO_WASM=$(wasm32-wasi-cabal list-bin indigo-wasm-reactor --allow-newer=base | tail -n 1)
           wizer --allow-wasi --wasm-bulk-memory true "$INDIGO_WASM" -o indigo-init.wasm
-          rm "$INDIGO_WASM"
-          cp indigo-init.wasm "$INDIGO_WASM"
           cd ..
-          cp "$INDIGO_WASM" indigo-wasm-latest/indigo-wasm-reactor.wasm
+          cp wasm_reactor/indigo-init.wasm indigo-wasm-latest/indigo-init.wasm
           cp -r share/std indigo-wasm-latest/
         shell: nix develop --command bash -e {0}
 
