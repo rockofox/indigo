@@ -18,7 +18,8 @@ executable indigo-wasm-reactor
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
-                        DuplicateRecordFields
+                        DuplicateRecordFields,
+                        LambdaCase
 
     ghc-options:
         -Wall -Wunused-packages -no-hs-main -optl-mexec-model=reactor

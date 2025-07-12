@@ -213,26 +213,26 @@ currentFrame :: StateT VerifierState IO VerifierFrame
 currentFrame = head . frames <$> get
 
 runRefinement :: Expr -> Expr -> IO Bool
-runRefinement refinement value = do
-    let prog =
-            Program
-                [ FuncDec "__refinement" [Any, StructT "Bool"] []
-                , FuncDef "__refinement" [Var "it" zeroPosition] refinement
-                , FuncDec "main" [StructT "IO"] []
-                , FuncDef
-                    "main"
-                    []
-                    ( DoBlock
-                        [ FuncCall "__refinement" [value] zeroPosition
-                        ]
-                    )
-                ]
-    compiled <- evalStateT (BytecodeCompiler.compileProgram prog) (BytecodeCompiler.initCompilerState prog)
-    let mainPc = BytecodeCompiler.locateLabel compiled "main"
-    result <- VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}], VM.shouldExit = False}
-    return $ case VM.stack result of
-        [VM.DBool b] -> b
-        _ -> error $ "Refinement did not return a boolean, but " ++ show (VM.stack result) ++ " instead"
+runRefinement refinement value = return False -- do
+-- let prog =
+--         Program
+--             [ FuncDec "__refinement" [Any, StructT "Bool"] []
+--             , FuncDef "__refinement" [Var "it" zeroPosition] refinement
+--             , FuncDec "main" [StructT "IO"] []
+--             , FuncDef
+--                 "main"
+--                 []
+--                 ( DoBlock
+--                     [ FuncCall "__refinement" [value] zeroPosition
+--                     ]
+--                 )
+--             ]
+-- compiled <- evalStateT (BytecodeCompiler.compileProgram prog) (BytecodeCompiler.initCompilerState prog)
+-- let mainPc = BytecodeCompiler.locateLabel compiled "main"
+-- result <- VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}], VM.shouldExit = False}
+-- return $ case VM.stack result of
+--     [VM.DBool b] -> b
+--     _ -> error $ "Refinement did not return a boolean, but " ++ show (VM.stack result) ++ " instead"
 
 -- evalStateT (verifyProgram' name input exprs) initVerifierState
 verifyProgram :: String -> Text -> [Expr] -> IO (Either (ParseErrorBundle Text Void) ())

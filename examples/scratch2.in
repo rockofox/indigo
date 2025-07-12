@@ -1,3 +1,4 @@
 # println [1, 2, 3, 4, 5] !! 2
 
-let hello : IO = println "Hello, World!"
+let greet (name : String) : String = "Hello, " ++ name ++ "!"
+let main : IO = println (greet "Joe")

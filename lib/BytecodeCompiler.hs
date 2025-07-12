@@ -1,10 +1,11 @@
 module BytecodeCompiler where
 
-import AST (anyPosition, zeroPosition)
+import AST (Position (..), anyPosition, zeroPosition)
+import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
-import Control.Monad (when, (>=>))
+import Control.Monad (unless, when, (>=>))
 import Control.Monad.Loops (firstM)
-import Control.Monad.State (MonadIO (liftIO), StateT, gets, modify)
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.Bifunctor (second)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, groupBy, inits, intercalate)
@@ -15,6 +16,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Data.Void
 import Debug.Trace (traceM, traceShowM)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
@@ -25,7 +27,7 @@ import Paths_indigo qualified
 import System.Directory (doesFileExist)
 import System.Environment
 import System.FilePath
-import Text.Megaparsec (errorBundlePretty)
+import Text.Megaparsec (ParseError, errorBundlePretty)
 import Util
 import VM
 import Prelude hiding (FilePath, lex)
@@ -47,6 +49,12 @@ data External = External
     }
     deriving (Show)
 
+data CompilerError = CompilerError
+    { errorMessage :: String
+    , errorPosition :: AST.Position
+    }
+    deriving (Show, Eq)
+
 data CompilerState a = CompilerState
     { program :: Parser.Program
     , functions :: [Function]
@@ -59,9 +67,9 @@ data CompilerState a = CompilerState
     , currentContext :: String -- TODO: Nested contexts
     , externals :: [External]
     , functionsByTrait :: [(String, String, String, Parser.Expr)]
+    , errors :: [CompilerError]
     , sourcePath :: String
     }
-    deriving (Show)
 
 data Let = Let
     { name :: String
@@ -84,6 +92,7 @@ initCompilerState prog =
         "__outside"
         []
         []
+        []
         "no file"
 
 initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
@@ -100,6 +109,12 @@ initCompilerStateWithFile prog =
         "__outside"
         []
         []
+        []
+
+cerror :: String -> AST.Position -> StateT (CompilerState a) IO ()
+cerror msg pos = do
+    -- TODO
+    unless (pos == AST.zeroPosition) $ modify (\s -> s{errors = CompilerError msg pos : errors s})
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -112,22 +127,38 @@ preludeExpr = do
     i <- liftIO preludeFile
     case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
         Left err -> error $ "Parse error: " ++ errorBundlePretty err
-        Right (Parser.Program progExpr) -> return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
+        Right prog@(Parser.Program progExpr) -> do
+            _ <-
+                liftIO $
+                    compileDry prog "<prelude>" >>= \case
+                        Right err -> compileFail "<prelude>" err i >> error ""
+                        Left p' -> return p'
+            return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
 
-compileProgram :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
+compileProgram :: Parser.Program -> StateT (CompilerState a) IO (Either [Instruction] [CompilerError])
 compileProgram (Parser.Program expr) = do
     prelude <- liftIO preludeExpr
     prelude' <- concatMapM (`compileExpr` Parser.Any) prelude
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ prelude' ++ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+    errors' <- gets errors
+    if null errors'
+        then
+            return $ Left $ prelude' ++ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+        else
+            return $ Right errors'
 
-compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO [Instruction]
+compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO (Either [Instruction] [CompilerError])
 compileProgramBare (Parser.Program expr) = do
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
-    return $ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+    errors' <- gets errors
+    if null errors'
+        then
+            return $ Left $ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+        else
+            return $ Right errors'
 
 findAnyFunction :: String -> [Function] -> Maybe Function
 findAnyFunction funcName xs = do
@@ -162,6 +193,25 @@ typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess)
 
 typesMatchExactly :: Function -> [Parser.Type] -> Bool
 typesMatchExactly fun typess = all (uncurry (==)) (zip fun.types typess) && length typess <= length fun.types
+
+typeCompatible :: Parser.Type -> Parser.Type -> StateT (CompilerState a) IO Bool
+typeCompatible x y = do
+    let x' = typeToString x
+    let y' = typeToString y
+    impls <- implsFor x'
+    let impls' = map (\x -> x ++ "." ++ y') impls
+    -- let compatible = x' == y' || x' == "Any" || y' == "Any"
+    let compatible = Parser.compareTypes x y
+    if compatible
+        then return True
+        else do
+            return $ y' `elem` impls
+
+evaluateFunction :: [Parser.Type] -> Int -> Parser.Type
+evaluateFunction types taken = case drop (length types - taken + 1) types of
+    [] -> Parser.Unknown
+    [x] -> x
+    xs -> Parser.Fn xs (last xs)
 
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
@@ -204,14 +254,14 @@ doBinOp x y expectedType op = do
         _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
-typeOf (Parser.FuncCall funcName _ _) = do
+typeOf (Parser.FuncCall funcName args _) = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
                 [Parser.Type.Unknown]
                 Parser.types
                 (find (\x -> x.name == funcName) funcDecs')
-    return $ last a
+    return $ evaluateFunction a (length args)
 typeOf (Parser.Var varName _) = do
     lets' <- gets lets
     let a = maybe Parser.Any vtype (find (\x -> x.name == varName) lets')
@@ -244,8 +294,9 @@ implsFor structName = do
 methodsForTrait :: String -> StateT (CompilerState a) IO [String]
 methodsForTrait traitName = do
     traits' <- gets traits
-    let trait = fromJust $ find (\x -> Parser.name x == traitName) traits'
-    return $ map Parser.name $ Parser.methods trait
+    case find (\x -> Parser.name x == traitName) traits' of
+        Just trait -> return $ map Parser.name $ Parser.methods trait
+        Nothing -> return []
 
 methodsForStruct :: String -> StateT (CompilerState a) IO [String]
 methodsForStruct structName = do
@@ -339,7 +390,7 @@ compileExpr (Parser.FuncCall "unsafeExit" [x] _) expectedType = compileExpr x ex
 compileExpr (Parser.FuncCall "abs" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Abs])
 compileExpr (Parser.FuncCall "root" [x, Parser.FloatLit y] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall "sqrt" [x] _) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
-compileExpr (Parser.FuncCall funcName args _) expectedType = do
+compileExpr (Parser.FuncCall funcName args pos) expectedType = do
     implsForExpectedType <- implsFor (typeToString expectedType)
     argTypes <- mapM typeOf args
     functions' <- gets functions
@@ -364,15 +415,25 @@ compileExpr (Parser.FuncCall funcName args _) expectedType = do
     let funcDec = case find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs' of
             Just fd -> do
                 case find (\(_, n, _, newDec) -> n == funcName && take (length args) (Parser.types newDec) == argTypes) fbt of
-                    Just (_, _, fqn, newDec) -> do
-                        Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = []}
+                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = []}
                     Nothing -> Just fd
             Nothing -> find (\(Parser.FuncDec name' _ _) -> name' == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
 
-    let isLocal = T.pack ((takeWhile (/= '@') curCon) ++ "@") `isPrefixOf` T.pack fun.funame
+    let isLocal = T.pack (takeWhile (/= '@') curCon ++ "@") `isPrefixOf` T.pack fun.funame
     -- traceM $ "Local check: " ++ (takeWhile (/='@') curCon) ++ " " ++ fun.funame
     let callWay = (if isLocal then CallLocal (funame fun) else Call (funame fun))
+
+    (argsOk, msgs) <- case funcDec of
+        Just fd -> do
+            let zippedArgs = zip argTypes (init $ Parser.types fd)
+            wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
+            let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
+            let tooManyArgs = ["Too many arguments provided." | length argTypes > length (init $ Parser.types fd)]
+            return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
+        Nothing -> return (True, [])
+
+    unless argsOk $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgs) pos
 
     case external of
         Just (External _ ereturnType _ from) -> do
@@ -494,16 +555,16 @@ compileExpr (Parser.ParenApply x y _) expectedType = do
     fun <- compileExpr x expectedType
     args <- concatMapM (`compileExpr` expectedType) y
     return $ args ++ fun ++ [CallS]
-compileExpr (Parser.Var x _) expectedType = do
+compileExpr (Parser.Var x pos) expectedType = do
     functions' <- gets functions
     curCon <- gets currentContext
     externals' <- gets externals
     let fun =
             any ((== x) . baseName) functions'
                 || any ((\context -> any ((== context ++ "@" ++ x) . baseName) functions') . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
-                || any ((== x) . ((Data.Text.unpack . last . splitOn "::") . fromString . baseName)) functions'
+                || any ((== x) . (Data.Text.unpack . last . splitOn "::") . fromString . baseName) functions'
     if fun || x `elem` internalFunctions || x `elem` map (\f -> f.name) externals'
-        then (`compileExpr` expectedType) (Parser.FuncCall x [] zeroPosition)
+        then (`compileExpr` expectedType) (Parser.FuncCall x [] pos)
         else return [LLoad x]
 compileExpr (Parser.Let name value) _ = do
     curCon <- gets currentContext
@@ -564,7 +625,7 @@ compileExpr (Parser.Cast from to) _ = do
     compileType (Parser.Var "String" _) = [Push $ DString ""]
     compileType (Parser.Var "CPtr" _) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit [x]) = compileType x ++ [PackList 1]
-    compileType (Parser.Var{}) = [Push $ DNone]
+    compileType (Parser.Var{}) = [Push DNone]
     compileType x = error $ "Cannot cast to type " ++ show x
 compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
     modify (\s -> s{structDecs = st : structDecs s})
@@ -594,9 +655,14 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     sourcePath' <- gets sourcePath
     let sourcePath = takeDirectory sourcePath'
     i <- liftIO (findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
-    let expr = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
+    let (expr, prog) = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
             Left err -> error $ "Parse error: " ++ errorBundlePretty err
-            Right (Parser.Program exprs) -> exprs
+            Right p@(Parser.Program exprs) -> (exprs, p)
+    _ <-
+        liftIO $
+            compileDry prog sourcePath' >>= \case
+                Right err -> error $ "Compile error: " ++ show err
+                Left p' -> return p'
     if qualified || isJust as
         then do
             let alias = if qualified then from else fromJust as
@@ -689,3 +755,54 @@ locateLabel program label = do
     case x of
         Just x' -> x'
         Nothing -> error $ "Label " ++ label ++ " not found"
+
+renderCompilerErrors :: [CompilerError] -> String -> String
+renderCompilerErrors errors input =
+    let linesOfInput = lines input
+        errorLines = map (\(CompilerError msg pos) -> (pos, msg)) errors
+     in unlines $
+            map
+                ( \(AST.Position (start, end), msg) ->
+                    let (startLine, startColumn) = getLineAndColumn start linesOfInput
+                        (endLine, endColumn) = getLineAndColumn end linesOfInput
+                        lineContent =
+                            if startLine < 0 || startLine > length linesOfInput
+                                then "Line " ++ show startLine ++ " out of range"
+                                else linesOfInput !! (startLine - 1)
+                        lineIndicator =
+                            replicate startColumn ' '
+                                ++ ( if startLine == endLine
+                                        then "\x1b[31m  └" ++ replicate (endColumn - startColumn) '─' ++ "┘\x1b[0m"
+                                        else "\x1b[31m  └" ++ replicate (length lineContent - startColumn) '─' ++ "┘\x1b[0m"
+                                   )
+                     in "\x1b[33m"
+                            ++ show startLine
+                            ++ "\x1b[0m:\x1b[91m "
+                            ++ lineContent
+                            ++ "\x1b[0m\n"
+                            ++ lineIndicator
+                            ++ " "
+                            ++ "\x1b[31m"
+                            ++ msg
+                            ++ "\x1b[0m"
+                )
+                errorLines
+
+getLineAndColumn :: Int -> [String] -> (Int, Int)
+getLineAndColumn charPos linesOfInput =
+    let go _ _ [] = (0, 0)
+        go remaining pos (l : ls)
+            | remaining <= length l = (pos, remaining)
+            | otherwise = go (remaining - length l - 1) (pos + 1) ls
+     in go charPos 1 linesOfInput
+
+compileDry :: Parser.Program -> String -> IO (Either [Instruction] [CompilerError])
+compileDry prog sourcePath' =
+    liftIO
+        ( evalStateT
+            (compileProgramBare prog)
+            (initCompilerStateWithFile prog sourcePath')
+        )
+
+compileFail :: String -> [CompilerError] -> String -> IO ()
+compileFail fileName errors file = putStrLn (fileName ++ "\x1b[31m      \x1b[0m \n" ++ renderCompilerErrors errors file)

@@ -49,7 +49,12 @@ compile prog = do
         Left err -> error $ errorBundlePretty err
         Right program -> do
             evalStateT
-                (compileProgramBare program)
+                ( compileProgramBare program >>= \case
+                    Right err -> do
+                        liftIO $ compileFail "<input>" err prog
+                        error ""
+                    Left p -> return p
+                )
                 (initCompilerState program)
                     { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] []]
                     }

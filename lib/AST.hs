@@ -162,7 +162,7 @@ instance Show Type where
     show Any = "Any"
     show None = "None"
     show Unknown = "Unknown"
-    show (Fn fnArgs fnRet) = "(" ++ show fnArgs ++ " -> " ++ show fnRet ++ ")"
+    show (Fn fnArgs fnRet) = "(" ++ (if null fnArgs then "" else unwords $ fmap (++ " ->") (init $ fmap show fnArgs)) ++ (if null fnArgs then "" else " ") ++ show fnRet ++ ")"
     show (List t) = "[" ++ show t ++ "]"
     show (StructT structName) = structName
     show Self = "Self"

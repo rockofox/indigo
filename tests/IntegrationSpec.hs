@@ -4,6 +4,7 @@ import BytecodeCompiler
     ( compileProgram
     , initCompilerState
     , locateLabel
+    , renderCompilerErrors
     )
 import Control.Monad.State (evalStateT)
 import Data.Functor
@@ -43,11 +44,12 @@ compileAndRun prog = do
             let (Parser.Program exprs) = program
             verifierResult <- verifyProgram "test" (T.pack prog) exprs
             whenErr verifierResult $ \err -> error $ "Verifier error: " ++ errorBundlePretty err
-            xxx <- evalStateT (compileProgram program) (initCompilerState program) <&> optimize
-            let xxxPoint = locateLabel xxx "main"
-
-            -- putStrLn $ printAssembly (V.fromList xxx) False
-            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, shouldExit = False}
+            compilerOutput <- evalStateT (compileProgram program) (initCompilerState program)
+            optimizedProgram <- case compilerOutput of
+                Left bytecode -> pure (optimize bytecode)
+                Right err -> error $ renderCompilerErrors err prog
+            let mainLabel = locateLabel optimizedProgram "main"
+            vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = mainLabel, breakpoints = [], callStack = [StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
             pure $ output $ ioBuffer vm
 
 spec = do

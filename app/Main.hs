@@ -3,6 +3,8 @@
 
 module Main where
 
+import AST qualified
+import BytecodeCompiler (CompilerError (..), compileFail, renderCompilerErrors)
 import BytecodeCompiler qualified
 import Control.Exception
 import Control.Monad
@@ -20,6 +22,7 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void
 import Data.Void qualified
+import Debug.Trace
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import GitHash
@@ -150,17 +153,20 @@ main = do
                 expr <- case rprog of
                     Left (err, expr) -> do
                         case expr of
-                            Just expr -> do
-                                when debug $ putStrLn $ prettyPrintProgram expr
+                            Just expr -> when debug $ putStrLn $ prettyPrintProgram expr
                             Nothing -> return ()
                         error $ "Parse error: " ++ errorBundlePretty err
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr
-                potentiallyTimedOperation "Compilation" showTime $
-                    do
-                        bool id optimize (not noOptimize)
-                        <$> evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr (fromJust input))
+                potentiallyTimedOperation "Compilation" showTime $ do
+                    result <- evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr (fromJust input))
+                    case result of
+                        Left instructions -> return instructions
+                        Right errors -> do
+                            let fileNameOrPlaceholder = fromMaybe "<input>" input
+                            compileFail fileNameOrPlaceholder errors i
+                            error ""
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode
@@ -204,19 +210,22 @@ cmd input = do
             modify (\s -> s{previousProgram = Program sexprs})
             modify (\s -> s{program = Program (sexprs ++ pexrs)})
             mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [])])
-            compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram mergedProgram) (BytecodeCompiler.initCompilerState mergedProgram)
-            let mainPc = BytecodeCompiler.locateLabel compiled "main"
-            result <- liftIO $ try (VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}) :: Repl (Either SomeException VM.VM)
-            case result of
-                Left err -> do
-                    liftIO $ putStrLn $ VM.printAssembly (V.fromList compiled) True
-                    liftIO $ print err
-                    previousProgram <- gets previousProgram
-                    modify (\s -> s{program = previousProgram})
-                Right vm -> do
-                    previousStack <- gets previousStack
-                    when (previousStack /= VM.stack vm) $ liftIO $ print $ head $ VM.stack vm
-                    modify (\s -> s{previousStack = VM.stack vm})
+            compilationResult <- liftIO $ evalStateT (BytecodeCompiler.compileProgram mergedProgram) (BytecodeCompiler.initCompilerState mergedProgram)
+            case compilationResult of
+                Right errors -> liftIO $ putStrLn $ "Compilation errors: " ++ show errors
+                Left compiled -> do
+                    let mainPc = BytecodeCompiler.locateLabel compiled "main"
+                    result <- liftIO $ try (VM.runVMVM $ (VM.initVM (V.fromList compiled)){VM.pc = mainPc, VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}) :: Repl (Either SomeException VM.VM)
+                    case result of
+                        Left err -> do
+                            liftIO $ putStrLn $ VM.printAssembly (V.fromList compiled) True
+                            liftIO $ print err
+                            previousProgram <- gets previousProgram
+                            modify (\s -> s{program = previousProgram})
+                        Right vm -> do
+                            previousStack <- gets previousStack
+                            when (previousStack /= VM.stack vm) $ liftIO $ print $ head $ VM.stack vm
+                            modify (\s -> s{previousStack = VM.stack vm})
 
 replCompleter :: (Monad m, MonadState REPLState m) => WordCompleter m
 replCompleter n = do
@@ -251,7 +260,9 @@ opts =
         , const $ do
             (Program sexprs) <- gets program
             compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram (Program sexprs)) (BytecodeCompiler.initCompilerState (Program sexprs))
-            liftIO $ putStrLn $ VM.printAssembly (V.fromList compiled) True
+            case compiled of
+                Right errors -> liftIO $ putStrLn $ "Compilation errors: " ++ show errors
+                Left instructions -> liftIO $ putStrLn $ VM.printAssembly (V.fromList instructions) True
         )
     ]
 

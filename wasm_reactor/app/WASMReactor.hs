@@ -50,8 +50,12 @@ runProgramRaw progPtr progLen = do
     case p of
         Left err -> putStrLn $ errorBundlePretty err
         Right program -> do
-            xxx <- evalStateT (compileProgram program) (initCompilerState program)
-
+            xxx <-
+                evalStateT (compileProgram program) (initCompilerState program) >>= \case
+                    Left instructions -> return instructions
+                    Right errors -> do
+                        compileFail "<input>" errors input
+                        error ""
             putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
@@ -68,7 +72,12 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
             case verified of
                 Left err -> error $ errorBundlePretty err
                 Right _ -> do
-                    xxx <- evalStateT (compileProgram program) (initCompilerState program)
+                    xxx <-
+                        evalStateT (compileProgram program) (initCompilerState program) >>= \case
+                            Left instructions -> return instructions
+                            Right errors -> do
+                                compileFail "<input>" errors input
+                                error ""
                     let xxxPoint = locateLabel xxx "main"
                     vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
                     let output' = BS.pack $ output $ ioBuffer vm
