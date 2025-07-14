@@ -17,7 +17,7 @@ import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Void
-import Debug.Trace (traceM, traceShowM)
+import Debug.Trace (trace, traceM, traceShowM)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -766,7 +766,7 @@ renderCompilerErrors errors input =
                     let (startLine, startColumn) = getLineAndColumn start linesOfInput
                         (endLine, endColumn) = getLineAndColumn end linesOfInput
                         lineContent =
-                            if startLine < 0 || startLine > length linesOfInput
+                            if startLine <= 0 || startLine > length linesOfInput
                                 then "Line " ++ show startLine ++ " out of range"
                                 else linesOfInput !! (startLine - 1)
                         lineIndicator =

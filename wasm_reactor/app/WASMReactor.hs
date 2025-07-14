@@ -76,7 +76,7 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
                         evalStateT (compileProgram program) (initCompilerState program) >>= \case
                             Left instructions -> return instructions
                             Right errors -> do
-                                compileFail "<input>" errors input
+                                compileFail "<input>" errors programStr
                                 error ""
                     let xxxPoint = locateLabel xxx "main"
                     vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
