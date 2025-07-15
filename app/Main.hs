@@ -94,13 +94,13 @@ inputFile :: Maybe String -> IO String
 inputFile input = case input of
     Just "-" -> getContents
     Just file -> readFile file
-    Nothing -> error "No input file specified"
+    Nothing -> errorWithoutStackTrace "No input file specified"
 
 inputFileBinary :: Maybe String -> IO B.ByteString
 inputFileBinary input = case input of
     Just "-" -> B.getContents
     Just file -> B.readFile file
-    Nothing -> error "No input file specified"
+    Nothing -> errorWithoutStackTrace "No input file specified"
 
 potentiallyTimedOperation :: (MonadIO m) => String -> Bool -> m a -> m a
 potentiallyTimedOperation msg showTime action = if showTime then timeItNamed msg action else action
@@ -155,7 +155,7 @@ main = do
                         case expr of
                             Just expr -> when debug $ putStrLn $ prettyPrintProgram expr
                             Nothing -> return ()
-                        error $ "Parse error: " ++ errorBundlePretty err
+                        errorWithoutStackTrace $ "Parse error: " ++ errorBundlePretty err
                     Right expr -> return expr
 
                 when debug $ putStrLn $ prettyPrintProgram expr
@@ -166,7 +166,7 @@ main = do
                         Right errors -> do
                             let fileNameOrPlaceholder = fromMaybe "<input>" input
                             compileFail fileNameOrPlaceholder errors i
-                            error ""
+                            errorWithoutStackTrace ""
             else do
                 bytecode <- inputFileBinary input
                 return $ VM.fromBytecode bytecode
@@ -174,7 +174,7 @@ main = do
         case output of
             Just "-" -> B.putStr $ VM.toBytecode $ V.fromList program
             Just file -> B.writeFile file $ VM.toBytecode $ V.fromList program
-            Nothing -> error "No output file specified"
+            Nothing -> errorWithoutStackTrace "No output file specified"
         exitSuccess
 
     when debug $ putStrLn $ VM.printAssembly (V.fromList program) False

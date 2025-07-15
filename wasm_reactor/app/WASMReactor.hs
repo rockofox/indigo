@@ -55,7 +55,7 @@ runProgramRaw progPtr progLen = do
                     Left instructions -> return instructions
                     Right errors -> do
                         compileFail "<input>" errors input
-                        error ""
+                        errorWithoutStackTrace ""
             putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
@@ -66,18 +66,18 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
     input <- peekCStringLen (inputPtr, inputLen)
     let p = parseProgram (Data.Text.pack programStr) Parser.initCompilerFlags
     case p of
-        Left err -> error $ errorBundlePretty err
+        Left err -> errorWithoutStackTrace $ errorBundlePretty err
         Right program -> do
             verified <- verifyProgram "" (Data.Text.pack programStr) (exprs program)
             case verified of
-                Left err -> error $ errorBundlePretty err
+                Left err -> errorWithoutStackTrace $ errorBundlePretty err
                 Right _ -> do
                     xxx <-
                         evalStateT (compileProgram program) (initCompilerState program) >>= \case
                             Left instructions -> return instructions
                             Right errors -> do
                                 compileFail "<input>" errors programStr
-                                error ""
+                                errorWithoutStackTrace ""
                     let xxxPoint = locateLabel xxx "main"
                     vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
                     let output' = BS.pack $ output $ ioBuffer vm
