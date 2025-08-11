@@ -6,61 +6,61 @@ import GHC.Generics (Generic)
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
 
 data Expr
-    = Var String Position
-    | BoolLit Bool
-    | IntLit Integer
-    | StringLit String
-    | FloatLit Float
-    | DoubleLit Double
-    | If Expr Expr Expr
-    | Let String Expr
+    = Var {varName :: String, varPos :: Position}
+    | BoolLit {boolValue :: Bool}
+    | IntLit {intValue :: Integer}
+    | StringLit {stringValue :: String}
+    | FloatLit {floatValue :: Float}
+    | DoubleLit {doubleValue :: Double}
+    | If {ifCond :: Expr, ifThen :: Expr, ifElse :: Expr}
+    | Let {letName :: String, letValue :: Expr}
     | FuncDef {name :: String, args :: [Expr], body :: Expr}
-    | FuncCall String [Expr] Position
+    | FuncCall {funcName :: String, funcArgs :: [Expr], funcPos :: Position}
     | FuncDec {name :: String, types :: [Type], generics :: [GenericExpr]}
     | Function {def :: [Expr], dec :: Expr}
-    | DoBlock [Expr]
-    | ExternDec String String [Type]
-    | Add Expr Expr
-    | Sub Expr Expr
-    | Mul Expr Expr
-    | Div Expr Expr
-    | Eq Expr Expr
-    | Neq Expr Expr
-    | Lt Expr Expr
-    | Gt Expr Expr
-    | Le Expr Expr
-    | Ge Expr Expr
-    | And Expr Expr
-    | Or Expr Expr
-    | Not Expr
-    | UnaryMinus Expr
+    | DoBlock {doBlockExprs :: [Expr]}
+    | ExternDec {externName :: String, externType :: String, externArgs :: [Type]}
+    | Add {addLhs :: Expr, addRhs :: Expr}
+    | Sub {subLhs :: Expr, subRhs :: Expr}
+    | Mul {mulLhs :: Expr, mulRhs :: Expr}
+    | Div {divLhs :: Expr, divRhs :: Expr}
+    | Eq {eqLhs :: Expr, eqRhs :: Expr}
+    | Neq {neqLhs :: Expr, neqRhs :: Expr}
+    | Lt {ltLhs :: Expr, ltRhs :: Expr}
+    | Gt {gtLhs :: Expr, gtRhs :: Expr}
+    | Le {leLhs :: Expr, leRhs :: Expr}
+    | Ge {geLhs :: Expr, geRhs :: Expr}
+    | And {andLhs :: Expr, andRhs :: Expr}
+    | Or {orLhs :: Expr, orRhs :: Expr}
+    | Not {notExpr :: Expr}
+    | UnaryMinus {unaryMinusExpr :: Expr}
     | Placeholder
-    | Discard Expr
+    | Discard {discardExpr :: Expr}
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
-    | Ref Expr
+    | Ref {refExpr :: Expr}
     | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String]}
-    | StructLit String [(String, Expr)] Position
-    | StructAccess Expr Expr
-    | ListLit [Expr]
-    | ListPattern [Expr]
-    | ListConcat Expr Expr
-    | ListAdd Expr Expr
-    | ArrayAccess Expr Expr
-    | Modulo Expr Expr
-    | Power Expr Expr
-    | Target String Expr
-    | Then Expr Expr
-    | Pipeline Expr Expr
-    | Lambda [Expr] Expr
-    | Cast Expr Expr
-    | TypeLit Type
-    | Flexible Expr
+    | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitPos :: Position}
+    | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr}
+    | ListLit {listLitExprs :: [Expr]}
+    | ListPattern {listPatternExprs :: [Expr]}
+    | ListConcat {listConcatLhs :: Expr, listConcatRhs :: Expr}
+    | ListAdd {listAddLhs :: Expr, listAddRhs :: Expr}
+    | ArrayAccess {arrayAccessArray :: Expr, arrayAccessIndex :: Expr}
+    | Modulo {moduloLhs :: Expr, moduloRhs :: Expr}
+    | Power {powerBase :: Expr, powerExponent :: Expr}
+    | Target {targetName :: String, targetExpr :: Expr}
+    | Then {thenLhs :: Expr, thenRhs :: Expr}
+    | Pipeline {pipelineLhs :: Expr, pipelineRhs :: Expr}
+    | Lambda {lambdaArgs :: [Expr], lambdaBody :: Expr}
+    | Cast {castExpr :: Expr, castType :: Expr}
+    | TypeLit {typeLitType :: Type}
+    | Flexible {flexibleExpr :: Expr}
     | Trait {name :: String, methods :: [Expr]}
     | Impl {trait :: String, for :: String, methods :: [Expr]}
-    | StrictEval Expr
-    | External String [Expr]
-    | CharLit Char
-    | ParenApply Expr [Expr] Position
+    | StrictEval {strictEvalExpr :: Expr}
+    | External {externalName :: String, externalArgs :: [Expr]}
+    | CharLit {charValue :: Char}
+    | ParenApply {parenApplyExpr :: Expr, parenApplyArgs :: [Expr], parenApplyPos :: Position}
     deriving
         ( Show
         , Generic
@@ -84,8 +84,8 @@ children (Not a) = [a]
 children (UnaryMinus a) = [a]
 children (If a b c) = [a, b, c]
 children (Let _ a) = [a]
-children (FuncDef _ _ a) = [a]
-children (FuncCall _ a _) = a
+children (FuncDef{body}) = [body]
+children (FuncCall{funcArgs}) = funcArgs
 children (Function a b) = a ++ [b]
 children (DoBlock a) = a
 children (ExternDec{}) = []
@@ -99,7 +99,7 @@ children (Discard a) = [a]
 children (Import{}) = []
 children (Ref a) = [a]
 children (Struct{}) = []
-children (StructLit _ a _) = map snd a
+children (StructLit{structLitFields}) = map snd structLitFields
 children (StructAccess a b) = [a, b]
 children (ListLit a) = a
 children (ListPattern a) = a
@@ -227,7 +227,7 @@ typeOf (Import{}) = error "Cannot infer type of import"
 typeOf (Ref _) = error "Cannot infer type of ref"
 typeOf (Struct{}) = error "Cannot infer type of struct"
 typeOf (StructLit x _ _) = StructT x
-typeOf (ListLit [Var x _]) = List $ StructT x
+typeOf (ListLit [Var{varName}]) = List $ StructT varName
 typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
 typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
 typeOf (Modulo x _) = typeOf x

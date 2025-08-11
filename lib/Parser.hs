@@ -103,16 +103,16 @@ binOpTable =
     ]
 
 sequenceExpr :: Expr -> Expr -> Expr
-sequenceExpr a b = FuncCall "sequence" [a, b] anyPosition
+sequenceExpr a b = FuncCall{funcName = "sequence", funcArgs = [a, b], funcPos = anyPosition}
 
 bindExpr :: Expr -> Expr -> Expr
-bindExpr a b = FuncCall "bind" [a, b] anyPosition
+bindExpr a b = FuncCall{funcName = "bind", funcArgs = [a, b], funcPos = anyPosition}
 
 binaryFunctionCall :: String -> Expr -> Expr -> Expr
-binaryFunctionCall f a b = FuncCall f [a, b] anyPosition
+binaryFunctionCall f a b = FuncCall{funcName = f, funcArgs = [a, b], funcPos = anyPosition}
 
 pFunctionCall :: String -> Expr -> Expr
-pFunctionCall f a = FuncCall f [a] anyPosition
+pFunctionCall f a = FuncCall{funcName = f, funcArgs = [a], funcPos = anyPosition}
 
 binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
 binary name f = InfixL (f <$ symbol name)
@@ -181,7 +181,7 @@ identifier = do
         then fail $ "keyword " ++ show name ++ " cannot be an identifier"
         else return name
   where
-    p = some (alphaNumChar <|> char '_' <|> oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '$', '%', '^', '~'])
+    p = some (alphaNumChar <|> char '_' <|> oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '%', '^', '~'])
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -201,7 +201,7 @@ double :: Parser Double
 double = lexeme (L.float <* char 'd')
 
 freeOperator :: Parser String
-freeOperator = try $ lexeme $ some (oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '$', '%', '^', '~', ':']) >>= \x -> if length x > 1 then return x else fail "Operator must be at least two characters"
+freeOperator = try $ lexeme $ some (oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '%', '^', '~', ':']) >>= \x -> if length x > 1 then return x else fail "Operator must be at least two characters"
 
 extra :: Parser String
 extra = do
@@ -242,7 +242,7 @@ validType =
         <?> "type"
 
 stringLit :: Parser String
-stringLit = lexeme $ char '\"' *> manyTill L.charLiteral (char '\"')
+stringLit = lexeme $ char '"' *> manyTill L.charLiteral (char '"')
 
 charLit :: Parser Char
 charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal <* char 'c' >>= \x -> if x > 255 then fail "Char literal must be between 0 and 255" else return (chr x))
@@ -432,7 +432,7 @@ parseProgram t cf = do
         Left err -> Left err
         Right program' -> do
             -- If theres no main function, add one
-            let foundMain = any (\case FuncDef "main" _ _ -> True; _ -> False) program'.exprs || any (\case Function defs _ -> any (\case FuncDef "main" _ _ -> True; _ -> False) defs; _ -> False) program'.exprs
+            let foundMain = any (\case FuncDef{name = "main"} -> True; _ -> False) program'.exprs || any (\case Function{def} -> any (\case FuncDef{name = "main"} -> True; _ -> False) def; _ -> False) program'.exprs
             let (outside, inside) = partition shouldBeOutside program'.exprs
             let artificialMainProgram = Program $ outside ++ [FuncDec "main" [Any] [], FuncDef "main" [] (DoBlock inside)]
             if foundMain || not cf.needsMain

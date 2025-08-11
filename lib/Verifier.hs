@@ -66,12 +66,12 @@ findMatchingBindings name = do
 listPatternToBindings :: Expr -> Type -> [VBinding]
 listPatternToBindings (ListPattern exprs) (List t) = do
     let singulars = init exprs
-    let Var restName _ = last exprs
-    concatMap (\case (Var name _) -> [VBinding{name = name, args = [], ttype = t, generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = List t, generics = []}]
+    let Var{varName = restName} = last exprs
+    concatMap (\case Var{varName} -> [VBinding{name = varName, args = [], ttype = t, generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = List t, generics = []}]
 listPatternToBindings (ListPattern exprs) (StructT "String") = do
     let singulars = init exprs
-    let Var restName _ = last exprs
-    concatMap (\case (Var name _) -> [VBinding{name = name, args = [], ttype = StructT "Char", generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = StructT "String", generics = []}]
+    let Var{varName = restName} = last exprs
+    concatMap (\case Var{varName} -> [VBinding{name = varName, args = [], ttype = StructT "Char", generics = []}]; _ -> []) singulars ++ [VBinding{name = restName, args = [], ttype = StructT "String", generics = []}]
 listPatternToBindings x y = error $ "listPatternToBinding called with non-list-pattern: " ++ show x ++ " " ++ show y
 
 typeOf' :: Expr -> StateT VerifierState IO Type
@@ -96,7 +96,7 @@ typeOf' (UnaryMinus x) = typeOf' x
 typeOf' (If _ b _) = typeOf' b
 typeOf' (Modulo x _) = typeOf' x
 typeOf' (ListConcat x _) = typeOf' x
-typeOf' (StructAccess n@(Var{}) (Var fieldName _)) = do
+typeOf' (StructAccess n@(Var{}) (Var{varName = fieldName})) = do
     n' <- typeOf' n
     case n' of
         StructT s -> do
@@ -271,7 +271,7 @@ verifyMultiple :: [Expr] -> StateT VerifierState IO [ParseError s e]
 verifyMultiple = concatMapM verifyExpr
 
 structLitToBindings :: Expr -> Type -> [VBinding]
-structLitToBindings (StructLit _ fields _) _ = map (\case (_, Var name _) -> VBinding{name = name, ttype = Any, args = [], generics = []}; _ -> error "Impossible") fields
+structLitToBindings (StructLit _ fields _) _ = map (\case (_, Var{varName}) -> VBinding{name = varName, ttype = Any, args = [], generics = []}; _ -> error "Impossible") fields
 structLitToBindings x y = error $ "structLitToBindings called with " ++ show x ++ " and " ++ show y
 
 verifyExpr :: Expr -> StateT VerifierState IO [ParseError s e]
@@ -294,8 +294,8 @@ verifyExpr (FuncDef name args body) = do
             return bodyErrors
           where
             argToBindings :: (Expr, Type) -> [VBinding]
-            argToBindings (Var name' _, Fn args' ret) = [VBinding{name = name', args = args', ttype = ret, generics = []}]
-            argToBindings (Var name' _, ttype') = [VBinding{name = name', args = [], ttype = ttype', generics = []}]
+            argToBindings (Var{varName}, Fn args' ret) = [VBinding{name = varName, args = args', ttype = ret, generics = []}]
+            argToBindings (Var{varName}, ttype') = [VBinding{name = varName, args = [], ttype = ttype', generics = []}]
             argToBindings (l@ListPattern{}, t) = listPatternToBindings l t
             argToBindings (s@StructLit{}, t) = structLitToBindings s t
             argToBindings _ = []
@@ -382,7 +382,7 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     let eTypes = concatMap (\matchingBinding -> ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show matchingBinding.args ++ ", got: " ++ show argumentTypes))) | not fta])) matchingBindings
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | null matchingBindings] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
-    let argsAsBindings = map (\case (Var name' _) -> VBinding{name = name', args = [], ttype = Any, generics = []}; Placeholder -> VBinding{name = "__placeholder", args = [], ttype = Any, generics = []}; _ -> error "Invalid lambda argument") args
+    let argsAsBindings = map (\case Var{varName} -> VBinding{name = varName, args = [], ttype = Any, generics = []}; Placeholder -> VBinding{name = "__placeholder", args = [], ttype = Any, generics = []}; _ -> error "Invalid lambda argument") args
     modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = Any, fname = "__lambda"}) : frames state})
     bodyErrors <- verifyExpr body
     modify (\state -> state{frames = tail (frames state)})

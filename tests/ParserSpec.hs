@@ -25,16 +25,16 @@ spec = do
         it "Can parse free operators" $
             parseProgram "x := 2" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncCall ":=" [Var "x" (Position (0, 2)), IntLit 2] anyPosition])
+                    (Program [FuncCall{funcName = ":=", funcArgs = [Var{varName = "x", varPos = Position (0, 2)}, IntLit{intValue = 2}], funcPos = anyPosition}])
     describe "Function definitions" $ do
         it "Should parse a simple function" $
             parseProgram "add a b = a + b" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncDef{name = "add", args = [Var "a" anyPosition, Var "b" anyPosition], body = Add (Var "a" anyPosition) (Var "b" anyPosition)}])
+                    (Program [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}}}])
         it "Should prase a function with 0 parameters" $
             parseProgram "thunk = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncDef{name = "thunk", args = [], body = IntLit 1}])
+                    (Program [FuncDef{name = "thunk", args = [], body = IntLit{intValue = 1}}])
     describe "compareTypes" $ do
         it "Should be true for exact matches" $
             property $
@@ -67,12 +67,12 @@ spec = do
         it "Should parse a simple program" $
             parseProgram "let main : IO = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall "print" [StringLit "Hello, world!"] anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"], generics = []}}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall{funcName = "print", funcArgs = [StringLit{stringValue = "Hello, world!"}], funcPos = anyPosition}}], dec = FuncDec{name = "main", types = [StructT "IO"], generics = []}}])
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [StructAccess (StructLit "bello" [] anyPosition) (Var "name" anyPosition)])
+                    (Program [StructAccess{structAccessStruct = StructLit{structLitName = "bello", structLitFields = [], structLitPos = anyPosition}, structAccessField = Var{varName = "name", varPos = anyPosition}}])
         it "Can define" $
             parseProgram "struct Teacher = ()" parserCompilerFlags
                 `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = []}])
@@ -99,7 +99,7 @@ spec = do
                             { trait = "Show"
                             , for = "Point"
                             , methods =
-                                [ FuncDef{name = "show", args = [Var "point" anyPosition], body = parseFreeUnsafe "\"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""}
+                                [ FuncDef{name = "show", args = [Var{varName = "point", varPos = anyPosition}], body = parseFreeUnsafe "\"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\""}
                                 ]
                             }
                         ]
@@ -125,33 +125,33 @@ spec = do
             |]
                     parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncCall "filter" [FuncCall "==" [IntLit 1] anyPosition, ListLit [IntLit 1, IntLit 2, IntLit 3]] anyPosition])
+                    (Program [FuncCall{funcName = "filter", funcArgs = [FuncCall{funcName = "==", funcArgs = [IntLit{intValue = 1}], funcPos = anyPosition}, ListLit{listLitExprs = [IntLit{intValue = 1}, IntLit{intValue = 2}, IntLit{intValue = 3}]}], funcPos = anyPosition}])
     describe "Unary minus" $ do
         it "Should parse unary minus" $
             parseProgram "(-1)" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [UnaryMinus (IntLit 1)])
+                    (Program [UnaryMinus{unaryMinusExpr = IntLit{intValue = 1}}])
         it "Should be able to use negative numbers in multiplication" $
             parseProgram "1 * (-1)" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Mul (IntLit 1) (UnaryMinus (IntLit 1))])
+                    (Program [Mul{mulLhs = IntLit{intValue = 1}, mulRhs = UnaryMinus{unaryMinusExpr = IntLit{intValue = 1}}}])
         it "Should be able to negate expressions in parentheses" $
             parseProgram "2 * (-(3-x*5))" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Mul (IntLit 2) (UnaryMinus (Sub (IntLit 3) (Mul (Var "x" anyPosition) (IntLit 5))))])
+                    (Program [Mul{mulLhs = IntLit{intValue = 2}, mulRhs = UnaryMinus{unaryMinusExpr = Sub{subLhs = IntLit{intValue = 3}, subRhs = Mul{mulLhs = Var{varName = "x", varPos = anyPosition}, mulRhs = IntLit{intValue = 5}}}}}])
     describe "Parentheses" $ do
         it "Should parse parentheses" $
             parseProgram "(1 + 2) * 3" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Mul (Add (IntLit 1) (IntLit 2)) (IntLit 3)])
+                    (Program [Mul{mulLhs = Add{addLhs = IntLit{intValue = 1}, addRhs = IntLit{intValue = 2}}, mulRhs = IntLit{intValue = 3}}])
         it "Should parse parenthesis application correctly" $
             parseProgram "(x y) z" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [ParenApply (FuncCall "x" [Var "y" anyPosition] anyPosition) [Var "z" anyPosition] anyPosition])
+                    (Program [ParenApply{parenApplyExpr = FuncCall{funcName = "x", funcArgs = [Var{varName = "y", varPos = anyPosition}], funcPos = anyPosition}, parenApplyArgs = [Var{varName = "z", varPos = anyPosition}], parenApplyPos = anyPosition}])
         it "bottles (i)-1" $
             parseProgram "bottles (i)-1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncCall "bottles" [Sub (Var "i" anyPosition) (IntLit 1)] anyPosition])
+                    (Program [FuncCall{funcName = "bottles", funcArgs = [Sub{subLhs = Var{varName = "i", varPos = anyPosition}, subRhs = IntLit{intValue = 1}}], funcPos = anyPosition}])
 
     describe "Generics" $ do
         it "Should parse let generics" $ do
@@ -163,7 +163,7 @@ spec = do
             |]
                 parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "add", args = [Var "a" anyPosition, Var "b" anyPosition], body = DoBlock [Add (Var "a" anyPosition) (Var "b" anyPosition)]}], dec = FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")]}}])
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = DoBlock{doBlockExprs = [Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}}]}}], dec = FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")]}}])
         it "Should parse classic decleration generics" $ do
             parseProgram
                 [r|
