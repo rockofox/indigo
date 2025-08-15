@@ -227,13 +227,12 @@ instance Show Data where
 instance Ord Data where
     (DInt x) `compare` (DInt y) = x `compare` y
     (DFloat x) `compare` (DFloat y) = x `compare` y
+    (DDouble x) `compare` (DDouble y) = x `compare` y
     (DString x) `compare` (DString y) = x `compare` y
     (DBool x) `compare` (DBool y) = x `compare` y
     (DList x) `compare` (DList y) = x `compare` y
-    (DString x) `compare` (DList y) = x `compare` show y
-    (DList x) `compare` (DString y) = show x `compare` y
     (DChar x) `compare` (DChar y) = x `compare` y
-    x `compare` y = error $ "Cannot compare " ++ show x ++ " and " ++ show y
+    x `compare` y = error $ "Cannot compare values of different or unsupported types: " ++ show x ++ " and " ++ show y
 
 data StackFrame = StackFrame
     { returnAddress :: Int
@@ -366,68 +365,63 @@ instance Real Data where
     toRational (DInt x) = toRational x
     toRational (DFloat x) = toRational x
     toRational (DDouble x) = toRational x
-    toRational x = error $ "Cannot convert " ++ show x ++ " to Rational"
+    toRational x = error $ "Cannot convert non-numeric type to Rational: " ++ show x
 
 instance Enum Data where
     toEnum = DInt
     fromEnum (DInt x) = x
     fromEnum (DFloat x) = round x
     fromEnum (DDouble x) = round x
-    fromEnum x = error $ "Cannot convert " ++ show x ++ " to Int"
+    fromEnum x = error $ "Cannot convert non-numeric type to Int: " ++ show x
 
 instance Integral Data where
     quot (DInt x) (DInt y) = DInt $ quot x y
-    quot _ _ = undefined
+    quot _ _ = error "Cannot quot values of different or non-integer types"
     rem (DInt x) (DInt y) = DInt $ rem x y
-    rem _ _ = undefined
+    rem _ _ = error "Cannot rem values of different or non-integer types"
     quotRem (DInt x) (DInt y) = (DInt $ quot x y, DInt $ rem x y)
-    quotRem _ _ = undefined
+    quotRem _ _ = error "Cannot quotRem values of different or non-integer types"
     toInteger (DInt x) = toInteger x
     toInteger (DFloat x) = round x
     toInteger (DDouble x) = round x
-    toInteger x = error $ "Cannot convert " ++ show x ++ " to Integer"
+    toInteger x = error $ "Cannot convert non-numeric type to Integer: " ++ show x
 
 instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
     (+) (DDouble x) (DDouble y) = DDouble $ x + y
-    (+) (DString x) (DString y) = DString $ x ++ y
-    (+) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x + Data.Char.ord y)
-    (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
+    (+) x y = error $ "Cannot add values of different or non-numeric types: " ++ show x ++ " and " ++ show y
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
     (-) (DDouble x) (DDouble y) = DDouble $ x - y
-    (-) (DList x) (DList y) = DList $ filter (`notElem` y) x
-    (-) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x - Data.Char.ord y)
-    (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
+    (-) x y = error $ "Cannot subtract values of different or non-numeric types: " ++ show x ++ " and " ++ show y
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
-    (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x -- TODO
-    (*) (DDouble x) (DDouble y) = DDouble $ x * y -- TODO: make generic
-    (*) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x * Data.Char.ord y)
-    (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
+    (*) (DDouble x) (DDouble y) = DDouble $ x * y
+    (*) x y = error $ "Cannot multiply values of different or non-numeric types: " ++ show x ++ " and " ++ show y
     fromInteger = DInt . fromInteger
     abs (DInt x) = DInt $ abs x
     abs (DFloat x) = DFloat $ abs x
-    abs x = error $ "Cannot take absolute value of " ++ show x
+    abs (DDouble x) = DDouble $ abs x
+    abs x = error $ "Cannot take absolute value of non-numeric type: " ++ show x
     signum (DInt x) = DInt $ signum x
     signum (DFloat x) = DFloat $ signum x
-    signum x = error $ "Cannot take signum of " ++ show x
+    signum (DDouble x) = DDouble $ signum x
+    signum x = error $ "Cannot take signum of non-numeric type: " ++ show x
 
 instance Fractional Data where
     (/) (DInt x) (DInt y) = DInt $ x `div` y
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
     (/) (DDouble x) (DDouble y) = DDouble $ x / y
-    (/) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x `div` Data.Char.ord y)
-    (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
-    fromRational = DFloat . fromRational
+    (/) x y = error $ "Cannot divide values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+    fromRational _ = error "fromRational is forbidden for Data. Use explicit DFloat/DDouble constructors only."
 
 instance Floating Data where
     (**) (DInt x) (DInt y) = DInt $ x ^ y
     (**) (DFloat x) (DFloat y) = DFloat $ x ** y
     (**) (DDouble x) (DDouble y) = DDouble $ x ** y
-    (**) x y = error $ "Cannot raise " ++ show x ++ " to the power of " ++ show y
-    pi = DFloat pi
+    (**) x y = error $ "Cannot exponentiate values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+    pi = error "pi not supported for Data"
     exp = error "exp not implemented"
     log = error "log not implemented"
     sin = error "sin not implemented"
@@ -676,17 +670,46 @@ runInstruction (PushPf name nArgs) = do
 runInstruction Pop = void stackPop
 runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
-runInstruction Add = stackPopN 2 >>= \[y, x] -> stackPush $ x + y
-runInstruction Sub = stackPopN 2 >>= \[y, x] -> stackPush $ x - y
-runInstruction Mul = stackPopN 2 >>= \[y, x] -> stackPush $ x * y
-runInstruction Div = stackPopN 2 >>= \[y, x] -> stackPush $ x / y
-runInstruction Pow = stackPopN 2 >>= \[y, x] -> stackPush $ x ** y
+runInstruction Add =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a + b)
+        (DFloat a, DFloat b) -> stackPush $ DFloat (a + b)
+        (DDouble a, DDouble b) -> stackPush $ DDouble (a + b)
+        _ -> error $ "Type error in Add: cannot add values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+runInstruction Sub =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a - b)
+        (DFloat a, DFloat b) -> stackPush $ DFloat (a - b)
+        (DDouble a, DDouble b) -> stackPush $ DDouble (a - b)
+        _ -> error $ "Type error in Sub: cannot subtract values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+runInstruction Mul =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a * b)
+        (DFloat a, DFloat b) -> stackPush $ DFloat (a * b)
+        (DDouble a, DDouble b) -> stackPush $ DDouble (a * b)
+        _ -> error $ "Type error in Mul: cannot multiply values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+runInstruction Div =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a `div` b)
+        (DFloat a, DFloat b) -> stackPush $ DFloat (a / b)
+        (DDouble a, DDouble b) -> stackPush $ DDouble (a / b)
+        _ -> error $ "Type error in Div: cannot divide values of different or non-numeric types: " ++ show x ++ " and " ++ show y
+runInstruction Pow =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a ^ b)
+        (DFloat a, DFloat b) -> stackPush $ DFloat (a ** b)
+        (DDouble a, DDouble b) -> stackPush $ DDouble (a ** b)
+        _ -> error $ "Type error in Pow: cannot exponentiate values of different or non-numeric types: " ++ show x ++ " and " ++ show y
 runInstruction Abs =
-    stackPop >>= \x -> stackPush $ case x of
-        DInt num -> DInt $ abs num
-        DFloat num -> DFloat $ abs num
-        _ -> error $ "Cannot take absolute value of " ++ show x
-runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
+    stackPop >>= \x -> case x of
+        DInt num -> stackPush $ DInt $ abs num
+        DFloat num -> stackPush $ DFloat $ abs num
+        DDouble num -> stackPush $ DDouble $ abs num
+        _ -> error $ "Cannot take absolute value of non-numeric type: " ++ show x
+runInstruction Mod =
+    stackPopN 2 >>= \[y, x] -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DInt (a `mod` b)
+        _ -> error $ "Type error in Mod: cannot mod values of different or non-integer types: " ++ show x ++ " and " ++ show y
 -- IO
 runInstruction (Builtin Print) = do
     vm <- get
@@ -760,13 +783,56 @@ runInstruction Ret = do
     -- get >>= \vm -> traceM $ show (stack vm)
     modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
 -- Comparison
-runInstruction Eq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x == y
-runInstruction Neq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x /= y
-runInstruction Lt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x < y
-runInstruction Gt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x > y
-runInstruction Not = stackPop >>= \d -> stackPush $ DBool $ not $ case d of DBool x -> x; _ -> error "Not a boolean"
-runInstruction And = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a && b; _ -> error "Not a boolean"
-runInstruction Or = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a || b; _ -> error "Not a boolean"
+runInstruction Eq =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DBool $ a == b
+        (DFloat a, DFloat b) -> stackPush $ DBool $ a == b
+        (DDouble a, DDouble b) -> stackPush $ DBool $ a == b
+        (DString a, DString b) -> stackPush $ DBool $ a == b
+        (DBool a, DBool b) -> stackPush $ DBool $ a == b
+        (DChar a, DChar b) -> stackPush $ DBool $ a == b
+        (DList a, DList b) -> stackPush $ DBool $ a == b
+        (DNone, DNone) -> stackPush $ DBool True
+        _ -> error $ "Type error in Eq: cannot compare values of different or unsupported types: " ++ show x ++ " and " ++ show y
+runInstruction Neq =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DBool $ a /= b
+        (DFloat a, DFloat b) -> stackPush $ DBool $ a /= b
+        (DDouble a, DDouble b) -> stackPush $ DBool $ a /= b
+        (DString a, DString b) -> stackPush $ DBool $ a /= b
+        (DBool a, DBool b) -> stackPush $ DBool $ a /= b
+        (DChar a, DChar b) -> stackPush $ DBool $ a /= b
+        (DList a, DList b) -> stackPush $ DBool $ a /= b
+        (DNone, DNone) -> stackPush $ DBool False
+        _ -> error $ "Type error in Neq: cannot compare values of different or unsupported types: " ++ show x ++ " and " ++ show y
+runInstruction Lt =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DBool $ a < b
+        (DFloat a, DFloat b) -> stackPush $ DBool $ a < b
+        (DDouble a, DDouble b) -> stackPush $ DBool $ a < b
+        (DString a, DString b) -> stackPush $ DBool $ a < b
+        (DChar a, DChar b) -> stackPush $ DBool $ a < b
+        _ -> error $ "Type error in Lt: cannot compare values of different or unsupported types: " ++ show x ++ " and " ++ show y
+runInstruction Gt =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DInt a, DInt b) -> stackPush $ DBool $ a > b
+        (DFloat a, DFloat b) -> stackPush $ DBool $ a > b
+        (DDouble a, DDouble b) -> stackPush $ DBool $ a > b
+        (DString a, DString b) -> stackPush $ DBool $ a > b
+        (DChar a, DChar b) -> stackPush $ DBool $ a > b
+        _ -> error $ "Type error in Gt: cannot compare values of different or unsupported types: " ++ show x ++ " and " ++ show y
+runInstruction Not =
+    stackPop >>= \d -> case d of
+        DBool x -> stackPush $ DBool $ not x
+        _ -> error $ "Type error in Not: not a boolean: " ++ show d
+runInstruction And =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DBool a, DBool b) -> stackPush $ DBool $ a && b
+        _ -> error $ "Type error in And: not booleans: " ++ show x ++ " and " ++ show y
+runInstruction Or =
+    stackPopN 2 >>= \(y : x : _) -> case (x, y) of
+        (DBool a, DBool b) -> stackPush $ DBool $ a || b
+        _ -> error $ "Type error in Or: not booleans: " ++ show x ++ " and " ++ show y
 -- Label
 runInstruction (Label _) = return ()
 -- Stack

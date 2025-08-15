@@ -3,7 +3,7 @@ module AST where
 import Data.Binary qualified
 import GHC.Generics (Generic)
 
-data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
+data GenericExpr = GenericExpr {genericExprName :: String, genericExprType :: Maybe Type} deriving (Show, Eq, Generic, Ord)
 
 data Expr
     = Var {varName :: String, varPos :: Position}
@@ -34,7 +34,7 @@ data Expr
     | Or {orLhs :: Expr, orRhs :: Expr}
     | Not {notExpr :: Expr}
     | UnaryMinus {unaryMinusExpr :: Expr}
-    | Placeholder
+    | Placeholder {}
     | Discard {discardExpr :: Expr}
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
     | Ref {refExpr :: Expr}
@@ -125,6 +125,13 @@ children (ParenApply a b _) = a : b
 children (ListAdd a b) = [a, b]
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
+
+-- Accessor functions for Position
+positionStart :: Position -> Int
+positionStart (Position (start, _)) = start
+
+positionEnd :: Position -> Int
+positionEnd (Position (_, end)) = end
 
 zeroPosition :: Position
 zeroPosition = Position (0, 0)
