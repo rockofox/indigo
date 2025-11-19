@@ -233,3 +233,141 @@ xterm-display {
     color: var(--subtle-color);
     border-top: 1px solid var(--highlight-med);
 }
+
+/* Documentation Styles */
+
+.docs-container {
+    display: flex;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+    gap: 3rem;
+    min-height: calc(100vh - 200px);
+}
+
+.docs-sidebar {
+    width: 250px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 2rem;
+    height: fit-content;
+    border-right: 1px solid var(--highlight-med);
+    padding-right: 2rem;
+}
+
+.docs-sidebar h3 {
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--subtle-color);
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+}
+
+.docs-sidebar h3:first-child {
+    margin-top: 0;
+}
+
+.docs-sidebar a {
+    display: block;
+    color: var(--text-color);
+    text-decoration: none;
+    padding: 0.5rem 0;
+    font-size: 0.95rem;
+    transition: color 0.2s;
+}
+
+.docs-sidebar a:hover {
+    color: var(--primary-color);
+}
+
+.docs-content {
+    flex-grow: 1;
+    max-width: 800px;
+}
+
+.docs-content h1 {
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+    color: var(--text-color);
+}
+
+.docs-content h2 {
+    font-size: 1.8rem;
+    margin-top: 3rem;
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+    border-bottom: 1px solid var(--highlight-med);
+    padding-bottom: 0.5rem;
+}
+
+.docs-content p {
+    margin-bottom: 1.5rem;
+    line-height: 1.7;
+    color: #c0bfd6;
+}
+
+.docs-content pre {
+    background-color: var(--surface-color);
+    padding: 1.5rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--highlight-med);
+}
+
+.docs-content code {
+    font-family: 'Fira Code', monospace;
+    font-size: 0.9rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .docs-container {
+        flex-direction: column;
+    }
+
+    .docs-sidebar {
+        width: 100%;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid var(--highlight-med);
+        padding-bottom: 2rem;
+        margin-bottom: 2rem;
+    }
+}
+
+/* Try Button Styles */
+.code-block-container {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+.code-block-container pre {
+    margin-bottom: 0;
+}
+
+.try-button {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    background-color: var(--surface-color);
+    color: var(--subtle-color);
+    border: 1px solid var(--highlight-med);
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    font-size: 0.9rem;
+    z-index: 10;
+    opacity: 0.6;
+}
+
+.try-button:hover {
+    opacity: 1;
+    color: var(--text-color);
+    border-color: var(--subtle-color);
+    background-color: var(--overlay-color);
+}
