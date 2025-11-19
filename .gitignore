@@ -29,3 +29,7 @@ cabal.project.local~
 result
 *.tix
 examples/scratch.in
+
+# Website 
+node_modules/
+elm-stuff/
