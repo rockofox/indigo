@@ -7,7 +7,7 @@ executable indigo-wasm-reactor
     c-sources:        cbits/init.c
     hs-source-dirs:   app
     build-depends:    base ^>=4.16.4.0,
-                      megaparsec,
+                      megaparsec >= 9.3,
                       mtl,
                       text,
                       bytestring,
