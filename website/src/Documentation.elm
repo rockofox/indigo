@@ -64,10 +64,10 @@ viewFunctionsAndBindings onLoadCode =
         , viewCodeBlock """let name = "Rocko"
 let main = println "Hello " : name""" onLoadCode True "indigo"
         , p [] [ text "The above code defines a binding name and a function main. The function main is called when the program is run." ]
-        , viewCodeBlock """let multiple_args (a: Int b: Int) => Int = a + b
+        , viewCodeBlock """let multiple_args (a: Int b: Int): Int = a + b
 let main = print (multiple_args 2, 3)""" onLoadCode True "indigo"
         , p [] [ text "Functions can have multiple arguments. The above function adds two integers. Specifying the return type is optional, specifying parameter types is mandatory currently." ]
-        , viewCodeBlock """let println (s: String) => IO = do
+        , viewCodeBlock """let println (s: String): IO = do
     print s
     print "\\n"
 end""" onLoadCode True "indigo"
@@ -96,7 +96,7 @@ viewStructsAndTraits onLoadCode =
         , viewCodeBlock """struct Dog = (name: String)
 struct Cat = (name: String)
 
-let main => IO = do
+let main: IO = do
     let bello = Dog { name : "Bello" }
     let mauzi = Cat { name : "Mauzi" }
     println name bello
@@ -115,7 +115,7 @@ impl Animal for Cat = do
     makeNoise self = println "Meow"
 end
 
-let main => IO = do
+let main: IO = do
     makeNoise (Dog {})
     makeNoise (Cat {})
 end""" onLoadCode True "indigo"
@@ -173,11 +173,11 @@ viewGenerics onLoadCode =
 impl Number for Int
 impl Number for Float
 
-let add<N: Number> (a: N b: N) => N = do
+let add<N: Number> (a: N b: N): N = do
   a + b
 end
 
-let main => IO = do
+let main: IO = do
   println add 1, 2
 end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]

@@ -9,20 +9,15 @@ class XTermStdio extends Fd {
         this.term = term;
     }
 
-    fd_write(view8, iovs) {
-        let nwritten = 0;
-        for (let iovec of iovs) {
-            let buffer = view8.slice(iovec.buf, iovec.buf + iovec.buf_len);
-            this.term.write(buffer);
-            nwritten += iovec.buf_len;
-        }
-        return { ret: 0, nwritten };
+    fd_write(data) {
+        this.term.write(data);
+        return { ret: 0, nwritten: data.byteLength };
     }
 
-    fd_read(view8, iovs) {
+    fd_read(len) {
         // Don't actually read from terminal - just return 0 bytes read
         // This prevents cursor position queries from getting garbage responses
-        return { ret: 0, nread: 0 };
+        return { ret: 0, data: new Uint8Array(0) };
     }
 
     fd_close() {
