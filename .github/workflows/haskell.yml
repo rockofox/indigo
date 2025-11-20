@@ -53,14 +53,14 @@ jobs:
         run: |
           cd wasm_reactor
           wasm32-wasi-cabal update
-          wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer='base' -f '-ffi'
+          wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer -f '-ffi'
         shell: nix develop --command bash -e {0}
 
       - name: Prepare WASM release
         run: |
           mkdir -p indigo-wasm-latest
           cd wasm_reactor
-          INDIGO_WASM=$(wasm32-wasi-cabal list-bin indigo-wasm-reactor --allow-newer=base | tail -n 1)
+          INDIGO_WASM=$(wasm32-wasi-cabal list-bin indigo-wasm-reactor --allow-newer | tail -n 1)
           wizer --allow-wasi --wasm-bulk-memory true "$INDIGO_WASM" -o indigo-init.wasm
           cd ..
           cp wasm_reactor/indigo-init.wasm indigo-wasm-latest/indigo-init.wasm
