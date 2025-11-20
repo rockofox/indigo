@@ -305,7 +305,6 @@ ifExpr = do
     keyword "else"
     optional newline'
     elseExpr <- expr <?> "else expression"
-    optional newline'
     return $ If cond thenExpr elseExpr
 
 doBlock :: Parser Expr
@@ -516,13 +515,13 @@ trait = do
     name <- identifier <?> "trait name"
     methods <-
         ( do
-                symbol "="
-                keyword "do"
-                newline'
-                fds <- funcDec `sepEndBy` newline' <?> "trait methods"
-                keyword "end"
-                return fds
-            )
+            symbol "="
+            keyword "do"
+            newline'
+            fds <- funcDec `sepEndBy` newline' <?> "trait methods"
+            keyword "end"
+            return fds
+        )
             <|> return []
     return $ Trait name methods
 
@@ -534,13 +533,13 @@ impl = do
     for <- identifier <?> "impl for"
     methods <-
         ( do
-                symbol "="
-                symbol "do"
-                newline'
-                fds <- funcDef `sepEndBy` newline' <?> "impl methods"
-                symbol "end"
-                return fds
-            )
+            symbol "="
+            symbol "do"
+            newline'
+            fds <- funcDef `sepEndBy` newline' <?> "impl methods"
+            symbol "end"
+            return fds
+        )
             <|> return []
     return $ Impl name for methods
 
