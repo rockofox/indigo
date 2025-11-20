@@ -40,7 +40,6 @@ import VM
     , runVMVM
     , shouldExit
     )
-import Verifier (verifyProgram)
 
 -- TODO: Put this stuff into a seperate file
 runProgramRaw :: Ptr CChar -> Int -> IO ()
@@ -68,24 +67,20 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
     case p of
         Left err -> errorWithoutStackTrace $ errorBundlePretty err
         Right program -> do
-            verified <- verifyProgram "" (Data.Text.pack programStr) (exprs program)
-            case verified of
-                Left err -> errorWithoutStackTrace $ errorBundlePretty err
-                Right _ -> do
-                    xxx <-
-                        evalStateT (compileProgram program) (initCompilerState program) >>= \case
-                            Left instructions -> return instructions
-                            Right errors -> do
-                                compileFail "<input>" errors programStr
-                                errorWithoutStackTrace ""
-                    let xxxPoint = locateLabel xxx "main"
-                    vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
-                    let output' = BS.pack $ output $ ioBuffer vm
-                    BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
-                        outputPtr <- mallocBytes len
-                        poke outputPtrPtr outputPtr
-                        copyBytes outputPtr buf len
-                        pure len
+            xxx <-
+                evalStateT (compileProgram program) (initCompilerState program) >>= \case
+                    Left instructions -> return instructions
+                    Right errors -> do
+                        compileFail "<input>" errors programStr
+                        errorWithoutStackTrace ""
+            let xxxPoint = locateLabel xxx "main"
+            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
+            let output' = BS.pack $ output $ ioBuffer vm
+            BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
+                outputPtr <- mallocBytes len
+                poke outputPtrPtr outputPtr
+                copyBytes outputPtr buf len
+                pure len
 
 foreign export ccall mallocPtr :: IO (Ptr (Ptr a))
 
