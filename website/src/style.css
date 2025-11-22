@@ -323,8 +323,113 @@ xterm-display {
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
+    .container {
+        padding: 0 1rem;
+    }
+
+    .site-header {
+        padding: 0.75rem 0;
+    }
+
+    .header-content {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .logo {
+        font-size: 1.25rem;
+    }
+
+    .main-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+
+    .main-nav a {
+        margin-left: 0;
+        font-size: 0.9rem;
+    }
+
+    .hero {
+        padding: 3rem 0;
+    }
+
+    .hero h1 {
+        font-size: 2rem;
+    }
+
+    .subtitle {
+        font-size: 1.1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .hero-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .hero-buttons a {
+        text-align: center;
+    }
+
+    .features-section {
+        padding: 2rem 0;
+    }
+
+    .features-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+
+    .playground-section {
+        padding: 2rem 0;
+    }
+
+    .examples-nav {
+        flex-wrap: wrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .example-btn {
+        flex-shrink: 0;
+        font-size: 0.85rem;
+        padding: 0.4rem 0.8rem;
+    }
+
+    .playground-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto;
+        height: auto;
+        min-height: 400px;
+    }
+
+    .editor-pane {
+        grid-column: 1;
+        grid-row: 1;
+        border-right: none;
+        border-bottom: 1px solid var(--highlight-med);
+        min-height: 250px;
+    }
+
+    .controls-pane {
+        grid-column: 1;
+        grid-row: 2;
+        border-bottom: 1px solid var(--highlight-med);
+    }
+
+    .terminal-pane {
+        grid-column: 1;
+        grid-row: 3;
+        min-height: 200px;
+    }
+
     .docs-container {
         flex-direction: column;
+        padding: 1rem;
+        gap: 2rem;
     }
 
     .docs-sidebar {
@@ -334,6 +439,54 @@ xterm-display {
         border-bottom: 1px solid var(--highlight-med);
         padding-bottom: 2rem;
         margin-bottom: 2rem;
+        padding-right: 0;
+    }
+
+    .docs-content h1 {
+        font-size: 1.8rem;
+    }
+
+    .docs-content h2 {
+        font-size: 1.4rem;
+        margin-top: 2rem;
+    }
+
+    .site-footer {
+        padding: 1.5rem 0;
+    }
+}
+
+@media (max-width: 480px) {
+    .hero {
+        padding: 2rem 0;
+    }
+
+    .hero h1 {
+        font-size: 1.75rem;
+    }
+
+    .subtitle {
+        font-size: 1rem;
+    }
+
+    .playground-container {
+        min-height: 350px;
+    }
+
+    .editor-pane {
+        min-height: 200px;
+    }
+
+    .terminal-pane {
+        min-height: 150px;
+    }
+
+    .docs-content h1 {
+        font-size: 1.5rem;
+    }
+
+    .docs-content h2 {
+        font-size: 1.2rem;
     }
 }
 
