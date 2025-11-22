@@ -8,7 +8,7 @@ import Control.Monad.Loops (firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
 import Data.Bifunctor (second)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, groupBy, inits, intercalate)
+import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
 import Data.List.Split qualified
 import Data.Map qualified
 import Data.Maybe (fromJust, isJust, isNothing)
@@ -16,8 +16,6 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
-import Data.Void
-import Debug.Trace (trace, traceM, traceShowM)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -27,7 +25,7 @@ import Paths_indigo qualified
 import System.Directory (doesFileExist)
 import System.Environment
 import System.FilePath
-import Text.Megaparsec (ParseError, errorBundlePretty)
+import Text.Megaparsec (errorBundlePretty)
 import Util
 import VM
 import Prelude hiding (FilePath, lex)
@@ -143,9 +141,10 @@ compileProgram (Parser.Program expr) = do
     createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     errors' <- gets errors
+    let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) expr
     if null errors'
         then
-            return $ Left $ prelude' ++ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+            return $ Left $ prelude' ++ freePart ++ ([Jmp "main" | hasTopLevelLets]) ++ functions' ++ [Push $ DInt 0, Exit]
         else
             return $ Right errors'
 
@@ -332,6 +331,13 @@ typesEqual :: Parser.Type -> Parser.Type -> Bool
 typesEqual (Parser.StructT x) (Parser.StructT y) = x == y
 typesEqual x y = x == y
 
+extractPatternVars :: Parser.Expr -> [String]
+extractPatternVars (Parser.Var{varName}) = [varName]
+extractPatternVars (Parser.ListLit{listLitExprs}) = concatMap extractPatternVars listLitExprs
+extractPatternVars (Parser.ListPattern{listPatternExprs}) = concatMap extractPatternVars listPatternExprs
+extractPatternVars (Parser.StructLit{structLitFields}) = concatMap (\(_, e) -> extractPatternVars e) structLitFields
+extractPatternVars _ = []
+
 compilePatternMatch :: Parser.Expr -> String -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
 compilePatternMatch (Parser.Var{varName}) nextLabel _ = return [LStore varName]
 compilePatternMatch (Parser.IntLit{intValue = x}) nextLabel _ = do
@@ -367,17 +373,17 @@ compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedTyp
     let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listPatternExprs - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextLabel]
     case last listPatternExprs of
         Parser.ListLit{listLitExprs} -> do
-            elements' <- concatMapM (\p -> compilePatternMatch p nextLabel expectedType) (init listPatternExprs)
+            elements' <- mapM (\p -> compilePatternMatch p nextLabel expectedType) (init listPatternExprs)
             let paramsWithIndex = zip elements' [0 ..]
-            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
+            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
             l' <- compileExpr (Parser.ListLit{listLitExprs = listLitExprs}) expectedType
             let listThing = [Comment "List thing", Dup, Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextLabel]
             return $ lengthCheck ++ concat xToY ++ listThing
         _ -> do
-            elements' <- concatMapM (\p -> compilePatternMatch p nextLabel expectedType) listPatternExprs
+            elements' <- mapM (\p -> compilePatternMatch p nextLabel expectedType) listPatternExprs
             let paramsWithIndex = zip elements' [0 ..]
-            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
-            let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice, last elements']
+            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
+            let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ last elements'
             return $ lengthCheck ++ concat xToY ++ rest
 compilePatternMatch (Parser.StructLit{structLitName, structLitFields}) nextLabel expectedType = do
     let fields' =
@@ -430,9 +436,21 @@ compileExpr (Parser.UnaryMinus{unaryMinusExpr = Parser.FloatLit{floatValue = x}}
 compileExpr (Parser.UnaryMinus{unaryMinusExpr = Parser.IntLit{intValue = x}}) _ = return [Push $ DInt $ -fromInteger x]
 compileExpr (Parser.StringLit{stringValue = x}) _ = return [Push $ DString x]
 compileExpr (Parser.DoBlock{doBlockExprs = exprs}) expectedType = do
+    letsBefore <- gets lets
+    let existingVars = map (\l -> l.name) letsBefore
+    let shadowedVars = filter (`elem` existingVars) $ map (\case Parser.Let{letName} -> letName; _ -> "") $ filter (\case Parser.Let{} -> True; _ -> False) exprs
+    saveInstrs <-
+        mapM
+            ( \varName -> do
+                let tempName = "__shadow_" ++ varName
+                return [LLoad varName, LStore tempName]
+            )
+            shadowedVars
     let grouped = groupBy (\a b -> isFuncCall a && isFuncCall b) exprs
     let nestedSequence = concatMap (\case [] -> []; [x] -> if isFuncCall x then [Parser.FuncCall{funcName = "sequence", funcArgs = [x, Parser.FuncCall{funcName = "nop", funcArgs = [], funcPos = anyPosition}], funcPos = anyPosition}] else [x]; xs -> if all isFuncCall xs then [foldl1 (\a b -> Parser.FuncCall{funcName = "sequence", funcArgs = [a, b], funcPos = anyPosition}) xs] else xs) grouped
-    if length (filter isFuncCall exprs) == 1 then concatMapM (`compileExpr` expectedType) exprs else concatMapM (`compileExpr` expectedType) nestedSequence
+    bodyInstrs <- if length (filter isFuncCall exprs) == 1 then concatMapM (`compileExpr` expectedType) exprs else concatMapM (`compileExpr` expectedType) nestedSequence
+    let restoreInstrs = concatMap (\varName -> [LLoad ("__shadow_" ++ varName), LStore varName]) shadowedVars
+    return $ concat saveInstrs ++ bodyInstrs ++ restoreInstrs
   where
     isFuncCall :: Parser.Expr -> Bool
     isFuncCall (Parser.FuncCall{funcName}) = funcName `notElem` internalFunctions
@@ -602,6 +620,7 @@ compileExpr (Parser.Function{def = [Parser.FuncDef{body = Parser.StrictEval{stri
     return $ evaledExpr ++ [LStore name]
 compileExpr (Parser.Function{def = a, dec = b@Parser.FuncDec{..}}) _ =
     mapM_ (`compileExpr` last b.types) a >> compileExpr b (last b.types) >> return []
+compileExpr (Parser.StrictEval{strictEvalExpr = e}) expectedType = compileExpr e expectedType
 compileExpr (Parser.Flexible{flexibleExpr = a}) expectedType = compileExpr a expectedType >>= \a' -> return $ Meta "flex" : a'
 compileExpr (Parser.ListConcat{listConcatLhs = a, listConcatRhs = b}) expectedType = do
     a' <- compileExpr a expectedType
@@ -632,13 +651,26 @@ compileExpr (Parser.When{whenExpr = expr, whenBranches = branches, whenElse = el
 
     branchLabels <- mapM (\_ -> allocId >>= \x -> return $ "when_next" ++ show x) branches
 
+    let allPatternVars = nub $ concatMap (extractPatternVars . fst) branches
+    lets' <- gets lets
+    let existingVars = map (\l -> l.name) lets'
+    let varsToSave = filter (`elem` existingVars) allPatternVars
+    saveInstrs <-
+        mapM
+            ( \varName -> do
+                let tempName = "__shadow_" ++ varName
+                return [LLoad varName, LStore tempName]
+            )
+            varsToSave
+
     let branchPairs = zip branches branchLabels
     branchInstrs <-
         mapM
             ( \((pat, body), nextLabel) -> do
                 patternInstrs <- compilePatternMatch pat nextLabel expectedType
                 bodyInstrs <- compileExpr body expectedType
-                return (patternInstrs, bodyInstrs)
+                let restoreInstrs = concatMap (\varName -> [LLoad ("__shadow_" ++ varName), LStore varName]) varsToSave
+                return (patternInstrs, bodyInstrs, restoreInstrs)
             )
             branchPairs
 
@@ -649,13 +681,13 @@ compileExpr (Parser.When{whenExpr = expr, whenBranches = branches, whenElse = el
     let branchCode =
             concat $
                 zipWith
-                    ( \(patternInstrs, bodyInstrs) nextLabel ->
-                        patternInstrs ++ bodyInstrs ++ [Jmp endLabel, Label nextLabel]
+                    ( \(patternInstrs, bodyInstrs, restoreInstrs) nextLabel ->
+                        patternInstrs ++ bodyInstrs ++ restoreInstrs ++ [Jmp endLabel, Label nextLabel]
                     )
                     branchInstrs
                     branchLabels
 
-    return $ expr' ++ branchCode ++ elseInstrs ++ [Label endLabel]
+    return $ expr' ++ concat saveInstrs ++ branchCode ++ elseInstrs ++ [Label endLabel]
 compileExpr (Parser.If{ifCond, ifThen, ifElse}) expectedType = do
     cond' <- compileExpr ifCond expectedType
     then' <- compileExpr ifThen expectedType

@@ -798,9 +798,9 @@ runInstruction (LStore name) = do
 runInstruction (LLoad name) = do
     vm <- get
     let localsc = locals $ safeHead $ callStack vm
-    let local = lookup name localsc
+    let local = Data.List.find ((== name) . fst) localsc
     case local of
-        Just x -> stackPush x
+        Just (_, x) -> stackPush x
         Nothing -> error $ "Local not found: " ++ name
 -- List
 runInstruction (Concat 0) = stackPush $ DList []
@@ -935,33 +935,37 @@ runInstruction (Repeat n) = do
     vm <- get
     let inst = program vm V.! (pc vm - 1)
     replicateM_ (n - 1) $ runInstruction inst
-runInstruction TypeEq =
-    stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of
-        (DInt _, DInt _) -> True
-        (DFloat _, DFloat _) -> True
-        (DString _, DString _) -> True
-        (DBool _, DBool _) -> True
-        (DList _, DList _) -> True
-        (DNone, DNone) -> True
-        (DChar _, DChar _) -> True
-        (DFuncRef{}, DFuncRef{}) -> True
-        (DMap a, DMap b) -> do
-            not (isJust (Data.Map.lookup "__name" a) && isJust (Data.Map.lookup "__name" b)) || (Data.Map.lookup "__name" a == Data.Map.lookup "__name" b)
-        (DMap m, DTypeQuery tq) -> do
-            let name = Data.Map.lookup "__name" m
-            let traits = Data.Map.lookup "__traits" m
-            case (name, traits) of
-                (Just (DString n), Just (DList ts)) -> n == tq || DString tq `elem` ts
-                _ -> False
-        (DInt _, DTypeQuery s) -> s == "Int"
-        (DFloat _, DTypeQuery s) -> s == "Float"
-        (DString _, DTypeQuery s) -> s == "String"
-        (DBool _, DTypeQuery s) -> s == "Bool"
-        (DList _, DTypeQuery s) -> s == "List"
-        (DNone, DTypeQuery s) -> s == "None"
-        (DChar _, DTypeQuery s) -> s == "Char"
-        (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
-        _ -> False
+runInstruction TypeEq = do
+    popped <- stackPopN 2
+    case popped of
+        [y, x] -> stackPush $ DBool $ case (x, y) of
+            (DInt _, DInt _) -> True
+            (DFloat _, DFloat _) -> True
+            (DString _, DString _) -> True
+            (DBool _, DBool _) -> True
+            (DList _, DList _) -> True
+            (DNone, DNone) -> True
+            (DChar _, DChar _) -> True
+            (DFuncRef{}, DFuncRef{}) -> True
+            (DMap a, DMap b) -> do
+                not (isJust (Data.Map.lookup "__name" a) && isJust (Data.Map.lookup "__name" b)) || (Data.Map.lookup "__name" a == Data.Map.lookup "__name" b)
+            (DMap m, DTypeQuery tq) -> do
+                let name = Data.Map.lookup "__name" m
+                let traits = Data.Map.lookup "__traits" m
+                case (name, traits) of
+                    (Just (DString n), Just (DList ts)) -> n == tq || DString tq `elem` ts
+                    _ -> False
+            (DInt _, DTypeQuery s) -> s == "Int"
+            (DFloat _, DTypeQuery s) -> s == "Float"
+            (DString _, DTypeQuery s) -> s == "String"
+            (DBool _, DTypeQuery s) -> s == "Bool"
+            (DList _, DTypeQuery s) -> s == "List"
+            (DNone, DTypeQuery s) -> s == "None"
+            (DChar _, DTypeQuery s) -> s == "Char"
+            (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
+            _ -> False
+        _ -> do
+            stackPush $ DBool False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList . reverse
 runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
 runInstruction (Mov n dat) = do

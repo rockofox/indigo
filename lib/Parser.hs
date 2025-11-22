@@ -600,6 +600,7 @@ term =
         , impl
         , Parser.trait
         , doBlock
+        , try letExpr
         , try combinedFunc
         , try funcDef
         , try funcDec

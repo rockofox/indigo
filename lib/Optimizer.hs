@@ -5,7 +5,10 @@ import VM
 treeShake :: [Instruction] -> [Instruction]
 treeShake prog = do
     let grouped = groupByLabel prog
-    let mainProg = dropWhile (\case (Label l : _) -> labelBaseName l /= "__sep"; _ -> False) grouped
+    let (beforeSep, afterSep) = break (\case (Label l : _) -> labelBaseName l == "__sep"; _ -> False) grouped
+    let mainProg = case afterSep of
+            [] -> grouped
+            (_ : rest) -> beforeSep ++ rest
     let usedByDeps = shake mainProg grouped
     concat usedByDeps
   where
@@ -13,14 +16,18 @@ treeShake prog = do
     shakeOnce x =
         filter
             ( \z -> do
-                let label = head z
-                hasUsage label (concat (filter (\w -> head w /= label) x))
+                case head z of
+                    Label _ -> do
+                        let label = head z
+                        hasUsage label (concat (filter (\w -> head w /= label) x))
+                    _ -> True
             )
     shake x y = do
         let x' = shakeOnce x y
         if x' == x then x else shake x' y
     hasUsage :: Instruction -> [Instruction] -> Bool
     hasUsage (Label "main") = const True
+    hasUsage (Label "__sep") = const True
     hasUsage (Label ln) = do
         any
             ( \case
@@ -58,7 +65,15 @@ treeShake prog = do
                         )
                         xs
              in (x : group) : groupByLabel rest
-        _ -> error "groupByLabel: not implemented"
+        _ ->
+            let (group, rest) =
+                    span
+                        ( \case
+                            Label _ -> False
+                            _ -> True
+                        )
+                        (x : xs)
+             in group : groupByLabel rest
     groupByLabel [] = []
 
     labelBaseName :: String -> String

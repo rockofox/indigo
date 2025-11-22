@@ -8,6 +8,7 @@ import BytecodeCompiler
     )
 import Control.Monad.State (evalStateT)
 import Data.Functor
+import Data.List (elemIndex)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -26,6 +27,7 @@ import Util (whenErr)
 import VM
     ( IOBuffer (output)
     , IOMode (VMBuffer)
+    , Instruction (Label)
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, ioBuffer, ioMode, pc)
     , initVM
@@ -49,7 +51,16 @@ compileAndRun prog = do
                 Left bytecode -> pure (optimize bytecode)
                 Right err -> error $ renderCompilerErrors err prog
             let mainLabel = locateLabel optimizedProgram "main"
-            vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = mainLabel, breakpoints = [], callStack = [StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
+            let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) exprs
+            let startPc =
+                    if hasTopLevelLets
+                        then do
+                            let sepIndex = elemIndex (VM.Label "__sep") optimizedProgram
+                            case sepIndex of
+                                Just sepPc -> sepPc + 1
+                                Nothing -> 0
+                        else mainLabel
+            vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
             pure $ output $ ioBuffer vm
 
 spec = do
@@ -650,3 +661,75 @@ spec = do
                     end
                 |]
                 `shouldReturn` "nested match\n"
+    describe "Variable shadowing" $ do
+        it "Pattern matching variables shadow outer let bindings" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 5
+                        let list = [1, 2, 3]
+                        when list of
+                            (x:y:rest) -> do
+                                println x
+                                println y
+                            end
+                            else -> println "no match"
+                        end
+                    end
+                |]
+                `shouldReturn` "1\n2\n"
+        it "Function parameters shadow outer variables" $ do
+            compileAndRun
+                [r|
+                    let x = 10
+                    let f (x: Int) : Int = x + 1
+                    let main : IO = println (f 5)
+                |]
+                `shouldReturn` "6\n"
+        it "Nested let bindings shadow outer variables" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 1
+                        let y = do
+                            let x = 2
+                            x
+                        end
+                        println x
+                        println y
+                    end
+                |]
+                `shouldReturn` "1\n2\n"
+        it "Shadowing is properly scoped and doesn't leak" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 1
+                        when [10, 20] of
+                            (x:y:rest) -> do
+                                println x
+                            end
+                            else -> println "no match"
+                        end
+                        println x
+                    end
+                |]
+                `shouldReturn` "10\n1\n"
+        it "Multiple levels of shadowing in pattern matching" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 100
+                        let y = 200
+                        when [1, 2, 3] of
+                            (x:y:rest) -> do
+                                println x
+                                println y
+                            end
+                            else -> println "no match"
+                        end
+                        println x
+                        println y
+                    end
+                |]
+                `shouldReturn` "1\n2\n100\n200\n"
