@@ -618,8 +618,11 @@ compileExpr (Parser.Function{def = [Parser.FuncDef{body = Parser.StrictEval{stri
     let name = dec.name
     evaledExpr <- compileExpr e expectedType
     return $ evaledExpr ++ [LStore name]
-compileExpr (Parser.Function{def = a, dec = b@Parser.FuncDec{..}}) _ =
-    mapM_ (`compileExpr` last b.types) a >> compileExpr b (last b.types) >> return []
+compileExpr (Parser.Function{def = a, dec = b@Parser.FuncDec{..}}) _ = do
+    curCon <- gets currentContext
+    let mangledName = if curCon /= "__outside" then curCon ++ "@" ++ b.name else b.name
+    let mangledDec = b{Parser.name = mangledName}
+    compileExpr mangledDec (last b.types) >> mapM_ (`compileExpr` last b.types) a >> return []
 compileExpr (Parser.StrictEval{strictEvalExpr = e}) expectedType = compileExpr e expectedType
 compileExpr (Parser.Flexible{flexibleExpr = a}) expectedType = compileExpr a expectedType >>= \a' -> return $ Meta "flex" : a'
 compileExpr (Parser.ListConcat{listConcatLhs = a, listConcatRhs = b}) expectedType = do
