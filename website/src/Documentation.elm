@@ -1,12 +1,13 @@
 module Documentation exposing (view, Topic(..))
 
-import Html exposing (Html, div, h1, h2, h3, p, pre, code, section, text, a, button, node)
+import Html exposing (Html, div, h2, h3, p, pre, code, section, text, a, button, node)
 import Html.Attributes exposing (class, id, href, attribute)
 import Html.Events exposing (onClick)
 
 type Topic
     = FunctionsAndBindings
     | Comments
+    | PatternMatching
     | StructsAndTraits
     | FFI
     | Generics
@@ -19,6 +20,7 @@ view currentTopic onLoadCode =
             [ case currentTopic of
                 FunctionsAndBindings -> viewFunctionsAndBindings onLoadCode
                 Comments -> viewComments onLoadCode
+                PatternMatching -> viewPatternMatching onLoadCode
                 StructsAndTraits -> viewStructsAndTraits onLoadCode
                 FFI -> viewFFI onLoadCode
                 Generics -> viewGenerics onLoadCode
@@ -31,6 +33,7 @@ viewSidebar =
         [ h3 [] [ text "Language Basics" ]
         , sidebarLink "Functions & Bindings" "/docs/functions-and-bindings"
         , sidebarLink "Comments" "/docs/comments"
+        , sidebarLink "Pattern Matching" "/docs/pattern-matching"
         , sidebarLink "Structs & Traits" "/docs/structs-and-traits"
         , h3 [] [ text "Advanced Features" ]
         , sidebarLink "FFI" "/docs/ffi"
@@ -162,6 +165,74 @@ let main = do
     greet "Rocko"
 end""" onLoadCode False "indigo"
         , p [] [ text "Indigo can interact with dynamic libraries by declaring their function in an external block. The runtime will look for the specified library (+ the appropriate extension for dynamic libraries on your OS) in your OS's search path and ./" ]
+        ]
+
+viewPatternMatching : (String -> msg) -> Html msg
+viewPatternMatching onLoadCode =
+    section [ id "pattern-matching" ]
+        [ h2 [] [ text "Pattern Matching" ]
+        , p [] [ text "Indigo provides pattern matching through the when expression, which allows you to match values against patterns and execute different code based on the match." ]
+        , viewCodeBlock """let x = 5
+when x of
+  1 -> println("x is one")
+  2 -> println("x is two")
+  3 -> println("x is three")
+  else -> println("x is something else")
+end""" onLoadCode True "indigo"
+        , p [] [ text "The when expression starts with when followed by the expression to match, then of, followed by pattern branches. Each branch consists of a pattern, an arrow ->, and the expression to execute if the pattern matches. The else branch is optional and serves as a default case." ]
+        , h3 [] [ text "List Pattern Matching" ]
+        , p [] [ text "You can match against lists using various patterns:" ]
+        , viewCodeBlock """let list = [1, 2, 3]
+when list of
+  [] -> println("empty list")
+  [x] -> println("single element: " ++ show(x))
+  [x, y] -> println("two elements: " ++ show(x) ++ ", " ++ show(y))
+  (x:y:rest) -> println("three or more elements, first two: " ++ show(x) ++ ", " ++ show(y))
+  else -> println("unexpected list")
+end""" onLoadCode True "indigo"
+        , p [] [ text "List patterns include: empty list [], single element [x], multiple elements [x, y], and cons patterns (x:y:rest) for matching the head and tail of a list." ]
+        , h3 [] [ text "String Pattern Matching" ]
+        , p [] [ text "Since strings are lists of characters, you can use list patterns to match strings:" ]
+        , viewCodeBlock """let str = "hello"
+when str of
+  [] -> println("empty string")
+  ['h', 'e', 'l', 'l', 'o'] -> println("matched 'hello'")
+  (c:rest) -> println("starts with: " ++ show(c))
+  else -> println("other string")
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Boolean Matching" ]
+        , viewCodeBlock """let b = True
+when b of
+  True -> println("b is true")
+  False -> println("b is false")
+  else -> println("b is something else")
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Function Pattern Matching" ]
+        , p [] [ text "Functions can also pattern match directly on their arguments by defining multiple function clauses with different patterns:" ]
+        , viewCodeBlock """let fib (0: Int) : Int = 0
+let fib (1: Int) : Int = 1
+let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
+
+let main : IO = do
+  println fib 12
+end""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the fib function has three definitions: one for when the argument is 0, one for when it's 1, and one for any other integer. The compiler will try to match the arguments against these patterns in order." ]
+        , p [] [ text "Function pattern matching also works with list patterns:" ]
+        , viewCodeBlock """let head ([]: [Any]) = 0
+let head ((x:xs): [Any]) = x
+
+let main : IO = do
+  println head [1, 2, 3]
+end""" onLoadCode True "indigo"
+        , p [] [ text "This head function matches the empty list pattern first, then matches any non-empty list using a cons pattern, binding the first element to x and the rest to xs." ]
+        , h3 [] [ text "Using when as a Function Body" ]
+        , p [] [ text "The when expression can be used directly as a function body:" ]
+        , viewCodeBlock """let main = when 5 of
+  1 -> println("one")
+  5 -> println("five")
+  else -> println("other")
+end""" onLoadCode True "indigo"
+        , p [] [ text "This allows for concise pattern matching in function definitions." ]
         ]
 
 viewGenerics : (String -> msg) -> Html msg

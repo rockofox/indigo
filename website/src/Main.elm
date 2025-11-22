@@ -123,6 +123,7 @@ routeParser =
         , map PlaygroundRoute (s "playground")
         , map (DocsRoute Documentation.FunctionsAndBindings) (s "docs" </> s "functions-and-bindings")
         , map (DocsRoute Documentation.Comments) (s "docs" </> s "comments")
+        , map (DocsRoute Documentation.PatternMatching) (s "docs" </> s "pattern-matching")
         , map (DocsRoute Documentation.StructsAndTraits) (s "docs" </> s "structs-and-traits")
         , map (DocsRoute Documentation.FFI) (s "docs" </> s "ffi")
         , map (DocsRoute Documentation.Generics) (s "docs" </> s "generics")
@@ -193,6 +194,9 @@ update msg model =
 
                         Documentation.Comments ->
                             "/docs/comments"
+
+                        Documentation.PatternMatching ->
+                            "/docs/pattern-matching"
 
                         Documentation.StructsAndTraits ->
                             "/docs/structs-and-traits"
