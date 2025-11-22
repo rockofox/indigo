@@ -1,0 +1,39 @@
+let show (x: Any): String = x as String
+
+let main = do
+  # Simple value matching
+  let x = 5
+  when x of
+    1 -> println("x is one")
+    2 -> println("x is two")
+    3 -> println("x is three")
+    else -> println("x is something else")
+  end
+  
+  # List pattern matching
+  let list = [1, 2, 3]
+  when list of
+    [] -> println("empty list")
+    [x] -> println("single element: " ++ show(x))
+    [x, y] -> println("two elements: " ++ show(x) ++ ", " ++ show(y))
+    (x:y:rest) -> println("three or more elements, first two: " ++ show(x) ++ ", " ++ show(y))
+    else -> println("unexpected list")
+  end
+  
+  # String pattern matching (strings are lists of chars)
+  let str = "hello"
+  when str of
+    [] -> println("empty string")
+    ['h', 'e', 'l', 'l', 'o'] -> println("matched 'hello'")
+    (c:rest) -> println("starts with: " ++ show(c))
+    else -> println("other string")
+  end
+  
+  # Boolean matching
+  let b = True
+  when b of
+    True -> println("b is true")
+    False -> println("b is false")
+    else -> println("b is something else")
+  end
+end

@@ -514,3 +514,139 @@ spec = do
                     let main : IO = bottles 3
                 |]
                 `shouldReturn` "3 bottles of beer on the wall, 3 bottles of beer.\nTake one down and pass it around, 2 bottles of beer on the wall.\n\n2 bottles of beer on the wall, 2 bottles of beer.\nTake one down and pass it around, 1 bottles of beer on the wall.\n\n1 bottles of beer on the wall, 1 bottles of beer.\nTake one down and pass it around, 0 bottles of beer on the wall.\n\nNo more bottles of beer on the wall, no more bottles of beer.\nGo to the store and buy some more, 99 bottles of beer on the wall.\n"
+    describe "when statements" $ do
+        it "Can match simple integer values" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 5
+                        when x of
+                            1 -> println "one"
+                            2 -> println "two"
+                            5 -> println "five"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "five\n"
+        it "Can match boolean values" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let b = True
+                        when b of
+                            True -> println "true"
+                            False -> println "false"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "true\n"
+        it "Can match string values" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let s = "hello"
+                        when s of
+                            "hello" -> println "matched hello"
+                            "world" -> println "matched world"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "matched hello\n"
+        it "Can match empty list" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let list = []
+                        when list of
+                            [] -> println "empty"
+                            (x:xs) -> println "not empty"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "empty\n"
+        it "Can match list with single element" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let list = [1]
+                        when list of
+                            [] -> println "empty"
+                            [x] -> println "single"
+                            (x:xs) -> println "cons"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "single\n"
+        it "Can match list with multiple elements" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let list = [1, 2, 3]
+                        when list of
+                            [] -> println "empty"
+                            [x] -> println "single"
+                            [x, y] -> println "two"
+                            (x:y:rest) -> println "three or more"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "three or more\n"
+        it "Can match string as list of chars" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let str = "hello"
+                        when str of
+                            [] -> println "empty"
+                            ['h', 'e', 'l', 'l', 'o'] -> println "matched hello"
+                            (c:rest) -> println "starts with char"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "matched hello\n"
+        it "Can use when as function body" $ do
+            compileAndRun
+                [r|
+                    let main : IO = when 5 of
+                        1 -> println "one"
+                        5 -> println "five"
+                        else -> println "other"
+                    end
+                |]
+                `shouldReturn` "five\n"
+        it "Can use else clause" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 99
+                        when x of
+                            1 -> println "one"
+                            2 -> println "two"
+                            else -> println "other"
+                        end
+                    end
+                |]
+                `shouldReturn` "other\n"
+        it "Can handle nested when statements" $ do
+            compileAndRun
+                [r|
+                    let main : IO = do
+                        let x = 1
+                        let y = 2
+                        when x of
+                            1 -> when y of
+                                2 -> println "nested match"
+                                else -> println "inner else"
+                            end
+                            else -> println "outer else"
+                        end
+                    end
+                |]
+                `shouldReturn` "nested match\n"

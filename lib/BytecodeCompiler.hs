@@ -332,6 +332,83 @@ typesEqual :: Parser.Type -> Parser.Type -> Bool
 typesEqual (Parser.StructT x) (Parser.StructT y) = x == y
 typesEqual x y = x == y
 
+compilePatternMatch :: Parser.Expr -> String -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
+compilePatternMatch (Parser.Var{varName}) nextLabel _ = return [LStore varName]
+compilePatternMatch (Parser.IntLit{intValue = x}) nextLabel _ = do
+    return [Dup, Push $ DInt $ fromIntegral x, Eq, Jf nextLabel, Pop]
+compilePatternMatch (Parser.BoolLit{boolValue = b}) nextLabel _ = do
+    return [Dup, Push $ DBool b, Eq, Jf nextLabel, Pop]
+compilePatternMatch (Parser.StringLit{stringValue = s}) nextLabel _ = do
+    return [Dup, Push $ DString s, Eq, Jf nextLabel, Pop]
+compilePatternMatch (Parser.CharLit{charValue = c}) nextLabel _ = do
+    return [Dup, Push $ DChar c, Eq, Jf nextLabel, Pop]
+compilePatternMatch lex@(Parser.ListLit{listLitExprs}) nextLabel expectedType = do
+    if null listLitExprs
+        then return [Dup, Push $ DList [], Eq, Jf nextLabel, Pop]
+        else do
+            -- Check if all elements are variables (for binding) or if we need to match literals
+            let allVars = all (\case Parser.Var{} -> True; _ -> False) listLitExprs
+            if allVars
+                then do
+                    -- Pattern like [x, y] - bind variables
+                    let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listLitExprs, Eq, Jf nextLabel]
+                    let bindings =
+                            concatMap
+                                ( \(Parser.Var{varName}, index) ->
+                                    [Dup, Push $ DInt index, Index, LStore varName]
+                                )
+                                (zip listLitExprs [0 ..])
+                    return $ lengthCheck ++ bindings ++ [Pop]
+                else do
+                    -- Pattern like [1, 2] - match literals
+                    lex' <- compileExpr lex expectedType
+                    return $ lex' ++ [Eq, Jf nextLabel]
+compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedType = do
+    let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listPatternExprs - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextLabel]
+    case last listPatternExprs of
+        Parser.ListLit{listLitExprs} -> do
+            elements' <- concatMapM (\p -> compilePatternMatch p nextLabel expectedType) (init listPatternExprs)
+            let paramsWithIndex = zip elements' [0 ..]
+            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
+            l' <- compileExpr (Parser.ListLit{listLitExprs = listLitExprs}) expectedType
+            let listThing = [Comment "List thing", Dup, Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextLabel]
+            return $ lengthCheck ++ concat xToY ++ listThing
+        _ -> do
+            elements' <- concatMapM (\p -> compilePatternMatch p nextLabel expectedType) listPatternExprs
+            let paramsWithIndex = zip elements' [0 ..]
+            let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
+            let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice, last elements']
+            return $ lengthCheck ++ concat xToY ++ rest
+compilePatternMatch (Parser.StructLit{structLitName, structLitFields}) nextLabel expectedType = do
+    let fields' =
+            concatMap
+                ( \case
+                    (sName, Parser.Var{varName = tName}) -> [(sName, tName)]
+                    _ -> []
+                )
+                structLitFields
+    let fieldMappings = concatMap (\(sName, tName) -> [Dup, Access sName, LStore tName]) fields'
+    let fields'' =
+            concatMap
+                ( \case
+                    (_, Parser.Var{}) -> []
+                    (sName, x) -> [(sName, x)]
+                )
+                structLitFields
+    fieldChecks <-
+        concatMapM
+            ( \(sName, x) -> do
+                let a = [Dup, Access sName]
+                b <- compileExpr x expectedType
+                return $ a ++ b ++ [Eq, Jf nextLabel]
+            )
+            fields''
+    return $ [Dup, Push $ DTypeQuery structLitName, TypeEq, Jf nextLabel] ++ fieldMappings ++ ([Pop | null fieldChecks]) ++ fieldChecks
+compilePatternMatch Parser.Placeholder _ _ = return []
+compilePatternMatch x nextLabel expectedType = do
+    x' <- compileExpr x expectedType
+    return $ x' ++ [Eq, Jf nextLabel]
+
 compileExpr :: Parser.Expr -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
 compileExpr (Parser.Add{addLhs = x, addRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "+", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
 compileExpr (Parser.Sub{subLhs = x, subRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "-", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
@@ -487,70 +564,18 @@ compileExpr (Parser.FuncDef{name = origName, args, body}) expectedType = do
 
     body' <- compileExpr body (last $ Parser.types funcDec)
 
-    args' <- concatMapM (`compileParameter` name) (reverse (filter (/= Parser.Placeholder) args))
+    nextFunId <- gets lastLabel
+    args' <- concatMapM (`compileParameter` (name, funame, nextFunId)) (reverse (filter (/= Parser.Placeholder) args))
     let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
     modify (\s -> s{currentContext = previousContext})
     return [] -- Function definitions get appended at the last stage of compilation
   where
-    compileParameter :: Parser.Expr -> String -> StateT (CompilerState a) IO [Instruction]
-    compileParameter (Parser.Var{varName}) _ = return [LStore varName]
-    compileParameter lex@(Parser.ListLit{listLitExprs}) funcName = do
-        nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        if null listLitExprs
-            then return [Dup, Push $ DList [], Eq, Jf nextFunName, Pop]
-            else do
-                lex' <- compileExpr lex expectedType
-                return $ lex' ++ [Eq, Jf nextFunName] -- TODO: Check if this works
-    compileParameter (Parser.ListPattern{listPatternExprs}) n = do
-        nextFunName <- ((n ++ "#") ++) . show . (+ 1) <$> allocId
-        let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listPatternExprs - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextFunName]
-        case last listPatternExprs of
-            Parser.ListLit{listLitExprs} -> do
-                elements' <- concatMapM (`compileParameter` n) (init listPatternExprs)
-                let paramsWithIndex = zip elements' [0 ..]
-                let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
-                l' <- compileExpr (Parser.ListLit{listLitExprs = listLitExprs}) expectedType
-                let listThing = [Comment "List thing", Dup, Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextFunName]
-                return $ lengthCheck ++ concat xToY ++ listThing
-            _ -> do
-                elements' <- concatMapM (`compileParameter` n) listPatternExprs
-                let paramsWithIndex = zip elements' [0 ..]
-                let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index, x]) paramsWithIndex
-                let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice, last elements']
-                return $ lengthCheck ++ concat xToY ++ rest
-    compileParameter (Parser.StructLit{structLitName, structLitFields}) funcName = do
-        nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        let fields' =
-                concatMap
-                    ( \case
-                        (sName, Parser.Var{varName = tName}) -> [(sName, tName)]
-                        _ -> []
-                    )
-                    structLitFields
-        let fieldMappings = concatMap (\(sName, tName) -> [Dup, Access sName, LStore tName]) fields'
-        let fields'' =
-                concatMap
-                    ( \case
-                        (_, Parser.Var{}) -> []
-                        (sName, x) -> [(sName, x)]
-                    )
-                    structLitFields
-        fieldChecks <-
-            concatMapM
-                ( \(sName, x) -> do
-                    let a = [Dup, Access sName]
-                    b <- compileExpr x expectedType
-                    return $ a ++ b ++ [Eq, Jf nextFunName]
-                )
-                fields''
-        return $ [Dup, Push $ DTypeQuery structLitName, TypeEq, Jf nextFunName] ++ fieldMappings ++ ([Pop | null fieldChecks]) ++ fieldChecks
-    compileParameter Parser.Placeholder _ = return []
-    compileParameter x funcName = do
-        nextFunName <- ((funcName ++ "#") ++) . show . (+ 1) <$> allocId
-        x' <- compileExpr x expectedType
-        return $ x' ++ [Eq, Jf nextFunName]
+    compileParameter :: Parser.Expr -> (String, String, Int) -> StateT (CompilerState a) IO [Instruction]
+    compileParameter pat (funcName, currentFuname, nextFunId) = do
+        let nextFunName = funcName ++ "#" ++ show nextFunId
+        compilePatternMatch pat nextFunName expectedType
 compileExpr (Parser.ParenApply{parenApplyExpr, parenApplyArgs}) expectedType = do
     fun <- compileExpr parenApplyExpr expectedType
     args <- concatMapM (`compileExpr` expectedType) parenApplyArgs
@@ -601,6 +626,36 @@ compileExpr (Parser.ListAdd{listAddLhs = a, listAddRhs = b}) expectedType = do
 compileExpr (Parser.ListLit{listLitExprs}) expectedType = do
     elems <- concatMapM (`compileExpr` expectedType) listLitExprs
     return $ elems ++ [PackList $ length listLitExprs]
+compileExpr (Parser.When{whenExpr = expr, whenBranches = branches, whenElse = else_}) expectedType = do
+    expr' <- compileExpr expr expectedType
+    endLabel <- allocId >>= \x -> return $ "when_end" ++ show x
+
+    branchLabels <- mapM (\_ -> allocId >>= \x -> return $ "when_next" ++ show x) branches
+
+    let branchPairs = zip branches branchLabels
+    branchInstrs <-
+        mapM
+            ( \((pat, body), nextLabel) -> do
+                patternInstrs <- compilePatternMatch pat nextLabel expectedType
+                bodyInstrs <- compileExpr body expectedType
+                return (patternInstrs, bodyInstrs)
+            )
+            branchPairs
+
+    elseInstrs <- case else_ of
+        Just elseExpr -> compileExpr elseExpr expectedType
+        Nothing -> return []
+
+    let branchCode =
+            concat $
+                zipWith
+                    ( \(patternInstrs, bodyInstrs) nextLabel ->
+                        patternInstrs ++ bodyInstrs ++ [Jmp endLabel, Label nextLabel]
+                    )
+                    branchInstrs
+                    branchLabels
+
+    return $ expr' ++ branchCode ++ elseInstrs ++ [Label endLabel]
 compileExpr (Parser.If{ifCond, ifThen, ifElse}) expectedType = do
     cond' <- compileExpr ifCond expectedType
     then' <- compileExpr ifThen expectedType

@@ -29,6 +29,7 @@ cabal.project.local~
 result
 *.tix
 examples/scratch.in
+.pre-commit-config.yaml
 
 # Website 
 node_modules/

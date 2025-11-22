@@ -1,0 +1,5 @@
+let main = when 5 of
+  1 -> println("one")
+  5 -> println("five")
+  else -> println("other")
+end

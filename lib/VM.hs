@@ -760,7 +760,15 @@ runInstruction Ret = do
     -- get >>= \vm -> traceM $ show (stack vm)
     modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
 -- Comparison
-runInstruction Eq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x == y
+runInstruction Eq =
+    stackPopN 2 >>= \case
+        [y, x] -> do
+            let result = case (x, y) of
+                    (DString s, DList l) -> s == map (\(DChar c) -> c) l && all (\case DChar _ -> True; _ -> False) l
+                    (DList l, DString s) -> map (\(DChar c) -> c) l == s && all (\case DChar _ -> True; _ -> False) l
+                    _ -> x == y
+            stackPush $ DBool result
+        _ -> error "Eq: expected 2 values on stack"
 runInstruction Neq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x /= y
 runInstruction Lt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x < y
 runInstruction Gt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x > y
@@ -967,7 +975,7 @@ runInstruction LoadSideStack = modify $ \vm -> vm{stack = if null $ sideStack vm
 runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
 runInstruction (ListAdd n) = do
     stackPopN n >>= \x -> do
-        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> (map DChar string); el -> [el]) x
+        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> map DChar string; el -> [el]) x
         stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 

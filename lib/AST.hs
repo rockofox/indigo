@@ -1,6 +1,7 @@
 module AST where
 
 import Data.Binary qualified
+import Data.Maybe (maybeToList)
 import GHC.Generics (Generic)
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
@@ -61,6 +62,7 @@ data Expr
     | External {externalName :: String, externalArgs :: [Expr]}
     | CharLit {charValue :: Char}
     | ParenApply {parenApplyExpr :: Expr, parenApplyArgs :: [Expr], parenApplyPos :: Position}
+    | When {whenExpr :: Expr, whenBranches :: [(Expr, Expr)], whenElse :: Maybe Expr}
     deriving
         ( Show
         , Generic
@@ -123,6 +125,7 @@ children (CharLit _) = []
 children (DoubleLit _) = []
 children (ParenApply a b _) = a : b
 children (ListAdd a b) = [a, b]
+children (When expr branches else_) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -250,6 +253,7 @@ typeOf (CharLit _) = StructT "Char"
 typeOf (DoubleLit _) = StructT "Double"
 typeOf (ParenApply a _ _) = typeOf a
 typeOf (ListAdd x _) = typeOf x
+typeOf (When _ branches else_) = if null branches then maybe Any typeOf else_ else typeOf (snd $ head branches)
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True

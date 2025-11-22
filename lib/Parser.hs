@@ -172,7 +172,7 @@ keyword :: Text -> Parser ()
 keyword w = (lexeme . try) (string w *> notFollowedBy alphaNumChar)
 
 rws :: [String]
-rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as"]
+rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of"]
 
 identifier :: Parser String
 identifier = do
@@ -256,7 +256,7 @@ funcDec = do
     return $ FuncDec name argTypes generics
 
 defArg :: Parser Expr
-defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer <|> StringLit <$> stringLit
+defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer <|> StringLit <$> stringLit <|> (symbol "True" >> return (BoolLit True)) <|> (symbol "False" >> return (BoolLit False))
 
 funcDef :: Parser Expr
 funcDef = do
@@ -293,6 +293,27 @@ letExpr = do
     state <- get
     put state{validLets = name : validLets state}
     return $ Let name value
+
+whenExprParser :: Parser Expr
+whenExprParser = do
+    keyword "when"
+    whenExpr' <- expr <?> "when expression"
+    keyword "of"
+    newline'
+    branches <- many $ do
+        pat <- defArg <?> "pattern"
+        symbol "->"
+        body <- expr <?> "branch body"
+        newline'
+        return (pat, body)
+    else_ <- optional $ do
+        keyword "else"
+        symbol "->"
+        elseExpr <- expr <?> "else expression"
+        newline'
+        return elseExpr
+    keyword "end"
+    return $ When whenExpr' branches else_
 
 ifExpr :: Parser Expr
 ifExpr = do
@@ -587,6 +608,7 @@ term =
         , array
         , try funcCall
         , try arrayAccess
+        , try whenExprParser
         , ifExpr
         , var
         ]
