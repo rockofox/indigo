@@ -39,7 +39,8 @@ import Verifier
 data CmdOptions = Options
     { input :: Maybe FilePath
     , output :: Maybe FilePath
-    , debug :: Bool
+    , debugAST :: Bool
+    , debugBytecode :: Bool
     , verbose :: Bool
     , emitBytecode :: Bool
     , runBytecode :: Bool
@@ -63,9 +64,13 @@ optionsParser =
                 )
             )
         <*> switch
-            ( long "debug"
+            ( long "debug-ast"
+                <> help "Output AST for debugging"
+            )
+        <*> switch
+            ( long "debug-bytecode"
                 <> short 'd'
-                <> help "Enable debug mode"
+                <> help "Output bytecode for debugging"
             )
         <*> switch (long "verbose" <> short 'v' <> help "Enable verbose mode (deprecated/broken)")
         <*> switch (long "emit-bytecode" <> short 'b' <> help "Emit bytecode")
@@ -127,7 +132,7 @@ parseNoVerify name input compilerFlags = return $ do
 
 main :: IO ()
 main = do
-    Options input output debug verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
+    Options input output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -153,12 +158,12 @@ main = do
                 expr <- case rprog of
                     Left (err, expr) -> do
                         case expr of
-                            Just expr -> when debug $ putStrLn $ prettyPrintProgram expr
+                            Just expr -> when debugAST $ putStrLn $ prettyPrintProgram expr
                             Nothing -> return ()
                         errorWithoutStackTrace $ "Parse error: " ++ errorBundlePretty err
                     Right expr -> return expr
 
-                when debug $ putStrLn $ prettyPrintProgram expr
+                when debugAST $ putStrLn $ prettyPrintProgram expr
                 potentiallyTimedOperation "Compilation" showTime $ do
                     result <- evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr (fromJust input))
                     case result of
@@ -177,7 +182,7 @@ main = do
             Nothing -> errorWithoutStackTrace "No output file specified"
         exitSuccess
 
-    when debug $ putStrLn $ VM.printAssembly (V.fromList program) False
+    when debugBytecode $ putStrLn $ VM.printAssembly (V.fromList program) False
 
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
