@@ -16,6 +16,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import ErrorRenderer (SourceError (..), parseErrorBundleToSourceErrors, renderErrors)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
 import GHC.Generics (Generic)
@@ -25,7 +26,6 @@ import Paths_indigo qualified
 import System.Directory (doesFileExist)
 import System.Environment
 import System.FilePath
-import Text.Megaparsec (errorBundlePretty)
 import Util
 import VM
 import Prelude hiding (FilePath, lex)
@@ -124,7 +124,7 @@ preludeExpr :: IO [Parser.Expr]
 preludeExpr = do
     i <- liftIO preludeFile
     case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
-        Left err -> error $ "Parse error: " ++ errorBundlePretty err
+        Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
         Right prog@(Parser.Program progExpr) -> do
             _ <-
                 liftIO $
@@ -746,7 +746,7 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     let sourcePath = takeDirectory sourcePath'
     i <- liftIO (findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
     let (expr, prog) = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
-            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
             Right p@(Parser.Program exprs) -> (exprs, p)
     _ <-
         liftIO $
@@ -848,43 +848,8 @@ locateLabel program label = do
 
 renderCompilerErrors :: [CompilerError] -> String -> String
 renderCompilerErrors errors input =
-    let linesOfInput = lines input
-        errorLines = map (\(CompilerError msg pos) -> (pos, msg)) errors
-     in unlines $
-            map
-                ( \(AST.Position (start, end), msg) ->
-                    let (startLine, startColumn) = getLineAndColumn start linesOfInput
-                        (endLine, endColumn) = getLineAndColumn end linesOfInput
-                        lineContent =
-                            if startLine <= 0 || startLine > length linesOfInput
-                                then "Line " ++ show startLine ++ " out of range"
-                                else linesOfInput !! (startLine - 1)
-                        lineIndicator =
-                            replicate startColumn ' '
-                                ++ ( if startLine == endLine
-                                        then "\x1b[31m  └" ++ replicate (endColumn - startColumn) '─' ++ "┘\x1b[0m"
-                                        else "\x1b[31m  └" ++ replicate (length lineContent - startColumn) '─' ++ "┘\x1b[0m"
-                                   )
-                     in "\x1b[33m"
-                            ++ show startLine
-                            ++ "\x1b[0m:\x1b[91m "
-                            ++ lineContent
-                            ++ "\x1b[0m\n"
-                            ++ lineIndicator
-                            ++ " "
-                            ++ "\x1b[31m"
-                            ++ msg
-                            ++ "\x1b[0m"
-                )
-                errorLines
-
-getLineAndColumn :: Int -> [String] -> (Int, Int)
-getLineAndColumn charPos linesOfInput =
-    let go _ _ [] = (0, 0)
-        go remaining pos (l : ls)
-            | remaining <= length l = (pos, remaining)
-            | otherwise = go (remaining - length l - 1) (pos + 1) ls
-     in go charPos 1 linesOfInput
+    let sourceErrors = map (\(CompilerError msg pos) -> SourceError{errorMessage = msg, errorPosition = pos}) errors
+     in renderErrors sourceErrors input
 
 compileDry :: Parser.Program -> String -> IO (Either [Instruction] [CompilerError])
 compileDry prog sourcePath' =

@@ -20,6 +20,7 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 import Data.Void
 import Debug.Trace
+import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import Parser
 import System.FilePath
 import Text.Megaparsec hiding (State)
@@ -258,7 +259,7 @@ verifyProgram' name source exprs = do
         prelude <- liftIO preludeFile
         let parsedPrelude = parseProgram (T.pack prelude) initCompilerFlags{needsMain = False}
         case parsedPrelude of
-            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack prelude)) prelude
             Right (Program exprs') -> do
                 _ <- concatMapM verifyExpr exprs'
                 return ()
@@ -393,7 +394,7 @@ verifyExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualifi
     let sourcePath = takeDirectory sourcePath'
     i <- liftIO (BytecodeCompiler.findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
     let expr = case parseProgram (Data.Text.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
-            Left err -> error $ "Parse error: " ++ errorBundlePretty err
+            Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack i)) i
             Right (Program exprs) -> exprs
     if qualified || isJust as
         then do

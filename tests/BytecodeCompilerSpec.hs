@@ -7,13 +7,13 @@ import Control.Monad.State (evalStateT, liftIO)
 import Data.Functor ((<&>))
 import Data.Text qualified
 import Debug.Trace
+import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import Foreign
 import GHC.IO (unsafePerformIO)
 import Parser qualified
 import Test.Hspec
 import Test.QuickCheck
 import Test.QuickCheck.Arbitrary.Generic
-import Text.Megaparsec (errorBundlePretty)
 import Text.RawString.QQ (r)
 import Util
 import VM (Action (..), Data (..), Instruction (..))
@@ -46,7 +46,7 @@ compile :: String -> IO [VM.Instruction]
 compile prog = do
     let p = Parser.parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
     case p of
-        Left err -> error $ errorBundlePretty err
+        Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
         Right program -> do
             evalStateT
                 ( compileProgramBare program >>= \case

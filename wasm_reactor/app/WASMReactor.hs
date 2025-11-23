@@ -15,6 +15,7 @@ import Data.Char (ord)
 import Data.IORef (readIORef)
 import Data.Text qualified
 import Data.Vector qualified as V
+import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import Foreign
     ( Ptr
     , Storable (poke)
@@ -28,7 +29,6 @@ import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar)
 import Parser (CompilerFlags (CompilerFlags), exprs, initCompilerFlags, parseProgram)
 import Parser qualified
-import Text.Megaparsec (errorBundlePretty)
 import VM
     ( IOBuffer (..)
     , IOMode (VMBuffer)
@@ -47,7 +47,7 @@ runProgramRaw progPtr progLen = do
     input <- peekCStringLen (progPtr, fromIntegral progLen)
     let p = parseProgram (Data.Text.pack input) initCompilerFlags
     case p of
-        Left err -> putStrLn $ errorBundlePretty err
+        Left err -> putStrLn $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack input)) input
         Right program -> do
             xxx <-
                 evalStateT (compileProgram program) (initCompilerState program) >>= \case
@@ -65,7 +65,7 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
     input <- peekCStringLen (inputPtr, inputLen)
     let p = parseProgram (Data.Text.pack programStr) Parser.initCompilerFlags
     case p of
-        Left err -> errorWithoutStackTrace $ errorBundlePretty err
+        Left err -> errorWithoutStackTrace $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack programStr)) programStr
         Right program -> do
             xxx <-
                 evalStateT (compileProgram program) (initCompilerState program) >>= \case

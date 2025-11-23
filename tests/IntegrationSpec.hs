@@ -12,6 +12,7 @@ import Data.List (elemIndex)
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import Optimizer
 import Parser
     ( CompilerFlags (CompilerFlags, verboseMode)
@@ -20,7 +21,6 @@ import Parser
 import Parser qualified
 import Test.Hspec (describe, it, pendingWith, shouldReturn, xit)
 import Test.QuickCheck (Testable (property))
-import Text.Megaparsec (errorBundlePretty)
 import Text.Megaparsec.Error
 import Text.RawString.QQ (r)
 import Util (whenErr)
@@ -41,11 +41,11 @@ compileAndRun :: String -> IO String
 compileAndRun prog = do
     let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
     case p of
-        Left err -> error $ errorBundlePretty err
+        Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
         Right program -> do
             let (Parser.Program exprs) = program
             verifierResult <- verifyProgram "test" (T.pack prog) exprs
-            whenErr verifierResult $ \err -> error $ "Verifier error: " ++ errorBundlePretty err
+            whenErr verifierResult $ \err -> error $ "Verifier error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack prog)) prog
             compilerOutput <- evalStateT (compileProgram program) (initCompilerState program)
             optimizedProgram <- case compilerOutput of
                 Left bytecode -> pure (optimize bytecode)

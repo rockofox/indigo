@@ -23,6 +23,7 @@ import Data.Vector qualified as V
 import Data.Void
 import Data.Void qualified
 import Debug.Trace
+import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import GitHash
@@ -32,7 +33,7 @@ import Parser
 import System.Console.Repline
 import System.Exit (exitFailure, exitSuccess)
 import System.TimeIt
-import Text.Megaparsec.Error (ParseErrorBundle, errorBundlePretty)
+import Text.Megaparsec.Error (ParseErrorBundle)
 import VM qualified
 import Verifier
 
@@ -160,7 +161,7 @@ main = do
                         case expr of
                             Just expr -> when debugAST $ putStrLn $ prettyPrintProgram expr
                             Nothing -> return ()
-                        errorWithoutStackTrace $ "Parse error: " ++ errorBundlePretty err
+                        errorWithoutStackTrace $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
                     Right expr -> return expr
 
                 when debugAST $ putStrLn $ prettyPrintProgram expr
@@ -208,7 +209,7 @@ cmd :: String -> Repl ()
 cmd input = do
     let (result, state) = runIdentity $ runStateT (parseProgram' (T.pack input)) (ParserState{compilerFlags = initCompilerFlags, validLets = [], validFunctions = []})
     case result of
-        Left err -> liftIO $ putStrLn $ errorBundlePretty err
+        Left err -> liftIO $ putStrLn $ renderErrors (parseErrorBundleToSourceErrors err (T.pack input)) input
         Right program' -> do
             let (Program pexrs) = program'
             (Program sexprs) <- gets program
