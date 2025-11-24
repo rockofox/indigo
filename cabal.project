@@ -2,3 +2,7 @@ packages: .
 -- wasm_reactor excluded - built separately with Nix
 
 tests: True
+
+optimization: False
+jobs: $ncpus
+index-state: HEAD

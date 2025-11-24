@@ -13,9 +13,7 @@ data-files:         **/*.in
 data-dir:           share
 
 common warnings
-    -- ghc-options: -Wall -Wno-incomplete-uni-patterns -funfolding-use-threshold=16 -O2 -optc-O3
-    -- ghc-options: -Wall -Wno-incomplete-uni-patterns -O0 -fno-code
-    ghc-options: -Wall -Wno-incomplete-uni-patterns -Wno-unused-record-wildcards
+    ghc-options: -Wall -Wno-incomplete-uni-patterns -Wno-unused-record-wildcards -O0
 
 flag ffi
     description: FFI
