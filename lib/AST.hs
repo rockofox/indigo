@@ -2,7 +2,6 @@ module AST where
 
 import Data.Binary qualified
 import Data.Maybe (maybeToList)
-import Debug.Trace (trace, traceM)
 import GHC.Generics (Generic)
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
@@ -236,7 +235,9 @@ typeOf (Ref _ _) = error "Cannot infer type of ref"
 typeOf (Struct{}) = error "Cannot infer type of struct"
 typeOf (StructLit x _ _) = StructT x
 typeOf (ListLit [Var{varName}] _) = List $ StructT varName
-typeOf (ListLit x _) = if null x then List Any else List $ typeOf $ head x
+typeOf (ListLit x _) = case x of
+    [] -> List Any
+    (y : _) -> List $ typeOf y
 typeOf (ArrayAccess{}) = error "Cannot infer type of array access"
 typeOf (Modulo x _ _) = typeOf x
 typeOf (Target{}) = error "Cannot infer type of target"
@@ -258,7 +259,9 @@ typeOf (CharLit _ _) = StructT "Char"
 typeOf (DoubleLit _ _) = StructT "Double"
 typeOf (ParenApply a _ _) = typeOf a
 typeOf (ListAdd x _ _) = typeOf x
-typeOf (When _ branches else_ _) = if null branches then maybe Unknown typeOf else_ else typeOf (snd $ head branches)
+typeOf (When _ branches else_ _) = case branches of
+    [] -> maybe Unknown typeOf else_
+    ((_, body) : _) -> typeOf body
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True

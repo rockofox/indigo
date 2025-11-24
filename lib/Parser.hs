@@ -89,7 +89,7 @@ binOpTable =
     , [binary "++" ListAdd]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "+" Add, binary "-" Sub]
-    , [binaryAny (\op a b p -> binaryFunctionCall op a b)]
+    , [binaryAny (\op a b _p -> binaryFunctionCall op a b)]
     , -- , [prefix "-" UnaryMinus]
       [binary "%" Modulo]
     , [binary ":" ListConcat]
@@ -172,7 +172,6 @@ getExprPosition (Impl{implPos}) = implPos
 getExprPosition (StrictEval{strictEvalPos}) = strictEvalPos
 getExprPosition (External{externalPos}) = externalPos
 getExprPosition (When{whenPos}) = whenPos
-getExprPosition _ = anyPosition
 
 combinePositions :: Position -> Position -> Position
 combinePositions (Position (x1, x2)) (Position (y1, y2))
@@ -622,10 +621,10 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (If a b c _) = If (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) (replacePositionWithAnyPosition c) anyPosition
     replacePositionWithAnyPosition (Let n v _) = Let n (replacePositionWithAnyPosition v) anyPosition
     replacePositionWithAnyPosition fd@FuncDef{body} = fd{body = replacePositionWithAnyPosition body}
-    replacePositionWithAnyPosition (FuncDec n t g _) = FuncDec n t g anyPosition
+    replacePositionWithAnyPosition (FuncDec n types g _) = FuncDec n types g anyPosition
     replacePositionWithAnyPosition (Function d dec _) = Function (map replacePositionWithAnyPosition d) (replacePositionWithAnyPosition dec) anyPosition
     replacePositionWithAnyPosition (DoBlock a _) = DoBlock (map replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (ExternDec n t a _) = ExternDec n t a anyPosition
+    replacePositionWithAnyPosition (ExternDec n types a _) = ExternDec n types a anyPosition
     replacePositionWithAnyPosition (Add a b _) = Add (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (Sub a b _) = Sub (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (Mul a b _) = Mul (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
@@ -659,10 +658,10 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (Pipeline a b _) = Pipeline (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (Lambda a b _) = Lambda (map replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (Cast a b _) = Cast (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
-    replacePositionWithAnyPosition (TypeLit t _) = TypeLit t anyPosition
+    replacePositionWithAnyPosition (TypeLit type' _) = TypeLit type' anyPosition
     replacePositionWithAnyPosition (Flexible a _) = Flexible (replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (Trait n m _) = Trait n (map replacePositionWithAnyPosition m) anyPosition
-    replacePositionWithAnyPosition (Impl t f m _) = Impl t f (map replacePositionWithAnyPosition m) anyPosition
+    replacePositionWithAnyPosition (Trait name methods _) = Trait name (map replacePositionWithAnyPosition methods) anyPosition
+    replacePositionWithAnyPosition (Impl traitName f m _) = Impl traitName f (map replacePositionWithAnyPosition m) anyPosition
     replacePositionWithAnyPosition (StrictEval a _) = StrictEval (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (External n a _) = External n (map replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (ParenApply a b _) = ParenApply (replacePositionWithAnyPosition a) (map replacePositionWithAnyPosition b) anyPosition

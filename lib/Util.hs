@@ -22,4 +22,6 @@ whenErr (Left x) f = f x
 whenErr _ _ = return ()
 
 showSanitized :: (Show a) => a -> String
-showSanitized = (tail . init) . (show . show)
+showSanitized x = case (show . show) x of
+    s | length s >= 2 -> drop 1 $ init s
+    s -> s

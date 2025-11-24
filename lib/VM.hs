@@ -217,8 +217,9 @@ instance Show Data where
       where
         showStruct :: Data -> String
         showStruct (DMap m) =
-            let (DString name) = m ! "__name"
-             in name ++ "{" ++ Data.List.intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) $ Data.Map.toList $ Data.Map.delete "__name" m) ++ "}"
+            case m ! "__name" of
+                DString name -> name ++ "{" ++ Data.List.intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) $ Data.Map.toList $ Data.Map.delete "__name" m) ++ "}"
+                _ -> error "showStruct: __name is not a String"
         showStruct _ = error "showStruct called with non-map"
     show (DTypeQuery x) = "TypeQuery " ++ x
     show (DCPtr x) = "CPtr " ++ show x
@@ -450,8 +451,7 @@ findLabelFuzzy x = do
             -- Look for fuzzy matches (without #)
             case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
                 [] -> error $ "Label not found: " ++ x
-                [(n, l)] -> return (n, l)
-                xs -> return $ head xs
+                ((n, l) : _) -> return (n, l)
 
 class IntoData a where
     intoData :: a -> Data
@@ -570,10 +570,10 @@ arg (DString x) = return (argString x, Nothing)
 arg (DBool x) =  return (argCInt (if x then 1 else 0), Nothing)
 arg (DChar x) =  return (argCChar (fromIntegral $ Data.Char.ord x), Nothing)
 arg (DList x@(DInt _ : _)) = do
-  withArray (map (\(DInt i) -> fromIntegral i :: CInt) x) $ \ptr -> do
+  withArray (map (\case DInt i -> fromIntegral i :: CInt; _ -> error "Non-int in int list") x) $ \ptr -> do
     return (argPtr ptr, Nothing)
 arg (DList x@(DChar _ : _)) = do -- TODO: make generic
-  withArray (map (\(DChar c) -> castCharToCChar c) x) $ \ptr -> do
+  withArray (map (\case DChar c -> castCharToCChar c; _ -> error "Non-char in char list") x) $ \ptr -> do
     return (argPtr ptr, Nothing)
 arg (DDouble x) = return (argCDouble $ realToFrac x, Nothing)
 arg d@(DMap x) = do
@@ -676,17 +676,17 @@ runInstruction (PushPf name nArgs) = do
 runInstruction Pop = void stackPop
 runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
-runInstruction Add = stackPopN 2 >>= \[y, x] -> stackPush $ x + y
-runInstruction Sub = stackPopN 2 >>= \[y, x] -> stackPush $ x - y
-runInstruction Mul = stackPopN 2 >>= \[y, x] -> stackPush $ x * y
-runInstruction Div = stackPopN 2 >>= \[y, x] -> stackPush $ x / y
-runInstruction Pow = stackPopN 2 >>= \[y, x] -> stackPush $ x ** y
+runInstruction Add = stackPopN 2 >>= \case [y, x] -> stackPush $ x + y; _ -> error "Add: expected 2 values"
+runInstruction Sub = stackPopN 2 >>= \case [y, x] -> stackPush $ x - y; _ -> error "Sub: expected 2 values"
+runInstruction Mul = stackPopN 2 >>= \case [y, x] -> stackPush $ x * y; _ -> error "Mul: expected 2 values"
+runInstruction Div = stackPopN 2 >>= \case [y, x] -> stackPush $ x / y; _ -> error "Div: expected 2 values"
+runInstruction Pow = stackPopN 2 >>= \case [y, x] -> stackPush $ x ** y; _ -> error "Pow: expected 2 values"
 runInstruction Abs =
     stackPop >>= \x -> stackPush $ case x of
         DInt num -> DInt $ abs num
         DFloat num -> DFloat $ abs num
         _ -> error $ "Cannot take absolute value of " ++ show x
-runInstruction Mod = stackPopN 2 >>= \[y, x] -> stackPush $ x `mod` y
+runInstruction Mod = stackPopN 2 >>= \case [y, x] -> stackPush $ x `mod` y; _ -> error "Mod: expected 2 values"
 -- IO
 runInstruction (Builtin Print) = do
     vm <- get
@@ -708,9 +708,11 @@ runInstruction (Builtin GetChar) = do
         HostDirect -> liftIO getChar >>= stackPush . DChar
         VMBuffer -> do
             let input = (ioBuffer vm).input
-            let (char, rest) = (head input, tail input)
-            modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
-            stackPush $ DChar char
+            case input of
+                (char : rest) -> do
+                    modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
+                    stackPush $ DChar char
+                [] -> error "Empty input buffer"
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)
     stackPush $ DFloat num
@@ -735,7 +737,11 @@ runInstruction (CallLocal x) = do
     nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
     case nextInstruction of
         Ret -> tailCall
-        _ -> modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = (head (callStack vm)).locals} : callStack vm}
+        _ -> do
+            vm <- get
+            case callStack vm of
+                (frame : _) -> modify $ \v -> v{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels v, callStack = StackFrame{returnAddress = pc v, locals = frame.locals} : callStack v}
+                [] -> error "Empty call stack"
   where
     tailCall = do
         traceM "Tail call"
@@ -758,27 +764,39 @@ runInstruction Ret = do
     -- Might be helpful to do something like:
     -- stackLen >>= \l -> when (l > 1) (error $ "Stack contains more than one item before return. Items: " ++ l)
     -- get >>= \vm -> traceM $ show (stack vm)
-    modify $ \vm -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = tail $ callStack vm}
+    modify $ \vm -> case callStack vm of
+        (_ : rest) -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = rest}
+        [] -> error "Tried to return, but callstack was empty"
 -- Comparison
 runInstruction Eq =
     stackPopN 2 >>= \case
         [y, x] -> do
             let result = case (x, y) of
-                    (DString s, DList l) -> s == map (\(DChar c) -> c) l && all (\case DChar _ -> True; _ -> False) l
-                    (DList l, DString s) -> map (\(DChar c) -> c) l == s && all (\case DChar _ -> True; _ -> False) l
+                    (DString s, DList l) -> s == map (\case DChar c -> c; _ -> error "Non-char in list") l && all (\case DChar _ -> True; _ -> False) l
+                    (DList l, DString s) -> map (\case DChar c -> c; _ -> error "Non-char in list") l == s && all (\case DChar _ -> True; _ -> False) l
                     _ -> x == y
             stackPush $ DBool result
         _ -> error "Eq: expected 2 values on stack"
-runInstruction Neq = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x /= y
-runInstruction Lt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x < y
-runInstruction Gt = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ x > y
+runInstruction Neq = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x /= y; _ -> error "Neq: expected 2 values"
+runInstruction Lt = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x < y; _ -> error "Lt: expected 2 values"
+runInstruction Gt = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x > y; _ -> error "Gt: expected 2 values"
 runInstruction Not = stackPop >>= \d -> stackPush $ DBool $ not $ case d of DBool x -> x; _ -> error "Not a boolean"
-runInstruction And = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a && b; _ -> error "Not a boolean"
-runInstruction Or = stackPopN 2 >>= \(y : x : _) -> stackPush $ DBool $ case (x, y) of (DBool a, DBool b) -> a || b; _ -> error "Not a boolean"
+runInstruction And =
+    stackPopN 2 >>= \case
+        (y : x : _) -> stackPush $ DBool $ case (x, y) of
+            (DBool a, DBool b) -> a && b
+            _ -> error "Not a boolean"
+        _ -> error "And: expected 2 values"
+runInstruction Or =
+    stackPopN 2 >>= \case
+        (y : x : _) -> stackPush $ DBool $ case (x, y) of
+            (DBool a, DBool b) -> a || b
+            _ -> error "Not a boolean"
+        _ -> error "Or: expected 2 values"
 -- Label
 runInstruction (Label _) = return ()
 -- Stack
-runInstruction Swp = stackPopN 2 >>= \(x : y : _) -> stackPushN [y, x]
+runInstruction Swp = stackPopN 2 >>= \case (x : y : _) -> stackPushN [y, x]; _ -> error "Swp: expected 2 values"
 runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
 runInstruction (DupN n) = stackPeek >>= \d -> stackPushN $ replicate n d
 -- Memory
@@ -791,10 +809,14 @@ runInstruction (LStore name) = do
     case local of
         Just _ -> do
             d <- stackPop
-            modify $ \vm -> vm{callStack = (safeHead $ callStack vm){locals = (name, d) : filter ((/= name) . fst) localsc} : tail (callStack vm)}
+            modify $ \vm -> case callStack vm of
+                (frame : rest) -> vm{callStack = frame{locals = (name, d) : filter ((/= name) . fst) localsc} : rest}
+                [] -> error "Empty call stack"
         Nothing -> do
             d <- stackPop
-            modify $ \vm -> vm{callStack = (safeHead $ callStack vm){locals = (name, d) : localsc} : tail (callStack vm)}
+            modify $ \vm -> case callStack vm of
+                (frame : rest) -> vm{callStack = frame{locals = (name, d) : localsc} : rest}
+                [] -> error "Empty call stack"
 runInstruction (LLoad name) = do
     vm <- get
     let localsc = locals $ safeHead $ callStack vm
@@ -819,7 +841,7 @@ runInstruction (Concat n) =
                             )
                         )
                         l
-                        (tail l)
+                        (drop 1 l)
 runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ list !! index; [DInt index, DString str] -> stackPush $ DChar $ str !! index; x -> error $ "Invalid types for index: " ++ show x
 runInstruction Slice = do
     start <- stackPop
@@ -832,7 +854,7 @@ runInstruction Slice = do
         (DNone, DInt end') -> DList $ slice 0 (Just end') list
         (DNone, DNone) -> DList $ slice 0 Nothing list
         _ -> error "Invalid slice"
-    when wasString $ stackPop >>= \(DList x) -> stackPush $ DString $ map (\(DChar char) -> char) x
+    when wasString $ stackPop >>= \case DList x -> stackPush $ DString $ map (\case DChar char -> char; _ -> error "Non-char in list") x; _ -> error "Expected DList"
   where
     slice :: Int -> Maybe Int -> [a] -> [a]
     slice start maybeEnd xs
@@ -891,14 +913,16 @@ runInstruction Cast = do
             DBool _ -> DBool $ x /= ""
             DList _ -> DList [DString x]
             DNone -> DNone
-            DChar _ -> DChar $ head x
+            DChar _ -> case x of
+                (c : _) -> DChar c
+                [] -> error "Empty string in cast"
             type' -> error $ "Cast to String for type not implemented: " ++ debugShowData type'
         (DList []) -> stackPush $ case to of
             DList _ -> DList []
             type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
         (DList x) -> stackPush $ case to of
             DList _ -> DList x
-            DString _ -> if all (\case DChar{} -> True; _ -> False) x then DString $ map (\(DChar c) -> c) x else DString $ show x
+            DString _ -> if all (\case DChar{} -> True; _ -> False) x then DString $ map (\case DChar c -> c; _ -> error "Non-char in list") x else DString $ show x
             DNone -> DNone
             type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
         x -> do
@@ -908,9 +932,9 @@ runInstruction Cast = do
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
 runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; m -> error $ "Invalid type for access. Tried to access " ++ show m ++ " on " ++ show x
-runInstruction AAccess = stackPopN 2 >>= \(DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m
+runInstruction AAccess = stackPopN 2 >>= \case (DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "AAccess: expected String and Map"
 runInstruction Keys = stackPop >>= \case DMap m -> stackPush $ DList $ map DString $ Data.Map.keys m; _ -> error "Invalid type for keys"
-runInstruction Update = stackPopN 3 >>= \(value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m
+runInstruction Update = stackPopN 3 >>= \case (value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m; _ -> error "Update: expected value, String key, and Map"
 runInstruction (PackMap n) = do
     elems <- stackPopN n
     stackPush $ DMap $ Data.Map.fromList $ map (\case [DString x, y] -> (x, y); x -> error $ "Invalid type for map: " ++ show x) $ chunksOf 2 elems
@@ -980,7 +1004,7 @@ runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
 runInstruction (ListAdd n) = do
     stackPopN n >>= \x -> do
         stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> map DChar string; el -> [el]) x
-        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\(DChar char) -> char) elements)); _ -> return ()
+        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\case DChar char -> char; _ -> error "Non-char in list") elements)); _ -> return ()
 runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 printAssembly :: Program -> Bool -> String

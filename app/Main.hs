@@ -225,7 +225,9 @@ cmd input = do
                             modify (\s -> s{program = previousProgram})
                         Right vm -> do
                             previousStack <- gets previousStack
-                            when (previousStack /= VM.stack vm) $ liftIO $ print $ head $ VM.stack vm
+                            when (previousStack /= VM.stack vm) $ case VM.stack vm of
+                                (x : _) -> liftIO $ print x
+                                [] -> return ()
                             modify (\s -> s{previousStack = VM.stack vm})
 
 replCompleter :: (Monad m, MonadState REPLState m) => WordCompleter m
@@ -235,7 +237,9 @@ replCompleter n = do
     return $ filter (isPrefixOf n) names
   where
     nameOf (FuncDef name _ _ _) = name
-    nameOf (Function def dec _) = nameOf (head def)
+    nameOf (Function def dec _) = case def of
+        (x : _) -> nameOf x
+        [] -> ""
     nameOf _ = ""
 
 opts :: [(String, String -> Repl ())]

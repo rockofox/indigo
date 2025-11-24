@@ -39,18 +39,20 @@ toRegInst' (Push x : is) = do
 toRegInst' (Pop : is) = do
     s <- get
     let vs = virtualStack s
-    let i = head vs
-    put $ s{virtualStack = tail vs}
-    rs <- toRegInst' is
-    return $ RegInst (Mov i (DInt 0)) [] : rs
+    case vs of
+        (_ : rest) -> do
+            put $ s{virtualStack = rest}
+            toRegInst' is
+        [] -> error "Pop: empty virtual stack"
 toRegInst' (Swp : is) = do
     s <- get
     let vs = virtualStack s
-    let i1 = head vs
-    let i2 = head $ tail vs
-    put $ s{virtualStack = i2 : i1 : tail (tail vs)}
-    rs <- toRegInst' is
-    return $ RegInst (Mov i1 (DInt 0)) [] : RegInst (Mov i2 (DInt 0)) [] : rs
+    case vs of
+        (i1 : i2 : rest) -> do
+            put $ s{virtualStack = i2 : i1 : rest}
+            rs <- toRegInst' is
+            return $ RegInst (Mov i1 (DInt 0)) [] : RegInst (Mov i2 (DInt 0)) [] : rs
+        _ -> error "Swp: expected at least 2 items on virtual stack"
 toRegInst' (l@(Label _) : is) = do
     rs <- toRegInst' is
     return $ RegInst l [] : rs

@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Optimizer where
 
 import VM
@@ -15,12 +17,10 @@ treeShake prog = do
     shakeOnce :: [[Instruction]] -> [[Instruction]] -> [[Instruction]]
     shakeOnce x =
         filter
-            ( \z -> do
-                case head z of
-                    Label _ -> do
-                        let label = head z
-                        hasUsage label (concat (filter (\w -> head w /= label) x))
-                    _ -> True
+            ( \case
+                (label@(Label _) : _) -> do
+                    hasUsage label (concat (filter (\case (l : _) -> l /= label; _ -> True) x))
+                _ -> True
             )
     shake x y = do
         let x' = shakeOnce x y

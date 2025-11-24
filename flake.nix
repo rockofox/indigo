@@ -80,6 +80,20 @@
               fourmolu.enable = true;
               # cabal-fmt.enable = true;
               shellcheck.enable = true;
+              cabal-build-test = {
+                enable = true;
+                name = "Cabal build and test";
+                entry = "${pkgs.writeShellApplication {
+                  name = "cabal-build-test";
+                  runtimeInputs = [ pkgs.haskellPackages.cabal-install ];
+                  text = ''
+                    set -e
+                    cabal build --ghc-options=-Werror
+                    cabal test all
+                  '';
+                }}/bin/cabal-build-test";
+                pass_filenames = false;
+              };
             };
           };
         };
