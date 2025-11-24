@@ -11,6 +11,7 @@ type Topic
     | StructsAndTraits
     | FFI
     | Generics
+    | RefinementTypes
 
 view : Topic -> (String -> msg) -> Html msg
 view currentTopic onLoadCode =
@@ -24,6 +25,7 @@ view currentTopic onLoadCode =
                 StructsAndTraits -> viewStructsAndTraits onLoadCode
                 FFI -> viewFFI onLoadCode
                 Generics -> viewGenerics onLoadCode
+                RefinementTypes -> viewRefinementTypes onLoadCode
             ]
         ]
 
@@ -38,6 +40,7 @@ viewSidebar =
         , h3 [] [ text "Advanced Features" ]
         , sidebarLink "FFI" "/docs/ffi"
         , sidebarLink "Generics" "/docs/generics"
+        , sidebarLink "Refinement Types" "/docs/refinement-types"
         ]
 
 sidebarLink : String -> String -> Html msg
@@ -254,4 +257,36 @@ end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]
         , p [] [ text "This function takes two parameters of type N and returns a result of the same type." ]
         , p [] [ text "The call to add only suceeds if the given parameters are of the same Number type. The return type N gets type erased to Number." ]
+        ]
+
+viewRefinementTypes : (String -> msg) -> Html msg
+viewRefinementTypes onLoadCode =
+    section [ id "refinement-types" ]
+        [ h2 [] [ text "Refinement Types" ]
+        , p [] [ text "Refinement types allow you to add compile-time constraints to struct definitions. These constraints are checked when creating struct literals, ensuring that only valid values can be constructed." ]
+        , p [] [ text "The syntax for refinement types uses the satisfies keyword followed by a boolean expression that references the struct's fields." ]
+        , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
+
+let main: IO = do
+    let a = Age{value: 5}
+end""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the Age struct has a refinement that requires the value field to be greater than or equal to zero. When creating an Age struct literal, the compiler checks this constraint at compile time." ]
+        , h3 [] [ text "Compile-Time Validation" ]
+        , p [] [ text "If you try to create a struct literal that violates the refinement constraint, the compiler will produce an error:" ]
+        , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
+
+let main: IO = do
+    let a = Age{value: 0 - 1}
+end""" onLoadCode False "indigo"
+        , p [] [ text "The above code will fail to compile with a refinement error, since the value -1 does not satisfy the constraint value >= 0." ]
+        , h3 [] [ text "Equality Constraints" ]
+        , p [] [ text "Refinements can also use equality checks to enforce specific values:" ]
+        , viewCodeBlock """struct Person = (name: String) satisfies (name == "Alice")
+
+let main: IO = do
+    let p = Person{name: "Alice"}
+end""" onLoadCode True "indigo"
+        , p [] [ text "This example shows a Person struct that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
+        , h3 [] [ text "Field References" ]
+        , p [] [ text "Field names from the struct can be referenced directly in the refinement expression. The refinement expression is evaluated with the struct literal's field values to determine if the constraint is satisfied." ]
         ]
