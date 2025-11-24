@@ -2,6 +2,7 @@ module BytecodeCompilerSpec (spec) where
 
 import AST qualified
 import BytecodeCompiler
+import Control.Exception (SomeException)
 import Control.Monad (join)
 import Control.Monad.State (evalStateT, liftIO)
 import Data.Functor ((<&>))
@@ -48,7 +49,7 @@ compile prog = do
     let p = Parser.parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
     case p of
         Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
-        Right program -> do
+        Right program ->
             evalStateT
                 ( compileProgramBare program >>= \case
                     Right err -> do
@@ -79,17 +80,17 @@ compileWithErrors prog = do
 spec :: Spec
 spec = do
     describe "Addition" $ do
-        it "Should compile 2+4" $ do
+        it "Should compile 2+4" $
             compile [r|2+4|]
                 `shouldReturn` [Label "main", StoreSideStack, Push 2, LStore "__op_a_0", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Call "+", ClearSideStack, Push $ DInt 0, Exit]
-        it "Should work properly with function calls" $ do
+        it "Should work properly with function calls" $
             compile
                 [r|
                 f x = x + 1
                 let main : IO = unsafePrint (f 2) + 4|]
                 `shouldReturn` [Label "f#0", StoreSideStack, LStore "x", LLoad "x", LStore "__op_a_1", Push 1, LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 2, Call "f#0", LStore "__op_a_2", Push 4, LStore "__op_b_2", LLoad "__op_a_2", LLoad "__op_b_2", Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
-    describe "Hello World" $ do
-        it "Should print Hello, world!" $ do
+    describe "Hello World" $
+        it "Should print Hello, world!" $
             compile [r|let main : IO = unsafePrint "Hello, world!"|]
                 `shouldReturn` [Label "main", StoreSideStack, Push $ DString "Hello, world!", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     -- describe "Implicit casting" $ do
@@ -99,10 +100,10 @@ spec = do
     --         compile [r|let main : IO = unsafePrint 2.0 + ^4|]
     --             `shouldReturn` [Label "main", StoreSideStack, Push 2.0, LStore "__op_a_0", Meta "flex", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Swp, Cast, Push 2.0, Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     describe "Explicit casting" $ do
-        it "Can cast from int to float" $ do
+        it "Can cast from int to float" $
             compile [r|2 as Float|]
                 `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, ClearSideStack, Push $ DInt 0, Exit]
-        it "Casts are compatible with binary operations" $ do
+        it "Casts are compatible with binary operations" $
             compile [r|(2 as Float) + 4.0|]
                 `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Call "+", ClearSideStack, Push $ DInt 0, Exit]
     xdescribe "typesMatch" $ do
@@ -248,3 +249,48 @@ spec = do
                             then expectationFailure $ "Expected successful compilation, got refinement error: " ++ show errors
                             else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
                 Right _ -> return ()
+    describe "Generics" $ do
+        it "Should compile a simple generic function" $
+            compile
+                [r|
+                let id<T> (x: T) : T = x
+                let main : IO = unsafePrint (id 42)
+                |]
+                `shouldReturn` [Label "id#0", StoreSideStack, LStore "x", LLoad "x", ClearSideStack, Ret, Label "main", StoreSideStack, Push 42, Call "id#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
+        it "Should compile generic function with trait constraint" $
+            compile
+                [r|
+                trait Number
+                impl Number for Int
+                impl Number for Float
+                let add<N: Number> (a: N b: N) : N = a + b
+                let main : IO = unsafePrint (add 1, 2)
+                |]
+                `shouldReturn` [Label "add#0", StoreSideStack, LStore "b", LStore "a", LLoad "a", LStore "__op_a_1", LLoad "b", LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 1, Push 2, Call "add#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
+        it "Should require matching generic types" $ do
+            let prog =
+                    [r|
+                trait Number
+                impl Number for Int
+                impl Number for Float
+                let add<N: Number> (a: N b: N) : N = a + b
+                let main : IO = unsafePrint (add 1, 2.0)
+                |]
+            compile prog `shouldThrow` (const True :: SomeException -> Bool)
+        it "Should compile generic function with struct types" $ do
+            result <-
+                compile
+                    [r|
+                struct Point = (x: Int, y: Int)
+                let getX<T> (p: T) : Int = p.x
+                let main : IO = unsafePrint (getX Point { x: 1, y: 2 })
+                |]
+            result `shouldSatisfy` any (\case Label name -> "getX" `isInfixOf` name; _ -> False)
+            result `shouldSatisfy` any (\case Call name -> "getX" `isInfixOf` name; _ -> False)
+        it "Should handle generic return types" $
+            compile
+                [r|
+                let identity<T> (x: T) : T = x
+                let main : IO = unsafePrint (identity "hello")
+                |]
+                `shouldReturn` [Label "identity#0", StoreSideStack, LStore "x", LLoad "x", ClearSideStack, Ret, Label "main", StoreSideStack, Push $ DString "hello", Call "identity#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]

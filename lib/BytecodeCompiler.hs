@@ -4,7 +4,7 @@ import AST (Position (..), anyPosition, zeroPosition)
 import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (unless, when, (>=>))
-import Control.Monad.Loops (firstM)
+import Control.Monad.Loops (allM, firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, modify)
 import Data.Bifunctor (second)
 import Data.Functor ((<&>))
@@ -319,6 +319,53 @@ typeCompatible x y = do
             if bothNumeric
                 then return True
                 else return $ y' `elem` impls
+
+compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> StateT (CompilerState a) IO Bool
+compareTypes' (Parser.List x) (Parser.List y) generics = compareTypes' x y generics
+compareTypes' (Parser.List Parser.Any) (Parser.StructT "String") _ = return True
+compareTypes' (Parser.List (Parser.StructT "Char")) (Parser.StructT "String") _ = return True
+compareTypes' (Parser.StructT "String") (Parser.List (Parser.StructT "Char")) _ = return True
+compareTypes' (Parser.StructT "String") (Parser.List Parser.Any) _ = return True
+compareTypes' aT (Parser.StructT b) generics = case aT of
+    Parser.StructT a -> do
+        let gen = find (\(Parser.GenericExpr name _) -> name == b) generics
+        case gen of
+            Just (Parser.GenericExpr _ (Just (Parser.StructT t))) -> compStructs a t
+            Just (Parser.GenericExpr _ _) -> return True
+            Nothing -> compStructs a b
+    Parser.Unknown -> return True
+    _ -> do
+        let gen = find (\(Parser.GenericExpr name _) -> name == b) generics
+        case gen of
+            Just (Parser.GenericExpr _ (Just t)) -> return $ Parser.compareTypes aT t
+            Just (Parser.GenericExpr _ Nothing) -> return True
+            Nothing -> return False
+  where
+    compStructs :: String -> String -> StateT (CompilerState a) IO Bool
+    compStructs structA structB = do
+        implsA <- implsFor structA
+        return $ structB `elem` implsA || structA == structB
+compareTypes' a b _ = return $ Parser.compareTypes a b
+
+allTheSame :: [Parser.Type] -> Bool
+allTheSame [] = True
+allTheSame [_] = True
+allTheSame xs = all (compareSame $ head xs) (tail xs)
+  where
+    compareSame :: Parser.Type -> Parser.Type -> Bool
+    compareSame (Parser.List x) (Parser.List y) = compareSame x y
+    compareSame x y = x == y
+
+functionTypesAcceptable :: [Parser.Type] -> [Parser.Type] -> [Parser.GenericExpr] -> StateT (CompilerState a) IO Bool
+functionTypesAcceptable use def generics = do
+    let genericNames = map (\(Parser.GenericExpr name _) -> name) generics
+    let useAndDef = zip use def
+    let udStructs = concatMap (\(a, b) -> case (a, b) of (_, Parser.StructT _) -> [(a, b)]; (Parser.List c'@(Parser.StructT _), Parser.List c@(Parser.StructT _)) -> [(c', c)]; _ -> []) useAndDef
+    let udStructsGeneric = filter (\case (_, Parser.StructT b) -> b `elem` genericNames; (_, Parser.List (Parser.StructT b)) -> b `elem` genericNames; _ -> error "Impossible") udStructs
+    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, Parser.StructT b) -> b == x; (_, Parser.List (Parser.StructT b)) -> b == x; _ -> error "Impossible") udStructsGeneric)) genericNames
+    let genericsMatch = all (\(_, types) -> allTheSame types) groupedUdStructsGeneric
+    typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
+    return $ typesMatch' && genericsMatch
 
 evaluateFunction :: [Parser.Type] -> Int -> Parser.Type
 evaluateFunction types taken = case drop (length types - taken + 1) types of
@@ -715,7 +762,7 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     let funcDec = case find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs' of
             Just fd -> do
                 case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
-                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = [], funcDecPos = anyPosition}
+                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = Parser.generics fd, funcDecPos = anyPosition}
                     Nothing -> Just fd
             Nothing -> find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
@@ -727,11 +774,22 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     (argsOk, msgs) <- case funcDec of
         Just fd -> do
             let expectedArgTypes = init $ Parser.types fd
-            let zippedArgs = zip argTypes expectedArgTypes
-            wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
-            let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
-            let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
-            return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
+            let generics = Parser.generics fd
+            if null generics
+                then do
+                    let zippedArgs = zip argTypes expectedArgTypes
+                    wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
+                    let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
+                    let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
+                    return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
+                else do
+                    typesAcceptable <- functionTypesAcceptable argTypes expectedArgTypes generics
+                    let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
+                    if typesAcceptable && null tooManyArgs
+                        then return (True, [])
+                        else do
+                            let wrongArgs = (["Generic type constraints not satisfied" | not typesAcceptable])
+                            return (False, wrongArgs ++ tooManyArgs)
         Nothing -> return (True, [])
 
     unless argsOk $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgs) funcPos
@@ -995,7 +1053,7 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
         else concatMapM (`compileExpr` expectedType) expr
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
-    mangleAST (Parser.FuncDec{name, types}) alias = Parser.FuncDec{name = alias ++ "@" ++ name, types = types, generics = [], funcDecPos = anyPosition}
+    mangleAST (Parser.FuncDec{name, types, generics}) alias = Parser.FuncDec{name = alias ++ "@" ++ name, types = types, generics = generics, funcDecPos = anyPosition}
     mangleAST (Parser.Function{def = fdef, dec}) alias = Parser.Function{def = map (`mangleAST` alias) fdef, dec = mangleAST dec alias, functionPos = anyPosition}
     mangleAST (Parser.FuncDef{name, args, body}) alias = Parser.FuncDef{name = alias ++ "@" ++ name, args = args, body = mangleAST body alias, funcDefPos = anyPosition}
     mangleAST x _ = x
