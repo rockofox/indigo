@@ -2,7 +2,10 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ['main']  # or 'master' depending on your default branch
+    branches: ['main']
+    paths:
+      - 'website/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -27,6 +30,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: website/package-lock.json
+          
+      - name: Cache build output
+        uses: actions/cache@v4
+        with:
+          path: website/dist
+          key: website-build-${{ runner.os }}-${{ hashFiles('website/**') }}
+          restore-keys: |
+            website-build-${{ runner.os }}-
           
       - name: Install dependencies
         working-directory: ./website

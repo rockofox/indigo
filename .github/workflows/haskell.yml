@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_test_release_and_wasm:
-    name: Build, Test, Release, and Build WASM (ubuntu-latest/GHC 9.8)
+  build_and_test:
+    name: Build and Test
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
@@ -22,15 +22,25 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Update ghc-wasm-meta input
-        run: nix flake lock --update-input ghc-wasm-meta
-
-      - name: Set up Cachix (optional)
+      - name: Set up Cachix
         uses: cachix/cachix-action@v14
         with:
           name: indigo
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         continue-on-error: true
+
+      - name: Update ghc-wasm-meta input
+        run: nix flake lock --update-input ghc-wasm-meta
+
+      - name: Cache cabal store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cabal/store
+            ~/.cabal/packages
+          key: cabal-${{ runner.os }}-${{ hashFiles('indigo.cabal', 'cabal.project*') }}
+          restore-keys: |
+            cabal-${{ runner.os }}-
 
       - name: Build and run tests
         run: |
@@ -39,19 +49,101 @@ jobs:
           cabal test all
         shell: nix develop --command bash -e {0}
 
-      - name: Prepare native release directory
+      - name: Save executable path
+        id: exe_path
         run: |
-          mkdir -p indigo-latest
           INDIGO_EXE=$(cabal list-bin indigo | tail -n 1)
-          cp "$INDIGO_EXE" indigo-latest/indigo
-          cp -r share/std indigo-latest
+          echo "path=$INDIGO_EXE" >> $GITHUB_OUTPUT
         shell: nix develop --command bash -e {0}
 
-      - name: Zip native release
-        run: |
-          zip -r indigo-release-latest.zip indigo-latest/*
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: indigo-executable
+          path: ${{ steps.exe_path.outputs.path }}
+          retention-days: 1
 
-      # WASM build and release
+  build_native_release:
+    name: Build Native Release
+    runs-on: ubuntu-latest
+    needs: build_and_test
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - uses: wimpysworld/nothing-but-nix@main
+        with:
+          hatchet-protocol: 'holster'
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@v14
+        with:
+          name: indigo
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        continue-on-error: true
+
+      - name: Download executable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: indigo-executable
+          path: indigo-latest
+
+      - name: Prepare native release directory
+        run: |
+          chmod +x indigo-latest/indigo
+          cp -r share/std indigo-latest
+
+      - name: Zip native release
+        run: zip -r indigo-release-latest.zip indigo-latest/*
+
+      - name: Upload native release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: indigo-native-release
+          path: indigo-release-latest.zip
+          retention-days: 1
+
+  build_wasm:
+    name: Build WASM Reactor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - uses: wimpysworld/nothing-but-nix@main
+        with:
+          hatchet-protocol: 'holster'
+
+      - name: Set up Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Set up Cachix
+        uses: cachix/cachix-action@v14
+        with:
+          name: indigo
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+        continue-on-error: true
+
+      - name: Update ghc-wasm-meta input
+        run: nix flake lock --update-input ghc-wasm-meta
+
+      - name: Cache WASM cabal store
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cabal/store
+            ~/.cabal/packages
+          key: wasm-cabal-${{ runner.os }}-${{ hashFiles('wasm_reactor/indigo-reactor.cabal', 'wasm_reactor/cabal.project*') }}
+          restore-keys: |
+            wasm-cabal-${{ runner.os }}-
+
       - name: Build WASM reactor
         run: |
           cd wasm_reactor
@@ -71,8 +163,29 @@ jobs:
         shell: nix develop --command bash -e {0}
 
       - name: Zip WASM release
-        run: |
-          zip -r indigo-wasm-latest.zip indigo-wasm-latest/*
+        run: zip -r indigo-wasm-latest.zip indigo-wasm-latest/*
+
+      - name: Upload WASM release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: indigo-wasm-release
+          path: indigo-wasm-latest.zip
+          retention-days: 1
+
+  release:
+    name: Create Releases
+    runs-on: ubuntu-latest
+    needs: [build_native_release, build_wasm]
+    steps:
+      - name: Download native release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: indigo-native-release
+
+      - name: Download WASM release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: indigo-wasm-release
 
       - id: 'auth'
         uses: 'google-github-actions/auth@v2'
