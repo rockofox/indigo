@@ -257,7 +257,7 @@ keyword :: Text -> Parser ()
 keyword w = (lexeme . try) (string w *> notFollowedBy alphaNumChar)
 
 rws :: [String]
-rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of"]
+rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of", "it", "satisfies", "is"]
 
 identifier :: Parser String
 identifier = do
@@ -286,7 +286,15 @@ double :: Parser Double
 double = lexeme (L.float <* char 'd')
 
 freeOperator :: Parser String
-freeOperator = try $ lexeme $ some (oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '%', '^', '~', ':']) >>= \x -> if length x > 1 then return x else fail "Operator must be at least two characters"
+freeOperator = try $ lexeme $ do
+    x <- some (oneOf ['+', '-', '*', '/', '=', '&', '|', '!', '?', '%', '^', '~', ':'])
+    let predefinedOps = ["!=", "==", "<=", ">=", "&&", "||"]
+    if length x > 1
+        then
+            if x `elem` predefinedOps
+                then fail $ "Overriding predefined operator " ++ show x ++ " is not allowed"
+                else return x
+        else fail "Operator must be at least two characters"
 
 extra :: Parser String
 extra = do

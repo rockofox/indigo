@@ -5,17 +5,18 @@ import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
 import Control.Monad (unless, when, (>=>))
 import Control.Monad.Loops (firstM)
-import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, gets, modify)
+import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, modify)
 import Data.Bifunctor (second)
 import Data.Functor ((<&>))
 import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
 import Data.List.Split qualified
 import Data.Map qualified
-import Data.Maybe (fromJust, isJust, isNothing)
+import Data.Maybe (fromJust, isJust, isNothing, maybeToList)
 import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Data.Vector qualified as V
 import ErrorRenderer (SourceError (..), parseErrorBundleToSourceErrors, renderErrors)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
@@ -67,6 +68,7 @@ data CompilerState a = CompilerState
     , functionsByTrait :: [(String, String, String, Parser.Expr)]
     , errors :: [CompilerError]
     , sourcePath :: String
+    , skipRefinementCheck :: Bool
     }
 
 data Let = Let
@@ -92,9 +94,10 @@ initCompilerState prog =
         []
         []
         "no file"
+        False
 
 initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
-initCompilerStateWithFile prog =
+initCompilerStateWithFile prog sourcePath' =
     CompilerState
         prog
         []
@@ -108,6 +111,8 @@ initCompilerStateWithFile prog =
         []
         []
         []
+        sourcePath'
+        False
 
 cerror :: String -> AST.Position -> StateT (CompilerState a) IO ()
 cerror msg pos = do
@@ -812,9 +817,24 @@ compileExpr (Parser.Var{varName, varPos}) expectedType = do
         else return [LLoad varName]
 compileExpr (Parser.Let{letName, letValue}) _ = do
     curCon <- gets currentContext
-    typeOf letValue >>= \v -> modify (\s -> s{lets = Let{name = letName, vtype = v, context = curCon} : lets s})
-    value' <- typeOf letValue >>= compileExpr letValue
-    return $ value' ++ [LStore letName]
+    case letValue of
+        Parser.Function{def, dec} -> do
+            let renamedDec = case dec of
+                    Parser.FuncDec{} -> dec{Parser.name = letName}
+                    _ -> dec
+                renamedDef =
+                    map
+                        ( \d -> case d of
+                            Parser.FuncDef{args, body, funcDefPos} -> Parser.FuncDef{name = letName, args = args, body = body, funcDefPos = funcDefPos}
+                            _ -> d
+                        )
+                        def
+            let fun = Parser.Function{def = renamedDef, dec = renamedDec, functionPos = Parser.anyPosition}
+            compileExpr fun Parser.Any
+        _ -> do
+            typeOf letValue >>= \v -> modify (\s -> s{lets = Let{name = letName, vtype = v, context = curCon} : lets s})
+            value' <- typeOf letValue >>= compileExpr letValue
+            return $ value' ++ [LStore letName]
 compileExpr (Parser.Function{def = [Parser.FuncDef{body = Parser.StrictEval{strictEvalExpr = e}}], dec}) expectedType = do
     let name = dec.name
     evaledExpr <- compileExpr e expectedType
@@ -932,7 +952,21 @@ compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
         _ <- compileExpr trait Parser.Any
         _ <- compileExpr impl Parser.Any
         return ()
-compileExpr (Parser.StructLit{structLitName, structLitFields}) _ = do
+compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitPos}) _ = do
+    skipCheck <- gets skipRefinementCheck
+    unless skipCheck $ do
+        structDecs' <- gets structDecs
+        let struct = find (\case Parser.Struct{name = name'} -> name' == structLitName; _ -> False) structDecs'
+        case struct of
+            Just expr -> case expr of
+                Parser.Struct{refinement, refinementSrc} -> do
+                    case refinement of
+                        Just rf -> do
+                            r <- runRefinement rf sl
+                            unless r $ cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
+                        Nothing -> return ()
+                _ -> return ()
+            Nothing -> return ()
     fields' <- mapM ((`compileExpr` Parser.Any) . snd) structLitFields
     let names = map (DString . fst) structLitFields
     let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
@@ -1018,6 +1052,125 @@ compileExpr (Parser.External{externalName = from, externalArgs = (Parser.FuncDec
     return []
 compileExpr (Parser.CharLit{charValue = x}) _ = return [Push $ DChar x]
 compileExpr x _ = error $ show x ++ " is not implemented"
+
+transformRefinementExpr :: Parser.Expr -> [(String, Parser.Type)] -> Parser.Expr
+transformRefinementExpr expr fieldNames = case expr of
+    Parser.Var{varName}
+        | varName `elem` map fst fieldNames ->
+            Parser.StructAccess
+                (Parser.Var "it" Parser.zeroPosition)
+                (Parser.Var varName Parser.zeroPosition)
+                Parser.anyPosition
+    Parser.Add{addLhs = x, addRhs = y, addPos} ->
+        Parser.Add (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) addPos
+    Parser.Sub{subLhs = x, subRhs = y, subPos} ->
+        Parser.Sub (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) subPos
+    Parser.Mul{mulLhs = x, mulRhs = y, mulPos} ->
+        Parser.Mul (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) mulPos
+    Parser.Div{divLhs = x, divRhs = y, divPos} ->
+        Parser.Div (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) divPos
+    Parser.Gt{gtLhs = x, gtRhs = y, gtPos} ->
+        Parser.Gt (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) gtPos
+    Parser.Lt{ltLhs = x, ltRhs = y, ltPos} ->
+        Parser.Lt (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) ltPos
+    Parser.Ge{geLhs = x, geRhs = y, gePos} ->
+        Parser.Ge (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) gePos
+    Parser.Le{leLhs = x, leRhs = y, lePos} ->
+        Parser.Le (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) lePos
+    Parser.Eq{eqLhs = x, eqRhs = y, eqPos} ->
+        Parser.Eq (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) eqPos
+    Parser.Neq{neqLhs = x, neqRhs = y, neqPos} ->
+        Parser.Neq (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) neqPos
+    Parser.And{andLhs = x, andRhs = y, andPos} ->
+        Parser.And (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) andPos
+    Parser.Or{orLhs = x, orRhs = y, orPos} ->
+        Parser.Or (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) orPos
+    Parser.Not{notExpr = x, notPos} ->
+        Parser.Not (transformRefinementExpr x fieldNames) notPos
+    Parser.UnaryMinus{unaryMinusExpr = x, unaryMinusPos} ->
+        Parser.UnaryMinus (transformRefinementExpr x fieldNames) unaryMinusPos
+    Parser.StructAccess{structAccessStruct = s, structAccessField = f, structAccessPos} ->
+        Parser.StructAccess (transformRefinementExpr s fieldNames) (transformRefinementExpr f fieldNames) structAccessPos
+    Parser.FuncCall{funcName, funcArgs, funcPos} ->
+        Parser.FuncCall funcName (map (`transformRefinementExpr` fieldNames) funcArgs) funcPos
+    _ -> expr
+
+extractFunctions :: [Parser.Expr] -> [Parser.Expr]
+extractFunctions = concatMap extractFunction
+  where
+    extractFunction expr@(Parser.Function{}) = [expr]
+    extractFunction expr@(Parser.FuncDef{body}) = expr : extractFunctions [body]
+    extractFunction expr@(Parser.FuncDec{}) = [expr]
+    extractFunction (Parser.Let{letName, letValue}) = case letValue of
+        Parser.Function{def, dec} ->
+            let renamedDec = case dec of
+                    Parser.FuncDec{} -> dec{Parser.name = letName}
+                    _ -> dec
+                renamedDef =
+                    map
+                        ( \d -> case d of
+                            Parser.FuncDef{args, body, funcDefPos} -> Parser.FuncDef{name = letName, args = args, body = body, funcDefPos = funcDefPos}
+                            _ -> d
+                        )
+                        def
+             in [Parser.Function{def = renamedDef, dec = renamedDec, functionPos = Parser.anyPosition}]
+        _ -> extractFunctions [letValue]
+    extractFunction (Parser.DoBlock{doBlockExprs}) = extractFunctions doBlockExprs
+    extractFunction _ = []
+
+runRefinement :: Parser.Expr -> Parser.Expr -> StateT (CompilerState a) IO Bool
+runRefinement refinement value = do
+    currentState <- get
+    let structDef = case value of
+            Parser.StructLit{structLitName} ->
+                find (\case Parser.Struct{name = name'} -> name' == structLitName; _ -> False) currentState.structDecs
+            _ -> Nothing
+    let fieldNames = case structDef of
+            Just (Parser.Struct{fields}) -> fields
+            _ -> []
+    let transformedRefinement = if null fieldNames then refinement else transformRefinementExpr refinement fieldNames
+    let currentProgramExprs = Parser.exprs currentState.program
+    let allFunctionDefs = extractFunctions currentProgramExprs
+    let functionDefs = filter (\case Parser.FuncDec{name} -> name /= "main"; Parser.FuncDef{name} -> name /= "main"; Parser.Function{dec = Parser.FuncDec{name}} -> name /= "main"; _ -> True) allFunctionDefs
+    let progExprs =
+            maybeToList structDef
+                ++ functionDefs
+                ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition
+                   , Parser.FuncDef "__refinement" [Parser.Var "it" Parser.zeroPosition] transformedRefinement Parser.anyPosition
+                   , Parser.FuncDec "main" [Parser.StructT "IO"] [] Parser.anyPosition
+                   , Parser.FuncDef
+                        "main"
+                        []
+                        ( Parser.DoBlock
+                            [ Parser.FuncCall "__refinement" [value] Parser.anyPosition
+                            ]
+                            Parser.anyPosition
+                        )
+                        Parser.anyPosition
+                   ]
+    let prog = Parser.Program progExprs
+    let freshState = initCompilerState prog
+        extractedFuncDecs = filter (\case Parser.FuncDec{} -> True; _ -> False) functionDefs
+        stateWithContext =
+            freshState
+                { funcDecs = currentState.funcDecs ++ extractedFuncDecs ++ [Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition]
+                , structDecs = currentState.structDecs
+                , skipRefinementCheck = True
+                }
+    compiled <- liftIO $ evalStateT (compileProgram prog) stateWithContext
+    case compiled of
+        Right _ -> return False
+        Left bytecode -> do
+            let mainPc = locateLabel bytecode "main"
+            let vm = (initVM (V.fromList bytecode)){pc = mainPc, callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainPc, locals = []}], shouldExit = False, running = True}
+            result <- liftIO $ runVMVM vm
+            let finalStack = stack result
+            let isRunning = running result
+            if isRunning
+                then return False
+                else return $ case find (\case DBool _ -> True; _ -> False) finalStack of
+                    Just (DBool b) -> b
+                    _ -> False
 
 createVirtualFunctions :: StateT (CompilerState a) IO ()
 createVirtualFunctions = do

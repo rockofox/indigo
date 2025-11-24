@@ -5,6 +5,7 @@ import BytecodeCompiler
 import Control.Monad (join)
 import Control.Monad.State (evalStateT, liftIO)
 import Data.Functor ((<&>))
+import Data.List (isInfixOf)
 import Data.Text qualified
 import Debug.Trace
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
@@ -58,6 +59,22 @@ compile prog = do
                 (initCompilerState program)
                     { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] [] AST.anyPosition]
                     }
+
+compileWithErrors :: String -> IO (Either [BytecodeCompiler.CompilerError] [VM.Instruction])
+compileWithErrors prog = do
+    let p = Parser.parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+    case p of
+        Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
+        Right program -> do
+            result <-
+                evalStateT
+                    (compileProgram program)
+                    (initCompilerState program)
+                        { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] [] AST.anyPosition]
+                        }
+            return $ case result of
+                Left instructions -> Right instructions
+                Right errors -> Left errors
 
 spec :: Spec
 spec = do
@@ -123,3 +140,59 @@ spec = do
                 \t1 t2 f ->
                     typesMatch f{types = [t1]} [t1, t2]
                         `shouldBe` False
+    describe "Refinement types" $ do
+        it "Should compile successfully when refinement passes" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Age = (value: Int) satisfies (value >= 0)
+                let main : IO = do
+                    let a = Age{value: 5}
+                end
+                |]
+            case result of
+                Left errors ->
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                     in if any ("Refinement failed" `isInfixOf`) errorMessages
+                            then expectationFailure $ "Expected successful compilation, got refinement error: " ++ show errors
+                            else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should produce error when refinement fails" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Age = (value: Int) satisfies (value >= 0)
+                let main : IO = do
+                    let a = Age{value: 0 - 1}
+                end
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Refinement failed" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected compilation error for failed refinement"
+        it "Should compile normally when struct has no refinement" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Person = (name: String)
+                let main : IO = do
+                    let p = Person{name: "Alice"}
+                end
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should compile refinements with equality" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Person = (name: String) satisfies (name == "Alice")
+                let main : IO = do
+                    let p = Person{name: "Alice"}
+                end
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()

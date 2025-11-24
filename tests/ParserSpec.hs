@@ -173,3 +173,64 @@ spec = do
                 parserCompilerFlags
                 `shouldBe` Right
                     (Program [FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")], funcDecPos = anyPosition}])
+    describe "Binary Operators" $ do
+        it "Should parse addition" $
+            parseProgram "1 + 2" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Add{addLhs = IntLit{intValue = 1, intPos = anyPosition}, addRhs = IntLit{intValue = 2, intPos = anyPosition}, addPos = anyPosition}])
+        it "Should parse subtraction" $
+            parseProgram "3 - 5" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Sub{subLhs = IntLit{intValue = 3, intPos = anyPosition}, subRhs = IntLit{intValue = 5, intPos = anyPosition}, subPos = anyPosition}])
+        it "Should parse multiplication" $
+            parseProgram "8 * 4" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Mul{mulLhs = IntLit{intValue = 8, intPos = anyPosition}, mulRhs = IntLit{intValue = 4, intPos = anyPosition}, mulPos = anyPosition}])
+        it "Should parse division" $
+            parseProgram "10 / 2" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Div{divLhs = IntLit{intValue = 10, intPos = anyPosition}, divRhs = IntLit{intValue = 2, intPos = anyPosition}, divPos = anyPosition}])
+        it "Should parse modulo" $
+            parseProgram "11 % 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Modulo{moduloLhs = IntLit{intValue = 11, intPos = anyPosition}, moduloRhs = IntLit{intValue = 3, intPos = anyPosition}, moduloPos = anyPosition}])
+        it "Should parse chained operations with correct precedence (1 + 2 * 3)" $
+            parseProgram "1 + 2 * 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Add{addLhs = IntLit{intValue = 1, intPos = anyPosition}, addRhs = Mul{mulLhs = IntLit{intValue = 2, intPos = anyPosition}, mulRhs = IntLit{intValue = 3, intPos = anyPosition}, mulPos = anyPosition}, addPos = anyPosition}])
+        it "Should parse chained operations with correct precedence ((1 + 2) * 3)" $
+            parseProgram "(1 + 2) * 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Mul{mulLhs = Add{addLhs = IntLit{intValue = 1, intPos = anyPosition}, addRhs = IntLit{intValue = 2, intPos = anyPosition}, addPos = anyPosition}, mulRhs = IntLit{intValue = 3, intPos = anyPosition}, mulPos = anyPosition}])
+        it "Should parse equality" $
+            parseProgram "4 == 5" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Eq{eqLhs = IntLit{intValue = 4, intPos = anyPosition}, eqRhs = IntLit{intValue = 5, intPos = anyPosition}, eqPos = anyPosition}])
+        it "Should parse inequality" $
+            parseProgram "4 != 5" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Neq{neqLhs = IntLit{intValue = 4, intPos = anyPosition}, neqRhs = IntLit{intValue = 5, intPos = anyPosition}, neqPos = anyPosition}])
+        it "Should parse less than" $
+            parseProgram "6 < 7" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Lt{ltLhs = IntLit{intValue = 6, intPos = anyPosition}, ltRhs = IntLit{intValue = 7, intPos = anyPosition}, ltPos = anyPosition}])
+        it "Should parse greater than" $
+            parseProgram "8 > 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Gt{gtLhs = IntLit{intValue = 8, intPos = anyPosition}, gtRhs = IntLit{intValue = 3, intPos = anyPosition}, gtPos = anyPosition}])
+        it "Should parse less-than or equal" $
+            parseProgram "2 <= 5" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Le{leLhs = IntLit{intValue = 2, intPos = anyPosition}, leRhs = IntLit{intValue = 5, intPos = anyPosition}, lePos = anyPosition}])
+        it "Should parse greater-than or equal" $
+            parseProgram "10 >= 10" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Ge{geLhs = IntLit{intValue = 10, intPos = anyPosition}, geRhs = IntLit{intValue = 10, intPos = anyPosition}, gePos = anyPosition}])
+        it "Should parse and" $
+            parseProgram "True && False" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [And{andLhs = BoolLit{boolValue = True, boolPos = anyPosition}, andRhs = BoolLit{boolValue = False, boolPos = anyPosition}, andPos = anyPosition}])
+        it "Should parse or" $
+            parseProgram "x || y" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Or{orLhs = Var{varName = "x", varPos = anyPosition}, orRhs = Var{varName = "y", varPos = anyPosition}, orPos = anyPosition}])
