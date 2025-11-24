@@ -21,6 +21,8 @@ jobs:
         uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-experimental-features = nix-command flakes ca-derivations
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
@@ -32,35 +34,19 @@ jobs:
       - name: Update ghc-wasm-meta input
         run: nix flake lock --update-input ghc-wasm-meta
 
-      - name: Cache cabal store
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cabal/store
-            ~/.cabal/packages
-          key: cabal-${{ runner.os }}-${{ hashFiles('indigo.cabal', 'cabal.project*') }}
-          restore-keys: |
-            cabal-${{ runner.os }}-
+      - name: Build with Nix
+        run: nix build .#indigo
 
-      - name: Build and run tests
+      - name: Run tests
         run: |
-          cabal update
-          cabal build
-          cabal test all
-        shell: nix develop --command bash -e {0}
-
-      - name: Save executable path
-        id: exe_path
-        run: |
-          INDIGO_EXE=$(cabal list-bin indigo | tail -n 1)
-          echo "path=$INDIGO_EXE" >> $GITHUB_OUTPUT
-        shell: nix develop --command bash -e {0}
+          nix develop --command bash -c "cabal update && cabal test all"
+        continue-on-error: false
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
         with:
           name: indigo-executable
-          path: ${{ steps.exe_path.outputs.path }}
+          path: result/bin/indigo
           retention-days: 1
 
   build_native_release:
@@ -79,6 +65,8 @@ jobs:
         uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-experimental-features = nix-command flakes ca-derivations
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
@@ -87,14 +75,13 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
         continue-on-error: true
 
-      - name: Download executable artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: indigo-executable
-          path: indigo-latest
+      - name: Build with Nix
+        run: nix build .#indigo
 
       - name: Prepare native release directory
         run: |
+          mkdir -p indigo-latest
+          cp result/bin/indigo indigo-latest/
           chmod +x indigo-latest/indigo
           cp -r share/std indigo-latest
 
@@ -123,6 +110,8 @@ jobs:
         uses: cachix/install-nix-action@v31
         with:
           nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-experimental-features = nix-command flakes ca-derivations impure-derivations
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
@@ -134,33 +123,14 @@ jobs:
       - name: Update ghc-wasm-meta input
         run: nix flake lock --update-input ghc-wasm-meta
 
-      - name: Cache WASM cabal store
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cabal/store
-            ~/.cabal/packages
-          key: wasm-cabal-${{ runner.os }}-${{ hashFiles('wasm_reactor/indigo-reactor.cabal', 'wasm_reactor/cabal.project*') }}
-          restore-keys: |
-            wasm-cabal-${{ runner.os }}-
-
-      - name: Build WASM reactor
-        run: |
-          cd wasm_reactor
-          wasm32-wasi-cabal update
-          wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer -f '-ffi'
-        shell: nix develop --command bash -e {0}
+      - name: Build WASM reactor with Nix
+        run: nix build .#build-wasm-reactor --extra-experimental-features "nix-command flakes ca-derivations impure-derivations"
 
       - name: Prepare WASM release
         run: |
           mkdir -p indigo-wasm-latest
-          cd wasm_reactor
-          INDIGO_WASM=$(wasm32-wasi-cabal list-bin indigo-wasm-reactor --allow-newer | tail -n 1)
-          wizer --allow-wasi --wasm-bulk-memory true "$INDIGO_WASM" -o indigo-init.wasm
-          cd ..
-          cp wasm_reactor/indigo-init.wasm indigo-wasm-latest/indigo-init.wasm
+          cp result/indigo-init.wasm indigo-wasm-latest/indigo-init.wasm
           cp -r share/std indigo-wasm-latest/
-        shell: nix develop --command bash -e {0}
 
       - name: Zip WASM release
         run: zip -r indigo-wasm-latest.zip indigo-wasm-latest/*

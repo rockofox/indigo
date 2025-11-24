@@ -26,38 +26,6 @@
           };
         };
         indigo = se.haskell.lib.justStaticExecutables se.haskellPackages.indigo;
-        build-wasm-reactor = se.stdenv.mkDerivation {
-          pname = "indigo-wasm-reactor";
-          version = "0.1.0.0";
-          src = se.lib.cleanSource ./.;
-          nativeBuildInputs = [
-            # se.cabal-install
-            se.wizer
-            ghc-wasm-meta.packages.${se.stdenv.hostPlatform.system}.default
-          ];
-          buildPhase = ''
-            export HOME=$TMPDIR
-            export CABAL_DIR=$TMPDIR/.cabal
-            mkdir -p $CABAL_DIR
-            export CABAL_CONFIG=$CABAL_DIR/config
-            cd wasm_reactor
-            # Initialize cabal config (no --config-file here)
-            # wasm32-wasi-cabal user-config init
-            # Use regular cabal to update the package index first
-            # cabal update --config-file=$CABAL_CONFIG
-            wasm32-wasi-cabal update
-            # Copy the package index to the wasm cabal directory
-            cp -r $HOME/.cabal/packages $CABAL_DIR/ || true
-            wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer='base' -f '-ffi'
-          '';
-          installPhase = ''
-            INDIGO_WASM=$(wasm32-wasi-cabal list-bin exe:indigo-wasm-reactor --allow-newer=base | tail -n 1)
-            mkdir -p "$out"
-            cp "$INDIGO_WASM" "$out/indigo-wasm-reactor.wasm"
-            ${se.wizer}/bin/wizer --allow-wasi --wasm-bulk-memory true "$out/indigo-wasm-reactor.wasm" -o "$out/indigo-init.wasm"
-          '';
-          dontFixup = true;
-        };
       };
     in
     flake-utils.lib.eachDefaultSystem (system:
@@ -65,6 +33,90 @@
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ overlay ];
+        };
+        wasmGHC = ghc-wasm-meta.packages.${system}.wasm32-wasi-ghc-9_14;
+        wasmCabal = ghc-wasm-meta.packages.${system}.wasm32-wasi-cabal-9_14;
+
+        indigoWasm = pkgs.stdenv.mkDerivation {
+          pname = "indigo-wasm";
+          version = "0.1.0.0";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [
+            wasmGHC
+            wasmCabal
+            pkgs.cabal-install
+          ];
+          __impure = true;
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export CABAL_DIR=$TMPDIR/.cabal
+            mkdir -p $CABAL_DIR
+            cd wasm_reactor
+            wasm32-wasi-cabal update
+            wasm32-wasi-cabal build lib:indigo --allow-newer --project-file=cabal.project
+          '';
+          installPhase = ''
+            mkdir -p $out
+            cp -r dist-newstyle $out/
+          '';
+          dontFixup = true;
+        };
+
+        indigoWasmReactor = pkgs.stdenv.mkDerivation {
+          pname = "indigo-wasm-reactor";
+          version = "0.1.0.0";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [
+            wasmGHC
+            wasmCabal
+            pkgs.cabal-install
+          ];
+          buildInputs = [
+            indigoWasm
+          ];
+          __impure = true;
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export CABAL_DIR=$TMPDIR/.cabal
+            mkdir -p $CABAL_DIR
+            cp -r ${indigoWasm}/dist-newstyle ./dist-newstyle || true
+            cd wasm_reactor
+            wasm32-wasi-cabal update
+            wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer --project-file=cabal.project
+          '';
+          installPhase = ''
+            INDIGO_WASM=$(wasm32-wasi-cabal list-bin exe:indigo-wasm-reactor --allow-newer | tail -n 1)
+            mkdir -p $out/bin
+            cp "$INDIGO_WASM" $out/bin/indigo-wasm-reactor.wasm
+          '';
+          dontFixup = true;
+        };
+
+        build-wasm-reactor = pkgs.stdenv.mkDerivation {
+          pname = "indigo-wasm-reactor";
+          version = "0.1.0.0";
+          src = pkgs.lib.cleanSource ./.;
+          nativeBuildInputs = [
+            pkgs.wizer
+          ];
+          buildInputs = [
+            indigoWasmReactor
+          ];
+          __impure = true;
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export XDG_CACHE_HOME=$TMPDIR/.cache
+            mkdir -p $out $XDG_CACHE_HOME
+            INDIGO_WASM=${indigoWasmReactor}/bin/indigo-wasm-reactor.wasm
+            if [ ! -f "$INDIGO_WASM" ]; then
+              echo "Error: Could not find wasm file at $INDIGO_WASM"
+              find ${indigoWasmReactor} -type f | head -20
+              exit 1
+            fi
+            cp "$INDIGO_WASM" "$out/indigo-wasm-reactor.wasm"
+            ${pkgs.wizer}/bin/wizer --allow-wasi --wasm-bulk-memory true "$out/indigo-wasm-reactor.wasm" -o "$out/indigo-init.wasm"
+          '';
+          dontFixup = true;
         };
       in
       {
@@ -101,7 +153,7 @@
         packages = {
           default = pkgs.indigo;
           indigo = pkgs.indigo;
-          build-wasm-reactor = pkgs.build-wasm-reactor;
+          build-wasm-reactor = build-wasm-reactor;
         };
         devShell = pkgs.haskellPackages.shellFor {
           packages = p: [ p."indigo" ];
