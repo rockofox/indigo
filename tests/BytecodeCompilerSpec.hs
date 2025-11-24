@@ -196,3 +196,55 @@ spec = do
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
                 Right _ -> return ()
+        it "Should compile successfully when refinement passes with local bindings" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Age = (value: Int) satisfies (value >= 0)
+                let main : IO = do
+                    let ageValue = 25
+                    let a = Age{value: ageValue}
+                end
+                |]
+            case result of
+                Left errors ->
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                     in if any ("Refinement failed" `isInfixOf`) errorMessages
+                            then expectationFailure $ "Expected successful compilation, got refinement error: " ++ show errors
+                            else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should produce error when refinement fails with local bindings" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Age = (value: Int) satisfies (value >= 0)
+                let main : IO = do
+                    let ageValue = 0 - 5
+                    let a = Age{value: ageValue}
+                end
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Refinement failed" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected compilation error for failed refinement with local bindings"
+        it "Should compile successfully with multiple local bindings in refinement" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let notJohn (x: String): Boolean = x != "John"
+                struct Teacher = (name: String, age: Int) satisfies ((notJohn name) && age > 18)
+                let main : IO = do
+                    let hisAge = 19
+                    let otherName = "Johnny"
+                    let t = Teacher { name: otherName, age: hisAge }
+                end
+                |]
+            case result of
+                Left errors ->
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                     in if any ("Refinement failed" `isInfixOf`) errorMessages
+                            then expectationFailure $ "Expected successful compilation, got refinement error: " ++ show errors
+                            else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()

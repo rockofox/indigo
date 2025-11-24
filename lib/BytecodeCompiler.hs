@@ -1095,6 +1095,43 @@ transformRefinementExpr expr fieldNames = case expr of
         Parser.FuncCall funcName (map (`transformRefinementExpr` fieldNames) funcArgs) funcPos
     _ -> expr
 
+extractVariables :: Parser.Expr -> [String]
+extractVariables expr = case expr of
+    Parser.Var{varName} -> [varName]
+    Parser.StructLit{structLitFields} -> concatMap (extractVariables . snd) structLitFields
+    Parser.FuncCall{funcArgs} -> concatMap extractVariables funcArgs
+    Parser.Add{addLhs, addRhs} -> extractVariables addLhs ++ extractVariables addRhs
+    Parser.Sub{subLhs, subRhs} -> extractVariables subLhs ++ extractVariables subRhs
+    Parser.Mul{mulLhs, mulRhs} -> extractVariables mulLhs ++ extractVariables mulRhs
+    Parser.Div{divLhs, divRhs} -> extractVariables divLhs ++ extractVariables divRhs
+    Parser.Gt{gtLhs, gtRhs} -> extractVariables gtLhs ++ extractVariables gtRhs
+    Parser.Lt{ltLhs, ltRhs} -> extractVariables ltLhs ++ extractVariables ltRhs
+    Parser.Ge{geLhs, geRhs} -> extractVariables geLhs ++ extractVariables geRhs
+    Parser.Le{leLhs, leRhs} -> extractVariables leLhs ++ extractVariables leRhs
+    Parser.Eq{eqLhs, eqRhs} -> extractVariables eqLhs ++ extractVariables eqRhs
+    Parser.Neq{neqLhs, neqRhs} -> extractVariables neqLhs ++ extractVariables neqRhs
+    Parser.And{andLhs, andRhs} -> extractVariables andLhs ++ extractVariables andRhs
+    Parser.Or{orLhs, orRhs} -> extractVariables orLhs ++ extractVariables orRhs
+    Parser.Not{notExpr} -> extractVariables notExpr
+    Parser.UnaryMinus{unaryMinusExpr} -> extractVariables unaryMinusExpr
+    Parser.StructAccess{structAccessStruct, structAccessField} -> extractVariables structAccessStruct ++ extractVariables structAccessField
+    Parser.If{ifCond, ifThen, ifElse} -> extractVariables ifCond ++ extractVariables ifThen ++ extractVariables ifElse
+    Parser.Let{letValue} -> extractVariables letValue
+    Parser.DoBlock{doBlockExprs} -> concatMap extractVariables doBlockExprs
+    Parser.ListLit{listLitExprs} -> concatMap extractVariables listLitExprs
+    Parser.ParenApply{parenApplyExpr, parenApplyArgs} -> extractVariables parenApplyExpr ++ concatMap extractVariables parenApplyArgs
+    _ -> []
+
+extractLets :: [Parser.Expr] -> [Parser.Expr]
+extractLets = concatMap extractLet
+  where
+    extractLet expr@(Parser.Let{letValue}) = expr : extractLets [letValue]
+    extractLet (Parser.FuncDef{body}) = extractLets [body]
+    extractLet (Parser.DoBlock{doBlockExprs}) = extractLets doBlockExprs
+    extractLet (Parser.If{ifThen, ifElse}) = extractLets [ifThen, ifElse]
+    extractLet (Parser.Function{def}) = extractLets def
+    extractLet _ = []
+
 extractFunctions :: [Parser.Expr] -> [Parser.Expr]
 extractFunctions = concatMap extractFunction
   where
@@ -1132,6 +1169,13 @@ runRefinement refinement value = do
     let currentProgramExprs = Parser.exprs currentState.program
     let allFunctionDefs = extractFunctions currentProgramExprs
     let functionDefs = filter (\case Parser.FuncDec{name} -> name /= "main"; Parser.FuncDef{name} -> name /= "main"; Parser.Function{dec = Parser.FuncDec{name}} -> name /= "main"; _ -> True) allFunctionDefs
+    let referencedVars = nub $ extractVariables value
+    let allLets = extractLets currentProgramExprs
+    let neededLets = filter (\case Parser.Let{letName} -> letName `elem` referencedVars; _ -> False) allLets
+    let mainBody =
+            if null neededLets
+                then [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
+                else neededLets ++ [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
     let progExprs =
             maybeToList structDef
                 ++ functionDefs
@@ -1141,11 +1185,7 @@ runRefinement refinement value = do
                    , Parser.FuncDef
                         "main"
                         []
-                        ( Parser.DoBlock
-                            [ Parser.FuncCall "__refinement" [value] Parser.anyPosition
-                            ]
-                            Parser.anyPosition
-                        )
+                        (Parser.DoBlock mainBody Parser.anyPosition)
                         Parser.anyPosition
                    ]
     let prog = Parser.Program progExprs
