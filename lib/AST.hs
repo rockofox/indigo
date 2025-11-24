@@ -2,67 +2,68 @@ module AST where
 
 import Data.Binary qualified
 import Data.Maybe (maybeToList)
+import Debug.Trace (trace, traceM)
 import GHC.Generics (Generic)
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
 
 data Expr
     = Var {varName :: String, varPos :: Position}
-    | BoolLit {boolValue :: Bool}
-    | IntLit {intValue :: Integer}
-    | StringLit {stringValue :: String}
-    | FloatLit {floatValue :: Float}
-    | DoubleLit {doubleValue :: Double}
-    | If {ifCond :: Expr, ifThen :: Expr, ifElse :: Expr}
-    | Let {letName :: String, letValue :: Expr}
-    | FuncDef {name :: String, args :: [Expr], body :: Expr}
+    | BoolLit {boolValue :: Bool, boolPos :: Position}
+    | IntLit {intValue :: Integer, intPos :: Position}
+    | StringLit {stringValue :: String, stringPos :: Position}
+    | FloatLit {floatValue :: Float, floatPos :: Position}
+    | DoubleLit {doubleValue :: Double, doublePos :: Position}
+    | If {ifCond :: Expr, ifThen :: Expr, ifElse :: Expr, ifPos :: Position}
+    | Let {letName :: String, letValue :: Expr, letPos :: Position}
+    | FuncDef {name :: String, args :: [Expr], body :: Expr, funcDefPos :: Position}
     | FuncCall {funcName :: String, funcArgs :: [Expr], funcPos :: Position}
-    | FuncDec {name :: String, types :: [Type], generics :: [GenericExpr]}
-    | Function {def :: [Expr], dec :: Expr}
-    | DoBlock {doBlockExprs :: [Expr]}
-    | ExternDec {externName :: String, externType :: String, externArgs :: [Type]}
-    | Add {addLhs :: Expr, addRhs :: Expr}
-    | Sub {subLhs :: Expr, subRhs :: Expr}
-    | Mul {mulLhs :: Expr, mulRhs :: Expr}
-    | Div {divLhs :: Expr, divRhs :: Expr}
-    | Eq {eqLhs :: Expr, eqRhs :: Expr}
-    | Neq {neqLhs :: Expr, neqRhs :: Expr}
-    | Lt {ltLhs :: Expr, ltRhs :: Expr}
-    | Gt {gtLhs :: Expr, gtRhs :: Expr}
-    | Le {leLhs :: Expr, leRhs :: Expr}
-    | Ge {geLhs :: Expr, geRhs :: Expr}
-    | And {andLhs :: Expr, andRhs :: Expr}
-    | Or {orLhs :: Expr, orRhs :: Expr}
-    | Not {notExpr :: Expr}
-    | UnaryMinus {unaryMinusExpr :: Expr}
-    | Placeholder
-    | Discard {discardExpr :: Expr}
-    | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String}
-    | Ref {refExpr :: Expr}
-    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String]}
+    | FuncDec {name :: String, types :: [Type], generics :: [GenericExpr], funcDecPos :: Position}
+    | Function {def :: [Expr], dec :: Expr, functionPos :: Position}
+    | DoBlock {doBlockExprs :: [Expr], doBlockPos :: Position}
+    | ExternDec {externName :: String, externType :: String, externArgs :: [Type], externDecPos :: Position}
+    | Add {addLhs :: Expr, addRhs :: Expr, addPos :: Position}
+    | Sub {subLhs :: Expr, subRhs :: Expr, subPos :: Position}
+    | Mul {mulLhs :: Expr, mulRhs :: Expr, mulPos :: Position}
+    | Div {divLhs :: Expr, divRhs :: Expr, divPos :: Position}
+    | Eq {eqLhs :: Expr, eqRhs :: Expr, eqPos :: Position}
+    | Neq {neqLhs :: Expr, neqRhs :: Expr, neqPos :: Position}
+    | Lt {ltLhs :: Expr, ltRhs :: Expr, ltPos :: Position}
+    | Gt {gtLhs :: Expr, gtRhs :: Expr, gtPos :: Position}
+    | Le {leLhs :: Expr, leRhs :: Expr, lePos :: Position}
+    | Ge {geLhs :: Expr, geRhs :: Expr, gePos :: Position}
+    | And {andLhs :: Expr, andRhs :: Expr, andPos :: Position}
+    | Or {orLhs :: Expr, orRhs :: Expr, orPos :: Position}
+    | Not {notExpr :: Expr, notPos :: Position}
+    | UnaryMinus {unaryMinusExpr :: Expr, unaryMinusPos :: Position}
+    | Placeholder {placeholderPos :: Position}
+    | Discard {discardExpr :: Expr, discardPos :: Position}
+    | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String, importPos :: Position}
+    | Ref {refExpr :: Expr, refPos :: Position}
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], structPos :: Position}
     | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitPos :: Position}
-    | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr}
-    | ListLit {listLitExprs :: [Expr]}
-    | ListPattern {listPatternExprs :: [Expr]}
-    | ListConcat {listConcatLhs :: Expr, listConcatRhs :: Expr}
-    | ListAdd {listAddLhs :: Expr, listAddRhs :: Expr}
-    | ArrayAccess {arrayAccessArray :: Expr, arrayAccessIndex :: Expr}
-    | Modulo {moduloLhs :: Expr, moduloRhs :: Expr}
-    | Power {powerBase :: Expr, powerExponent :: Expr}
-    | Target {targetName :: String, targetExpr :: Expr}
-    | Then {thenLhs :: Expr, thenRhs :: Expr}
-    | Pipeline {pipelineLhs :: Expr, pipelineRhs :: Expr}
-    | Lambda {lambdaArgs :: [Expr], lambdaBody :: Expr}
-    | Cast {castExpr :: Expr, castType :: Expr}
-    | TypeLit {typeLitType :: Type}
-    | Flexible {flexibleExpr :: Expr}
-    | Trait {name :: String, methods :: [Expr]}
-    | Impl {trait :: String, for :: String, methods :: [Expr]}
-    | StrictEval {strictEvalExpr :: Expr}
-    | External {externalName :: String, externalArgs :: [Expr]}
-    | CharLit {charValue :: Char}
+    | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr, structAccessPos :: Position}
+    | ListLit {listLitExprs :: [Expr], listLitPos :: Position}
+    | ListPattern {listPatternExprs :: [Expr], listPatternPos :: Position}
+    | ListConcat {listConcatLhs :: Expr, listConcatRhs :: Expr, listConcatPos :: Position}
+    | ListAdd {listAddLhs :: Expr, listAddRhs :: Expr, listAddPos :: Position}
+    | ArrayAccess {arrayAccessArray :: Expr, arrayAccessIndex :: Expr, arrayAccessPos :: Position}
+    | Modulo {moduloLhs :: Expr, moduloRhs :: Expr, moduloPos :: Position}
+    | Power {powerBase :: Expr, powerExponent :: Expr, powerPos :: Position}
+    | Target {targetName :: String, targetExpr :: Expr, targetPos :: Position}
+    | Then {thenLhs :: Expr, thenRhs :: Expr, thenPos :: Position}
+    | Pipeline {pipelineLhs :: Expr, pipelineRhs :: Expr, pipelinePos :: Position}
+    | Lambda {lambdaArgs :: [Expr], lambdaBody :: Expr, lambdaPos :: Position}
+    | Cast {castExpr :: Expr, castType :: Expr, castPos :: Position}
+    | TypeLit {typeLitType :: Type, typeLitPos :: Position}
+    | Flexible {flexibleExpr :: Expr, flexiblePos :: Position}
+    | Trait {name :: String, methods :: [Expr], traitPos :: Position}
+    | Impl {trait :: String, for :: String, methods :: [Expr], implPos :: Position}
+    | StrictEval {strictEvalExpr :: Expr, strictEvalPos :: Position}
+    | External {externalName :: String, externalArgs :: [Expr], externalPos :: Position}
+    | CharLit {charValue :: Char, charPos :: Position}
     | ParenApply {parenApplyExpr :: Expr, parenApplyArgs :: [Expr], parenApplyPos :: Position}
-    | When {whenExpr :: Expr, whenBranches :: [(Expr, Expr)], whenElse :: Maybe Expr}
+    | When {whenExpr :: Expr, whenBranches :: [(Expr, Expr)], whenElse :: Maybe Expr, whenPos :: Position}
     deriving
         ( Show
         , Generic
@@ -70,62 +71,62 @@ data Expr
         )
 
 children :: Expr -> [Expr]
-children (Add a b) = [a, b]
-children (Sub a b) = [a, b]
-children (Mul a b) = [a, b]
-children (Div a b) = [a, b]
-children (Eq a b) = [a, b]
-children (Neq a b) = [a, b]
-children (Lt a b) = [a, b]
-children (Gt a b) = [a, b]
-children (Le a b) = [a, b]
-children (Ge a b) = [a, b]
-children (And a b) = [a, b]
-children (Or a b) = [a, b]
-children (Not a) = [a]
-children (UnaryMinus a) = [a]
-children (If a b c) = [a, b, c]
-children (Let _ a) = [a]
+children (Add a b _) = [a, b]
+children (Sub a b _) = [a, b]
+children (Mul a b _) = [a, b]
+children (Div a b _) = [a, b]
+children (Eq a b _) = [a, b]
+children (Neq a b _) = [a, b]
+children (Lt a b _) = [a, b]
+children (Gt a b _) = [a, b]
+children (Le a b _) = [a, b]
+children (Ge a b _) = [a, b]
+children (And a b _) = [a, b]
+children (Or a b _) = [a, b]
+children (Not a _) = [a]
+children (UnaryMinus a _) = [a]
+children (If a b c _) = [a, b, c]
+children (Let _ a _) = [a]
 children (FuncDef{body}) = [body]
 children (FuncCall{funcArgs}) = funcArgs
-children (Function a b) = a ++ [b]
-children (DoBlock a) = a
+children (Function a b _) = a ++ [b]
+children (DoBlock a _) = a
 children (ExternDec{}) = []
-children Placeholder = []
+children (Placeholder _) = []
 children (Var _ _) = []
-children (BoolLit _) = []
-children (IntLit _) = []
-children (StringLit _) = []
-children (FloatLit _) = []
-children (Discard a) = [a]
+children (BoolLit _ _) = []
+children (IntLit _ _) = []
+children (StringLit _ _) = []
+children (FloatLit _ _) = []
+children (Discard a _) = [a]
 children (Import{}) = []
-children (Ref a) = [a]
+children (Ref a _) = [a]
 children (Struct{}) = []
 children (StructLit{structLitFields}) = map snd structLitFields
-children (StructAccess a b) = [a, b]
-children (ListLit a) = a
-children (ListPattern a) = a
-children (ListConcat a b) = [a, b]
-children (ArrayAccess a b) = [a, b]
-children (Modulo a b) = [a, b]
-children (Power a b) = [a, b]
-children (Target _ a) = [a]
-children (Then a b) = [a, b]
-children (Pipeline a b) = [a, b]
-children (Lambda _ a) = [a]
-children (Cast a b) = [a, b]
-children (TypeLit _) = []
-children (Flexible a) = [a]
-children (Trait _ a) = a
-children (Impl _ _ a) = a
+children (StructAccess a b _) = [a, b]
+children (ListLit a _) = a
+children (ListPattern a _) = a
+children (ListConcat a b _) = [a, b]
+children (ArrayAccess a b _) = [a, b]
+children (Modulo a b _) = [a, b]
+children (Power a b _) = [a, b]
+children (Target _ a _) = [a]
+children (Then a b _) = [a, b]
+children (Pipeline a b _) = [a, b]
+children (Lambda _ a _) = [a]
+children (Cast a b _) = [a, b]
+children (TypeLit _ _) = []
+children (Flexible a _) = [a]
+children (Trait _ a _) = a
+children (Impl _ _ a _) = a
 children (FuncDec{}) = []
-children (StrictEval a) = [a]
-children (External _ a) = a
-children (CharLit _) = []
-children (DoubleLit _) = []
+children (StrictEval a _) = [a]
+children (External _ a _) = a
+children (CharLit _ _) = []
+children (DoubleLit _ _) = []
 children (ParenApply a b _) = a : b
-children (ListAdd a b) = [a, b]
-children (When expr branches else_) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
+children (ListAdd a b _) = [a, b]
+children (When expr branches else_ _) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -190,70 +191,74 @@ compareTypes (Fn x y) (Fn a b) = do
 compareTypes Self Self = True
 compareTypes Self StructT{} = True
 compareTypes StructT{} Self = True
+compareTypes (StructT x) (StructT y) = x == y
 compareTypes (List x) (List y) = compareTypes x y
 compareTypes Unknown _ = True
 compareTypes _ Unknown = True
-compareTypes x y = x == y || x == Any || y == Any
+compareTypes Any Any = True
+compareTypes _ Any = True
+compareTypes Any _ = False
+compareTypes x y = x == y
 
 typeOf :: Expr -> Type
-typeOf (IntLit _) = StructT "Int"
-typeOf (FloatLit _) = StructT "Float"
-typeOf (BoolLit _) = StructT "Bool"
-typeOf (StringLit _) = StructT "String"
-typeOf (Add x _) = typeOf x
-typeOf (Sub x _) = typeOf x
-typeOf (Mul x _) = typeOf x
-typeOf (Div x _) = typeOf x
-typeOf (Power x _) = typeOf x
-typeOf (UnaryMinus x) = typeOf x
-typeOf (Eq _ _) = StructT "Bool"
-typeOf (Neq _ _) = StructT "Bool"
-typeOf (Lt _ _) = StructT "Bool"
-typeOf (Gt _ _) = StructT "Bool"
-typeOf (Le _ _) = StructT "Bool"
-typeOf (Ge _ _) = StructT "Bool"
-typeOf (And _ _) = StructT "Bool"
-typeOf (Or _ _) = StructT "Bool"
-typeOf (Not _) = StructT "Bool"
+typeOf (IntLit _ _) = StructT "Int"
+typeOf (FloatLit _ _) = StructT "Float"
+typeOf (BoolLit _ _) = StructT "Bool"
+typeOf (StringLit _ _) = StructT "String"
+typeOf (Add x _ _) = typeOf x
+typeOf (Sub x _ _) = typeOf x
+typeOf (Mul x _ _) = typeOf x
+typeOf (Div x _ _) = typeOf x
+typeOf (Power x _ _) = typeOf x
+typeOf (UnaryMinus x _) = typeOf x
+typeOf (Eq{}) = StructT "Bool"
+typeOf (Neq{}) = StructT "Bool"
+typeOf (Lt{}) = StructT "Bool"
+typeOf (Gt{}) = StructT "Bool"
+typeOf (Le{}) = StructT "Bool"
+typeOf (Ge{}) = StructT "Bool"
+typeOf (And{}) = StructT "Bool"
+typeOf (Or{}) = StructT "Bool"
+typeOf (Not _ _) = StructT "Bool"
 typeOf (FuncCall{}) = Any
-typeOf Placeholder = Any
-typeOf (Var{}) = Any
-typeOf (Let _ _) = error "Cannot infer type of let"
-typeOf (If _ b _) = typeOf b
+typeOf (Placeholder _) = Any
+typeOf Var{} = error "This should never happen"
+typeOf (Let{}) = error "Cannot infer type of let"
+typeOf (If _ b _ _) = typeOf b
 typeOf (FuncDef{}) = error "Cannot infer type of function definition"
 typeOf x@(FuncDec{}) = error $ "Cannot infer type of function declaration " ++ show x
-typeOf (Function _ _) = Unknown -- error "Cannot infer type of modern function"
-typeOf (DoBlock x) = if null x then None else typeOf $ last x
+typeOf (Function{}) = Unknown -- error "Cannot infer type of modern function"
+typeOf (DoBlock x _) = if null x then None else typeOf $ last x
 typeOf (ExternDec{}) = error "Cannot infer type of extern declaration"
-typeOf (Discard _) = error "Cannot infer type of discard"
+typeOf (Discard _ _) = error "Cannot infer type of discard"
 typeOf (Import{}) = error "Cannot infer type of import"
-typeOf (Ref _) = error "Cannot infer type of ref"
+typeOf (Ref _ _) = error "Cannot infer type of ref"
 typeOf (Struct{}) = error "Cannot infer type of struct"
 typeOf (StructLit x _ _) = StructT x
-typeOf (ListLit [Var{varName}]) = List $ StructT varName
-typeOf (ListLit x) = if null x then List Any else List $ typeOf $ head x
-typeOf (ArrayAccess _ _) = error "Cannot infer type of array access"
-typeOf (Modulo x _) = typeOf x
-typeOf (Target _ _) = error "Cannot infer type of target"
-typeOf (ListConcat x _) = typeOf x
-typeOf (ListPattern _) = List Any
-typeOf (StructAccess _ s) = typeOf s
-typeOf (Pipeline _ b) = typeOf b
-typeOf (Lambda _ _) = Fn [] Any
-typeOf (Cast _ (Var to _)) = StructT to
-typeOf (Cast _ b) = typeOf b
-typeOf (TypeLit x) = x
-typeOf (Flexible x) = typeOf x
-typeOf (Trait _ _) = error "Cannot infer type of trait"
+typeOf (ListLit [Var{varName}] _) = List $ StructT varName
+typeOf (ListLit x _) = if null x then List Any else List $ typeOf $ head x
+typeOf (ArrayAccess{}) = error "Cannot infer type of array access"
+typeOf (Modulo x _ _) = typeOf x
+typeOf (Target{}) = error "Cannot infer type of target"
+typeOf (ListConcat x _ _) = typeOf x
+typeOf (ListPattern _ _) = List Any
+typeOf (StructAccess _ s _) = typeOf s
+typeOf (Pipeline _ b _) = typeOf b
+typeOf (Lambda{}) = Fn [] Any
+typeOf (Cast _ (Var to _) _) = StructT to
+typeOf (Cast _ b _) = typeOf b
+typeOf (TypeLit x _) = x
+typeOf (Flexible x _) = typeOf x
+typeOf (Trait{}) = error "Cannot infer type of trait"
 typeOf (Impl{}) = error "Cannot infer type of impl"
-typeOf (Then _ b) = typeOf b
-typeOf (StrictEval x) = typeOf x
-typeOf (External _ _) = error "Cannot infer type of external"
-typeOf (CharLit _) = StructT "Char"
-typeOf (DoubleLit _) = StructT "Double"
+typeOf (Then _ b _) = typeOf b
+typeOf (StrictEval x _) = typeOf x
+typeOf (External{}) = error "Cannot infer type of external"
+typeOf (CharLit _ _) = StructT "Char"
+typeOf (DoubleLit _ _) = StructT "Double"
 typeOf (ParenApply a _ _) = typeOf a
-typeOf (ListAdd x _) = typeOf x
-typeOf (When _ branches else_) = if null branches then maybe Any typeOf else_ else typeOf (snd $ head branches)
+typeOf (ListAdd x _ _) = typeOf x
+typeOf (When _ branches else_ _) = if null branches then maybe Unknown typeOf else_ else typeOf (snd $ head branches)
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True

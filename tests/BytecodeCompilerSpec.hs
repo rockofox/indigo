@@ -56,7 +56,7 @@ compile prog = do
                     Left p -> return p
                 )
                 (initCompilerState program)
-                    { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] []]
+                    { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] [] AST.anyPosition]
                     }
 
 spec :: Spec

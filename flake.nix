@@ -97,13 +97,14 @@
             pkgs.haskellPackages.ghcid
             pkgs.haskellPackages.fourmolu
             pkgs.haskellPackages.hlint
+            pkgs.haskellPackages.ghci-dap
+            pkgs.haskellPackages.haskell-debug-adapter
             pkgs.wasmtime
             pkgs.wabt
             pkgs.wizer
             ghc-wasm-meta.packages.${system}.default
           ];
           withHoogle = false;
-          inherit (inputs.self.checks.${system}.pre-commit-check) shellHook;
         };
       });
 }

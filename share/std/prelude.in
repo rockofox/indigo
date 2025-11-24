@@ -1,7 +1,7 @@
+struct IO = (inner: Any)
+
 nop :: IO
 nop _ = IO{inner: (-1)}
-
-struct IO = (inner: Any)
 
 trait Optional
 struct Some = (value: Any) is Optional
@@ -30,20 +30,25 @@ impl Monad for IO = do
   sequence IO{inner: x} IO{inner: y} = IO{inner: y}
 end
 
-let + (x: Int y: Int) : Int = unsafeAdd x, y
-let - (x: Int y: Int) : Int = unsafeSub x, y
-let * (x: Int y: Int) : Int = unsafeMul x, y
-let / (x: Int y: Int) : Int = unsafeDiv x, y
-let `<` (x: Int y: Int) : Int = unsafeLt x, y
-let `>` (x: Int y: Int) : Int = unsafeGt x, y
-let `<=` (x: Int y: Int) : Int = unsafeLe x, y
-let `>=` (x: Int y: Int) : Int = unsafeGe x, y
+trait Number
+
+impl Number for Int
+impl Number for Float
+
+let + (x: Number y: Number) : Number = unsafeAdd x, y
+let - (x: Number y: Number) : Number = unsafeSub x, y
+let * (x: Number y: Number) : Number = unsafeMul x, y
+let / (x: Number y: Number) : Number = unsafeDiv x, y
+let `<` (x: Number y: Number) : Bool = unsafeLt x, y
+let `>` (x: Number y: Number) : Bool = unsafeGt x, y
+let `<=` (x: Number y: Number) : Bool = unsafeLe x, y
+let `>=` (x: Number y: Number) : Bool = unsafeGe x, y
 let == (x: Any y: Any) : Bool = unsafeEq x, y
 let != (x: Any y: Any) : Bool = unsafeNeq x, y
 let && (x: Bool y: Bool) : Bool = unsafeAnd x, y
 let || (x: Bool y: Bool) : Bool = unsafeOr x, y
-let % (x: Any y: Any) : Int = unsafeMod x, y
-let ++ (x: Any y: Any) : String = unsafeListAdd x, y
+let % (x: Number y: Number) : Number = unsafeMod x, y
+let ++ (x: Number y: Number) : Number = unsafeListAdd x, y
 
 let flip (f: (Any -> Any -> Any) x: Any y: Any): (Any -> Any -> Any) = f y, x
 

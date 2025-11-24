@@ -26,7 +26,6 @@ import Debug.Trace
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
-import GitHash
 import Optimizer
 import Options.Applicative
 import Parser
@@ -35,7 +34,6 @@ import System.Exit (exitFailure, exitSuccess)
 import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle)
 import VM qualified
-import Verifier
 
 data CmdOptions = Options
     { input :: Maybe FilePath
@@ -83,10 +81,10 @@ optionsParser =
         <*> switch (long "no-optimize" <> short 'O' <> help "Don't optimize the program")
 
 prettyPrintExpr :: Expr -> Int -> String
-prettyPrintExpr (DoBlock exprs) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
-prettyPrintExpr (FuncDef name _ expr) i =
+prettyPrintExpr (DoBlock exprs _) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
+prettyPrintExpr (FuncDef name _ expr _) i =
     case expr of
-        DoBlock _ -> "FuncDef[<" ++ name ++ ">\n" ++ prettyPrintExpr expr (i + 1) ++ "\n" ++ indent i ++ "]"
+        DoBlock _ _ -> "FuncDef[<" ++ name ++ ">\n" ++ prettyPrintExpr expr (i + 1) ++ "\n" ++ indent i ++ "]"
         _ -> "FuncDef[<" ++ name ++ ">" ++ prettyPrintExpr expr 0 ++ "]"
 prettyPrintExpr x i = indent i ++ show x
 
@@ -119,10 +117,7 @@ parseAndVerify name input compilerFlags path =
                 Left err -> return $ Left (err, Nothing)
                 Right program' -> do
                     let (Program exprs) = program'
-                    verifierResult <- verifyProgramWithPath name (T.pack input) exprs path
-                    case verifierResult of
-                        Left err -> return $ Left (err, Just program')
-                        Right _ -> return $ Right program'
+                    return $ Right program'
         )
 
 parseNoVerify name input compilerFlags = return $ do
@@ -215,7 +210,7 @@ cmd input = do
             (Program sexprs) <- gets program
             modify (\s -> s{previousProgram = Program sexprs})
             modify (\s -> s{program = Program (sexprs ++ pexrs)})
-            mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [])])
+            mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [] AST.anyPosition) AST.anyPosition])
             compilationResult <- liftIO $ evalStateT (BytecodeCompiler.compileProgram mergedProgram) (BytecodeCompiler.initCompilerState mergedProgram)
             case compilationResult of
                 Right errors -> liftIO $ putStrLn $ "Compilation errors: " ++ show errors
@@ -239,8 +234,8 @@ replCompleter n = do
     let names = map nameOf exprs
     return $ filter (isPrefixOf n) names
   where
-    nameOf (FuncDef name _ _) = name
-    nameOf (Function def dec) = nameOf (head def)
+    nameOf (FuncDef name _ _ _) = name
+    nameOf (Function def dec _) = nameOf (head def)
     nameOf _ = ""
 
 opts :: [(String, String -> Repl ())]

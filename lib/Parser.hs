@@ -24,6 +24,7 @@ import Control.Monad.State
     , State
     , runState
     )
+import Data.Bifunctor (bimap, second)
 import Data.Char (isUpper)
 import Data.List
 import Data.Maybe (fromMaybe)
@@ -88,7 +89,7 @@ binOpTable =
     , [binary "++" ListAdd]
     , [binary "**" Power, binary "*" Mul, binary "/" Div]
     , [binary "+" Add, binary "-" Sub]
-    , [binaryAny binaryFunctionCall]
+    , [binaryAny (\op a b p -> binaryFunctionCall op a b)]
     , -- , [prefix "-" UnaryMinus]
       [binary "%" Modulo]
     , [binary ":" ListConcat]
@@ -102,11 +103,11 @@ binOpTable =
     -- , [postfixAny pFunctionCall]
     ]
 
-sequenceExpr :: Expr -> Expr -> Expr
-sequenceExpr a b = FuncCall{funcName = "sequence", funcArgs = [a, b], funcPos = anyPosition}
+sequenceExpr :: Expr -> Expr -> Position -> Expr
+sequenceExpr a b p = FuncCall{funcName = "sequence", funcArgs = [a, b], funcPos = p}
 
-bindExpr :: Expr -> Expr -> Expr
-bindExpr a b = FuncCall{funcName = "bind", funcArgs = [a, b], funcPos = anyPosition}
+bindExpr :: Expr -> Expr -> Position -> Expr
+bindExpr a b p = FuncCall{funcName = "bind", funcArgs = [a, b], funcPos = p}
 
 binaryFunctionCall :: String -> Expr -> Expr -> Expr
 binaryFunctionCall f a b = FuncCall{funcName = f, funcArgs = [a, b], funcPos = anyPosition}
@@ -114,18 +115,100 @@ binaryFunctionCall f a b = FuncCall{funcName = f, funcArgs = [a, b], funcPos = a
 pFunctionCall :: String -> Expr -> Expr
 pFunctionCall f a = FuncCall{funcName = f, funcArgs = [a], funcPos = anyPosition}
 
-binary :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
-binary name f = InfixL (f <$ symbol name)
+getExprPosition :: Expr -> Position
+getExprPosition (Var{varPos}) = varPos
+getExprPosition (FuncCall{funcPos}) = funcPos
+getExprPosition (StructLit{structLitPos}) = structLitPos
+getExprPosition (ParenApply{parenApplyPos}) = parenApplyPos
+getExprPosition (BoolLit{boolPos}) = boolPos
+getExprPosition (IntLit{intPos}) = intPos
+getExprPosition (StringLit{stringPos}) = stringPos
+getExprPosition (FloatLit{floatPos}) = floatPos
+getExprPosition (DoubleLit{doublePos}) = doublePos
+getExprPosition (CharLit{charPos}) = charPos
+getExprPosition (If{ifPos}) = ifPos
+getExprPosition (Let{letPos}) = letPos
+getExprPosition (FuncDef{funcDefPos}) = funcDefPos
+getExprPosition (FuncDec{funcDecPos}) = funcDecPos
+getExprPosition (Function{functionPos}) = functionPos
+getExprPosition (DoBlock{doBlockPos}) = doBlockPos
+getExprPosition (ExternDec{externDecPos}) = externDecPos
+getExprPosition (Add{addPos}) = addPos
+getExprPosition (Sub{subPos}) = subPos
+getExprPosition (Mul{mulPos}) = mulPos
+getExprPosition (Div{divPos}) = divPos
+getExprPosition (Eq{eqPos}) = eqPos
+getExprPosition (Neq{neqPos}) = neqPos
+getExprPosition (Lt{ltPos}) = ltPos
+getExprPosition (Gt{gtPos}) = gtPos
+getExprPosition (Le{lePos}) = lePos
+getExprPosition (Ge{gePos}) = gePos
+getExprPosition (And{andPos}) = andPos
+getExprPosition (Or{orPos}) = orPos
+getExprPosition (Not{notPos}) = notPos
+getExprPosition (UnaryMinus{unaryMinusPos}) = unaryMinusPos
+getExprPosition (Placeholder{placeholderPos}) = placeholderPos
+getExprPosition (Discard{discardPos}) = discardPos
+getExprPosition (Import{importPos}) = importPos
+getExprPosition (Ref{refPos}) = refPos
+getExprPosition (Struct{structPos}) = structPos
+getExprPosition (StructAccess{structAccessPos}) = structAccessPos
+getExprPosition (ListLit{listLitPos}) = listLitPos
+getExprPosition (ListPattern{listPatternPos}) = listPatternPos
+getExprPosition (ListConcat{listConcatPos}) = listConcatPos
+getExprPosition (ListAdd{listAddPos}) = listAddPos
+getExprPosition (ArrayAccess{arrayAccessPos}) = arrayAccessPos
+getExprPosition (Modulo{moduloPos}) = moduloPos
+getExprPosition (Power{powerPos}) = powerPos
+getExprPosition (Target{targetPos}) = targetPos
+getExprPosition (Then{thenPos}) = thenPos
+getExprPosition (Pipeline{pipelinePos}) = pipelinePos
+getExprPosition (Lambda{lambdaPos}) = lambdaPos
+getExprPosition (Cast{castPos}) = castPos
+getExprPosition (TypeLit{typeLitPos}) = typeLitPos
+getExprPosition (Flexible{flexiblePos}) = flexiblePos
+getExprPosition (Trait{traitPos}) = traitPos
+getExprPosition (Impl{implPos}) = implPos
+getExprPosition (StrictEval{strictEvalPos}) = strictEvalPos
+getExprPosition (External{externalPos}) = externalPos
+getExprPosition (When{whenPos}) = whenPos
+getExprPosition _ = anyPosition
 
-binaryAny :: (String -> Expr -> Expr -> Expr) -> Operator Parser Expr
-binaryAny f = InfixL (f <$> freeOperator)
+combinePositions :: Position -> Position -> Position
+combinePositions (Position (x1, x2)) (Position (y1, y2))
+    | x1 >= 0 && y1 >= 0 = Position (min x1 y1, max x2 y2)
+    | x1 >= 0 = Position (x1, x2)
+    | y1 >= 0 = Position (y1, y2)
+    | otherwise = anyPosition
 
-binaryR :: Text -> (Expr -> Expr -> Expr) -> Operator Parser Expr
-binaryR name f = InfixR (f <$ symbol name)
+binary :: Text -> (Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
+binary name f = InfixL $ do
+    _ <- symbol name
+    return $ \a b -> f a b (combinePositions (getExprPosition a) (getExprPosition b))
 
-prefix, postfix :: Text -> (Expr -> Expr) -> Operator Parser Expr
-prefix name f = Prefix (f <$ symbol name)
-postfix name f = Postfix (f <$ symbol name)
+binaryAny :: (String -> Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
+binaryAny f = InfixL $ do
+    op <- freeOperator
+    return $ \a b -> f op a b (combinePositions (getExprPosition a) (getExprPosition b))
+
+binaryR :: Text -> (Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
+binaryR name f = InfixR $ do
+    _ <- symbol name
+    return $ \a b -> f a b (combinePositions (getExprPosition a) (getExprPosition b))
+
+prefix, postfix :: Text -> (Expr -> Position -> Expr) -> Operator Parser Expr
+prefix name f = Prefix $ do
+    start <- getOffset
+    _ <- symbol name
+    end <- getOffset
+    let pos = Position (start, end)
+    return $ \a -> f a (combinePositions pos (getExprPosition a))
+postfix name f = Postfix $ do
+    start <- getOffset
+    _ <- symbol name
+    end <- getOffset
+    let pos = Position (start, end)
+    return $ \a -> f a (combinePositions (getExprPosition a) pos)
 
 prefixAny :: (String -> Expr -> Expr) -> Operator Parser Expr
 prefixAny f = Prefix (f <$> identifier)
@@ -135,8 +218,11 @@ postfixAny f = Postfix (f <$> identifier)
 
 ref :: Parser Expr
 ref = do
+    start <- getOffset
     symbol "*"
-    Ref <$> funcCall
+    expr' <- funcCall
+    end <- getOffset
+    return $ Ref expr' (Position (start, end))
 
 parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
@@ -231,8 +317,7 @@ validType =
                 let ret = last args
                 return $ Fn args ret
         <|> do
-            squareBrackets $ do
-                List <$> validType
+            squareBrackets $ List <$> validType
         <|> do
             keyword "Self"
             return Self
@@ -249,21 +334,51 @@ charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal
 
 funcDec :: Parser Expr
 funcDec = do
+    start <- getOffset
     name <- (identifier <|> gravis) <?> "function name"
     generics <- fromMaybe [] <$> optional generic <?> "function generics"
     symbol "::"
     argTypes <- sepBy1 validType (symbol "->") <?> "function arguments"
-    return $ FuncDec name argTypes generics
+    end <- getOffset
+    return $ FuncDec name argTypes generics (Position (start, end))
 
 defArg :: Parser Expr
-defArg = try structLit <|> var <|> parens listPattern <|> array <|> placeholder <|> IntLit <$> integer <|> StringLit <$> stringLit <|> (symbol "True" >> return (BoolLit True)) <|> (symbol "False" >> return (BoolLit False))
+defArg =
+    try structLit
+        <|> var
+        <|> parens listPattern
+        <|> array
+        <|> placeholder
+        <|> do
+            start <- getOffset
+            val <- integer
+            end <- getOffset
+            return $ IntLit val (Position (start, end))
+        <|> do
+            start <- getOffset
+            val <- stringLit
+            end <- getOffset
+            return $ StringLit val (Position (start, end))
+        <|> do
+            start <- getOffset
+            symbol "True"
+            end <- getOffset
+            return $ BoolLit True (Position (start, end))
+        <|> do
+            start <- getOffset
+            symbol "False"
+            end <- getOffset
+            return $ BoolLit False (Position (start, end))
 
 funcDef :: Parser Expr
 funcDef = do
+    start <- getOffset
     name <- identifier <|> gravis <?> "function name"
     args <- many defArg <?> "function arguments"
     symbol "="
-    FuncDef name args <$> expr <?> "function body"
+    body <- expr <?> "function body"
+    end <- getOffset
+    return $ FuncDef name args body (Position (start, end))
 
 gravis :: Parser String
 gravis = lexeme $ char '`' *> someTill L.charLiteral (char '`')
@@ -286,16 +401,19 @@ parenApply = do
 
 letExpr :: Parser Expr
 letExpr = do
+    start <- getOffset
     keyword "let"
     name <- identifier <|> gravis <?> "variable name"
     symbol "="
     value <- recover expr <?> "variable value"
+    end <- getOffset
     state <- get
     put state{validLets = name : validLets state}
-    return $ Let name value
+    return $ Let name value (Position (start, end))
 
 whenExprParser :: Parser Expr
 whenExprParser = do
+    start <- getOffset
     keyword "when"
     whenExpr' <- expr <?> "when expression"
     keyword "of"
@@ -313,10 +431,12 @@ whenExprParser = do
         newline'
         return elseExpr
     keyword "end"
-    return $ When whenExpr' branches else_
+    end <- getOffset
+    return $ When whenExpr' branches else_ (Position (start, end))
 
 ifExpr :: Parser Expr
 ifExpr = do
+    start <- getOffset
     keyword "if"
     cond <- expr <?> "condition"
     keyword "then"
@@ -326,15 +446,18 @@ ifExpr = do
     keyword "else"
     optional newline'
     elseExpr <- expr <?> "else expression"
-    return $ If cond thenExpr elseExpr
+    end <- getOffset
+    return $ If cond thenExpr elseExpr (Position (start, end))
 
 doBlock :: Parser Expr
 doBlock = do
+    start <- getOffset
     keyword "do"
     newline'
     exprs <- lines' <?> "do block"
     keyword "end" <|> lookAhead (keyword "else")
-    return $ DoBlock exprs
+    end <- getOffset
+    return $ DoBlock exprs (Position (start, end))
 
 generic :: Parser [GenericExpr]
 generic = do
@@ -352,6 +475,7 @@ generic = do
 
 combinedFunc :: Parser Expr
 combinedFunc = do
+    start <- getOffset
     keyword "let"
     name <- identifier <|> gravis <?> "function name"
     generics <- (fromMaybe [] <$> optional generic) <?> "function generics"
@@ -359,7 +483,8 @@ combinedFunc = do
     returnType <- optional (symbol ":" >> validType <?> "return type") <?> "return type"
     symbol "="
     body <- recover expr <?> "function body"
-    return $ Function [FuncDef name args body] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics)
+    end <- getOffset
+    return $ Function [FuncDef name args body anyPosition] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics anyPosition) (Position (start, end))
   where
     argsAndTypes =
         unzip <$> many do
@@ -371,22 +496,27 @@ combinedFunc = do
 
 import_ :: Parser Expr
 import_ = do
+    start <- getOffset
     keyword "import"
     qualified <- optional (keyword "qualified" >> return True) <?> "qualified"
     optional $ keyword "from"
     from <- many (alphaNumChar <|> char '.' <|> char '@' <|> char '/') <?> "import path"
     alias <- optional (keyword " as" >> extra) <?> "import alias"
-    return $ Import{objects = ["*"], from = from, qualified = fromMaybe False qualified, as = alias}
+    end <- getOffset
+    return $ Import{objects = ["*"], from = from, qualified = Just True == qualified, as = alias, importPos = Position (start, end)}
 
 array :: Parser Expr
 array = do
+    start <- getOffset
     symbol "["
     elements <- sepBy expr (symbol ",") <?> "array elements"
     symbol "]"
-    return $ ListLit elements
+    end <- getOffset
+    return $ ListLit elements (Position (start, end))
 
 struct :: Parser Expr
 struct = do
+    start <- getOffset
     keyword "struct"
     name <- extra <?> "struct name"
     symbol "="
@@ -400,7 +530,8 @@ struct = do
     is <- optional $ do
         keyword "is"
         sepBy extra (symbol ",") <?> "struct interfaces"
-    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is}
+    end <- getOffset
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, structPos = Position (start, end)}
   where
     structField = do
         fieldName <- identifier <?> "field name"
@@ -428,14 +559,20 @@ structLit = do
 
 arrayAccess :: Parser Expr
 arrayAccess = do
+    start <- getOffset
     a <- choice [var, array] <?> "array"
     symbol "["
     index <- expr <?> "array index"
     symbol "]"
-    return $ ArrayAccess a index
+    end <- getOffset
+    return $ ArrayAccess a index (Position (start, end))
 
 placeholder :: Parser Expr
-placeholder = symbol "_" >> return Placeholder
+placeholder = do
+    start <- getOffset
+    symbol "_"
+    end <- getOffset
+    return $ Placeholder (Position (start, end))
 
 parseProgramPure :: Text -> Program
 parseProgramPure t = case parseProgram t initCompilerFlags of
@@ -454,7 +591,7 @@ parseProgram t cf = do
             -- If theres no main function, add one
             let foundMain = any (\case FuncDef{name = "main"} -> True; _ -> False) program'.exprs || any (\case Function{def} -> any (\case FuncDef{name = "main"} -> True; _ -> False) def; _ -> False) program'.exprs
             let (outside, inside) = partition shouldBeOutside program'.exprs
-            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [Any] [], FuncDef "main" [] (DoBlock inside)]
+            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [Any] [] anyPosition, FuncDef "main" [] (DoBlock inside anyPosition) anyPosition]
             if foundMain || not cf.needsMain
                 then Right program'
                 else Right artificialMainProgram
@@ -476,11 +613,71 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition :: Expr -> Expr
     replacePositionWithAnyPosition (FuncCall a b _) = FuncCall a (map replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (Var a _) = Var a anyPosition
+    replacePositionWithAnyPosition (BoolLit v _) = BoolLit v anyPosition
+    replacePositionWithAnyPosition (IntLit v _) = IntLit v anyPosition
+    replacePositionWithAnyPosition (StringLit v _) = StringLit v anyPosition
+    replacePositionWithAnyPosition (FloatLit v _) = FloatLit v anyPosition
+    replacePositionWithAnyPosition (DoubleLit v _) = DoubleLit v anyPosition
+    replacePositionWithAnyPosition (CharLit v _) = CharLit v anyPosition
+    replacePositionWithAnyPosition (If a b c _) = If (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) (replacePositionWithAnyPosition c) anyPosition
+    replacePositionWithAnyPosition (Let n v _) = Let n (replacePositionWithAnyPosition v) anyPosition
     replacePositionWithAnyPosition fd@FuncDef{body} = fd{body = replacePositionWithAnyPosition body}
-    replacePositionWithAnyPosition (DoBlock a) = DoBlock $ map replacePositionWithAnyPosition a
-    replacePositionWithAnyPosition (ListConcat a b) = ListConcat (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b)
-    replacePositionWithAnyPosition (StructAccess a b) = StructAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b)
-    replacePositionWithAnyPosition x = x
+    replacePositionWithAnyPosition (FuncDec n t g _) = FuncDec n t g anyPosition
+    replacePositionWithAnyPosition (Function d dec _) = Function (map replacePositionWithAnyPosition d) (replacePositionWithAnyPosition dec) anyPosition
+    replacePositionWithAnyPosition (DoBlock a _) = DoBlock (map replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (ExternDec n t a _) = ExternDec n t a anyPosition
+    replacePositionWithAnyPosition (Add a b _) = Add (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Sub a b _) = Sub (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Mul a b _) = Mul (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Div a b _) = Div (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Eq a b _) = Eq (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Neq a b _) = Neq (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Lt a b _) = Lt (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Gt a b _) = Gt (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Le a b _) = Le (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Ge a b _) = Ge (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (And a b _) = And (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Or a b _) = Or (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Not a _) = Not (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (UnaryMinus a _) = UnaryMinus (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (Placeholder _) = Placeholder anyPosition
+    replacePositionWithAnyPosition (Discard a _) = Discard (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (Import o f q a _) = Import o f q a anyPosition
+    replacePositionWithAnyPosition (Ref a _) = Ref (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (Struct n f r s i _) = Struct n f (fmap replacePositionWithAnyPosition r) s i anyPosition
+    replacePositionWithAnyPosition (StructLit n f _) = StructLit n (map (second replacePositionWithAnyPosition) f) anyPosition
+    replacePositionWithAnyPosition (StructAccess a b _) = StructAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (ListLit a _) = ListLit (map replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (ListPattern a _) = ListPattern (map replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (ListConcat a b _) = ListConcat (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (ListAdd a b _) = ListAdd (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (ArrayAccess a b _) = ArrayAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Modulo a b _) = Modulo (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Power a b _) = Power (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Target n e _) = Target n (replacePositionWithAnyPosition e) anyPosition
+    replacePositionWithAnyPosition (Then a b _) = Then (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Pipeline a b _) = Pipeline (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Lambda a b _) = Lambda (map replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (Cast a b _) = Cast (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (TypeLit t _) = TypeLit t anyPosition
+    replacePositionWithAnyPosition (Flexible a _) = Flexible (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (Trait n m _) = Trait n (map replacePositionWithAnyPosition m) anyPosition
+    replacePositionWithAnyPosition (Impl t f m _) = Impl t f (map replacePositionWithAnyPosition m) anyPosition
+    replacePositionWithAnyPosition (StrictEval a _) = StrictEval (replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (External n a _) = External n (map replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (ParenApply a b _) = ParenApply (replacePositionWithAnyPosition a) (map replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (When e b el _) =
+        When
+            (replacePositionWithAnyPosition e)
+            ( map
+                ( Data.Bifunctor.bimap
+                    replacePositionWithAnyPosition
+                    replacePositionWithAnyPosition
+                )
+                b
+            )
+            (fmap replacePositionWithAnyPosition el)
+            anyPosition
 
 lines' :: Parser [Expr]
 lines' = expr `sepEndBy` newline'
@@ -496,21 +693,29 @@ var = do
 
 target :: Parser Expr
 target = do
+    start <- getOffset
     symbol "__target"
     target' <- (symbol "wasm" <|> symbol "c") <?> "target"
-    Target (unpack target') <$> expr <?> "target"
+    expr' <- expr <?> "target"
+    end <- getOffset
+    return $ Target (unpack target') expr' (Position (start, end))
 
 listPattern :: Parser Expr
 listPattern = do
+    start <- getOffset
     elements <- sepBy1 (var <|> placeholder <|> array) (symbol ":") <?> "list pattern"
-    return $ ListPattern elements
+    end <- getOffset
+    return $ ListPattern elements (Position (start, end))
 
 lambda :: Parser Expr
 lambda = do
+    start <- getOffset
     symbol "\\"
     args <- some (var <|> parens listPattern <|> array <|> placeholder) <?> "lambda arguments"
     symbol "->"
-    Lambda args <$> expr <?> "lambda body"
+    body <- expr <?> "lambda body"
+    end <- getOffset
+    return $ Lambda args body (Position (start, end))
 
 verbose :: (Show a) => String -> Parser a -> Parser a
 verbose str parser = do
@@ -524,14 +729,18 @@ recover = withRecovery recover'
     recover' :: ParseError Text Void -> Parser Expr
     recover' err = do
         registerParseError err
-        return Placeholder
+        return $ Placeholder anyPosition
 
 typeLiteral :: Parser Expr
 typeLiteral = do
-    TypeLit <$> validType
+    start <- getOffset
+    t <- validType
+    end <- getOffset
+    return $ TypeLit t (Position (start, end))
 
 trait :: Parser Expr
 trait = do
+    start <- getOffset
     keyword "trait"
     name <- identifier <?> "trait name"
     methods <-
@@ -544,10 +753,12 @@ trait = do
             return fds
         )
             <|> return []
-    return $ Trait name methods
+    end <- getOffset
+    return $ Trait name methods (Position (start, end))
 
 impl :: Parser Expr
 impl = do
+    start <- getOffset
     keyword "impl"
     name <- identifier <?> "impl name"
     symbol "for"
@@ -562,10 +773,12 @@ impl = do
             return fds
         )
             <|> return []
-    return $ Impl name for methods
+    end <- getOffset
+    return $ Impl name for methods (Position (start, end))
 
 external :: Parser Expr
 external = do
+    start <- getOffset
     keyword "external"
     from <- stringLit <?> "external from"
     symbol "="
@@ -573,12 +786,16 @@ external = do
     newline'
     decs <- funcDec `sepEndBy` newline' <?> "external declarations"
     symbol "end"
-    return $ External from decs
+    end <- getOffset
+    return $ External from decs (Position (start, end))
 
 unaryMinus :: Parser Expr
 unaryMinus = parens $ do
+    start <- getOffset
     symbol "-"
-    UnaryMinus <$> expr <?> "negatable expression"
+    expr' <- expr <?> "negatable expression"
+    end <- getOffset
+    return $ UnaryMinus expr' (Position (start, end))
 
 term :: Parser Expr
 term =
@@ -587,13 +804,41 @@ term =
         , try unaryMinus
         , try parenApply
         , parens expr
-        , CharLit <$> try charLit
-        , DoubleLit <$> try double
-        , FloatLit <$> try float
-        , IntLit <$> try integer
-        , StringLit <$> try stringLit
-        , symbol "True" >> return (BoolLit True)
-        , symbol "False" >> return (BoolLit False)
+        , do
+            start <- getOffset
+            val <- try charLit
+            end <- getOffset
+            return $ CharLit val (Position (start, end))
+        , do
+            start <- getOffset
+            val <- try double
+            end <- getOffset
+            return $ DoubleLit val (Position (start, end))
+        , do
+            start <- getOffset
+            val <- try float
+            end <- getOffset
+            return $ FloatLit val (Position (start, end))
+        , do
+            start <- getOffset
+            val <- try integer
+            end <- getOffset
+            return $ IntLit val (Position (start, end))
+        , do
+            start <- getOffset
+            val <- try stringLit
+            end <- getOffset
+            return $ StringLit val (Position (start, end))
+        , do
+            start <- getOffset
+            symbol "True"
+            end <- getOffset
+            return $ BoolLit True (Position (start, end))
+        , do
+            start <- getOffset
+            symbol "False"
+            end <- getOffset
+            return $ BoolLit False (Position (start, end))
         , external
         , struct
         , import_

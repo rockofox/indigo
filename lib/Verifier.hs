@@ -1,3 +1,6 @@
+-- THIS FILE IS DEPRECATED. IT IS NOT USED ANYMORE.
+-- (TYPE) CHECKING IS NOW DONE IN THE BYTECODE COMPILER.
+-- DO NOT TOUCH THIS. IT ONLY EXISTS FOR REFERENCE.
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Use newtype instead of data" #-}
@@ -5,19 +8,19 @@ module Verifier where
 
 import AST
 import BytecodeCompiler (preludeFile)
-import BytecodeCompiler qualified
+import qualified BytecodeCompiler
 import Control.Monad
 import Control.Monad.Loops (allM)
 import Control.Monad.State.Lazy hiding (state)
 import Data.Functor ((<&>))
 import Data.List (find)
-import Data.List.NonEmpty qualified as NonEmpty
-import Data.Map qualified as Map
+import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Map as Map
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
-import Data.Set qualified as Set
+import qualified Data.Set as Set
 import Data.Text (Text, pack)
-import Data.Text qualified as T
-import Data.Vector qualified as V
+import qualified Data.Text as T
+import qualified Data.Vector as V
 import Data.Void
 import Debug.Trace
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
@@ -25,7 +28,7 @@ import Parser
 import System.FilePath
 import Text.Megaparsec hiding (State)
 import Util
-import VM qualified
+import qualified VM
 
 data VerifierState = VerifierState {frames :: [VerifierFrame], topLevel :: Bool, structDecs :: [Expr], sourcePath :: String} deriving (Show)
 
@@ -83,10 +86,10 @@ typeOf' (FuncCall name args _) = do
     if isJust matchingBinding
         then do
             let actualArgNum = length args
-            let formalArgNum = length (fromJust matchingBinding).args
+            let formalArgNum = length (fromJust matchingBinding) . args
             if actualArgNum == formalArgNum
                 then return $ maybe Unknown ttype matchingBinding
-                else return Fn{args = take actualArgNum (fromJust matchingBinding).args, ret = (fromJust matchingBinding).args !! actualArgNum}
+                else return Fn{args = take actualArgNum (fromJust matchingBinding) . args, ret = fromJust matchingBinding . args !! actualArgNum}
         else return Unknown
 typeOf' (Add a _) = typeOf' a
 typeOf' (Sub a _) = typeOf' a
@@ -282,10 +285,10 @@ verifyExpr (FuncDef name args body) = do
     case b of
         Just binding -> do
             currentFrame' <- currentFrame
-            modify (\state -> state{frames = currentFrame'{bindings = Set.map (\b' -> if Verifier.name b' == name && b'.ttype == Any then b'{ttype = typeOf body} else b') (bindings (head (frames state)))} : tail (frames state)})
-            let argsAndTypes = zip args binding.args
+            modify (\state -> state{frames = currentFrame'{bindings = Set.map (\b' -> if Verifier.name b' == name && b' . ttype == Any then b'{ttype = typeOf body} else b') (bindings (head (frames state)))} : tail (frames state)})
+            let argsAndTypes = zip args binding . args
             let argsAsBindings = concatMap argToBindings argsAndTypes
-            let bType = if binding.ttype == Any then typeOf body else binding.ttype
+            let bType = if binding . ttype == Any then typeOf body else binding . ttype
             modify (\state -> state{frames = (VerifierFrame{bindings = Set.fromList argsAsBindings, ttypes = Map.empty, ftype = bType, fname = name}) : frames state})
             types <- mapM typeOf' args
             modify (\state -> state{frames = (VerifierFrame{bindings = Set.insert (VBinding{name = name, args = types, ttype = bType, generics = []}) (bindings (head (frames state))), ttypes = Map.empty, ftype = bType, fname = name}) : tail (frames state)})
@@ -350,10 +353,10 @@ verifyExpr sl@(StructLit structName _ (Position (start, _))) = do
     case struct of
         Nothing -> return [FancyError 0 (Set.singleton (ErrorFail $ "Could not find relevant struct for " ++ structName))]
         Just st -> do
-            case st.refinement of
+            case st . refinement of
                 Just rf -> do
                     r <- liftIO $ runRefinement rf sl
-                    (if r then return [] else return [FancyError start (Set.singleton (ErrorFail $ "Refinement failed (" ++ st.refinementSrc ++ ")"))])
+                    (if r then return [] else return [FancyError start (Set.singleton (ErrorFail $ "Refinement failed (" ++ st . refinementSrc ++ ")"))])
                 Nothing -> return []
 verifyExpr (Impl trait for _) = do
     rootFrame <- head . frames <$> get
@@ -369,18 +372,18 @@ verifyExpr (FuncCall name args (Position (start, _))) = do
     fta <- case matchingBindings of
         [] -> return False
         bindings -> do
-            let fta' = mapM (\binding -> functionTypesAcceptable argumentTypes binding.args binding.generics) bindings
+            let fta' = mapM (\binding -> functionTypesAcceptable argumentTypes binding . args binding . generics) bindings
             or <$> fta'
     eNoMatchi <- case matchingBindings of
         [] -> return []
         bindings -> do
             concatMapM
                 ( \binding -> do
-                    matchi <- compareTypes' (ftype currentFrame') (ttype binding) binding.generics
-                    return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding.ttype ++ "` of `" ++ binding.name ++ "` is incompatible with type `" ++ show currentFrame'.ftype ++ "` of " ++ currentFrame'.fname))) | topLevel' && currentFrame'.fname /= "__lambda" && not matchi]
+                    matchi <- compareTypes' (ftype currentFrame') (ttype binding) binding . generics
+                    return [FancyError start (Set.singleton (ErrorFail ("Type `" ++ show binding . ttype ++ "` of `" ++ binding . name ++ "` is incompatible with type `" ++ show currentFrame' . ftype ++ "` of " ++ currentFrame' . fname))) | topLevel' && currentFrame' . fname /= "__lambda" && not matchi]
                 )
                 bindings
-    let eTypes = concatMap (\matchingBinding -> ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show matchingBinding.args ++ ", got: " ++ show argumentTypes))) | not fta])) matchingBindings
+    let eTypes = concatMap (\matchingBinding -> ([FancyError start (Set.singleton (ErrorFail ("Argument types do not match on " ++ name ++ ", expected: " ++ show matchingBinding . args ++ ", got: " ++ show argumentTypes))) | not fta])) matchingBindings
     return $ [FancyError start (Set.singleton (ErrorFail $ "Could not find relevant binding for " ++ name)) | null matchingBindings] ++ eArgs ++ eTypes ++ eNoMatchi
 verifyExpr (Lambda args body) = do
     let argsAsBindings = map (\case Var{varName} -> VBinding{name = varName, args = [], ttype = Any, generics = []}; Placeholder -> VBinding{name = "__placeholder", args = [], ttype = Any, generics = []}; _ -> error "Invalid lambda argument") args

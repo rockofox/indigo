@@ -35,7 +35,6 @@ import VM
     , runVMVM
     , shouldExit
     )
-import Verifier
 
 compileAndRun :: String -> IO String
 compileAndRun prog = do
@@ -44,8 +43,6 @@ compileAndRun prog = do
         Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
         Right program -> do
             let (Parser.Program exprs) = program
-            verifierResult <- verifyProgram "test" (T.pack prog) exprs
-            whenErr verifierResult $ \err -> error $ "Verifier error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack prog)) prog
             compilerOutput <- evalStateT (compileProgram program) (initCompilerState program)
             optimizedProgram <- case compilerOutput of
                 Left bytecode -> pure (optimize bytecode)

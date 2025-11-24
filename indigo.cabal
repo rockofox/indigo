@@ -27,7 +27,6 @@ library
                      , VM
                      , BytecodeCompiler
                      , AST
-                     , Verifier
                      , Util
                      , RegInst
                      , Ffi
@@ -87,7 +86,6 @@ executable indigo
                       timeit,
                       repline,
                       containers,
-                      githash
 
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
@@ -104,7 +102,6 @@ test-suite spec
         ParserSpec
         BytecodeCompilerSpec
         IntegrationSpec
-        VerifierSpec
         RegInstSpec
         OptimizerSpec
     build-tool-depends: hspec-discover:hspec-discover == 2.*

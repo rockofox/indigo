@@ -16,6 +16,7 @@ import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
+import Debug.Trace (traceM)
 import ErrorRenderer (SourceError (..), parseErrorBundleToSourceErrors, renderErrors)
 import Foreign (nullPtr, ptrToWordPtr)
 import Foreign.C.Types ()
@@ -111,8 +112,116 @@ initCompilerStateWithFile prog =
 
 cerror :: String -> AST.Position -> StateT (CompilerState a) IO ()
 cerror msg pos = do
-    -- TODO
-    unless (pos == AST.zeroPosition) $ modify (\s -> s{errors = CompilerError msg pos : errors s})
+    unless (pos == AST.zeroPosition) $ modify (\s -> s{errors = errors s ++ [CompilerError msg pos]})
+
+extractPosition :: Parser.Expr -> AST.Position
+extractPosition (Parser.Var{varPos}) = varPos
+extractPosition (Parser.FuncCall{funcPos}) = funcPos
+extractPosition (Parser.StructLit{structLitPos}) = structLitPos
+extractPosition (Parser.ParenApply{parenApplyPos}) = parenApplyPos
+extractPosition (Parser.BoolLit{boolPos}) = boolPos
+extractPosition (Parser.IntLit{intPos}) = intPos
+extractPosition (Parser.StringLit{stringPos}) = stringPos
+extractPosition (Parser.FloatLit{floatPos}) = floatPos
+extractPosition (Parser.DoubleLit{doublePos}) = doublePos
+extractPosition (Parser.CharLit{charPos}) = charPos
+extractPosition (Parser.If{ifPos}) = ifPos
+extractPosition (Parser.Let{letPos}) = letPos
+extractPosition (Parser.FuncDef{funcDefPos}) = funcDefPos
+extractPosition (Parser.FuncDec{funcDecPos}) = funcDecPos
+extractPosition (Parser.Function{functionPos}) = functionPos
+extractPosition (Parser.DoBlock{doBlockPos}) = doBlockPos
+extractPosition (Parser.ExternDec{externDecPos}) = externDecPos
+extractPosition (Parser.Add{addPos}) = addPos
+extractPosition (Parser.Sub{subPos}) = subPos
+extractPosition (Parser.Mul{mulPos}) = mulPos
+extractPosition (Parser.Div{divPos}) = divPos
+extractPosition (Parser.Eq{eqPos}) = eqPos
+extractPosition (Parser.Neq{neqPos}) = neqPos
+extractPosition (Parser.Lt{ltPos}) = ltPos
+extractPosition (Parser.Gt{gtPos}) = gtPos
+extractPosition (Parser.Le{lePos}) = lePos
+extractPosition (Parser.Ge{gePos}) = gePos
+extractPosition (Parser.And{andPos}) = andPos
+extractPosition (Parser.Or{orPos}) = orPos
+extractPosition (Parser.Not{notPos}) = notPos
+extractPosition (Parser.UnaryMinus{unaryMinusPos}) = unaryMinusPos
+extractPosition (Parser.Placeholder{placeholderPos}) = placeholderPos
+extractPosition (Parser.Discard{discardPos}) = discardPos
+extractPosition (Parser.Import{importPos}) = importPos
+extractPosition (Parser.Ref{refPos}) = refPos
+extractPosition (Parser.Struct{structPos}) = structPos
+extractPosition (Parser.StructAccess{structAccessPos}) = structAccessPos
+extractPosition (Parser.ListLit{listLitPos}) = listLitPos
+extractPosition (Parser.ListPattern{listPatternPos}) = listPatternPos
+extractPosition (Parser.ListConcat{listConcatPos}) = listConcatPos
+extractPosition (Parser.ListAdd{listAddPos}) = listAddPos
+extractPosition (Parser.ArrayAccess{arrayAccessPos}) = arrayAccessPos
+extractPosition (Parser.Modulo{moduloPos}) = moduloPos
+extractPosition (Parser.Power{powerPos}) = powerPos
+extractPosition (Parser.Target{targetPos}) = targetPos
+extractPosition (Parser.Then{thenPos}) = thenPos
+extractPosition (Parser.Pipeline{pipelinePos}) = pipelinePos
+extractPosition (Parser.Lambda{lambdaPos}) = lambdaPos
+extractPosition (Parser.Cast{castPos}) = castPos
+extractPosition (Parser.TypeLit{typeLitPos}) = typeLitPos
+extractPosition (Parser.Flexible{flexiblePos}) = flexiblePos
+extractPosition (Parser.Trait{traitPos}) = traitPos
+extractPosition (Parser.Impl{implPos}) = implPos
+extractPosition (Parser.StrictEval{strictEvalPos}) = strictEvalPos
+extractPosition (Parser.External{externalPos}) = externalPos
+extractPosition (Parser.When{whenPos}) = whenPos
+extractPosition _ = AST.anyPosition
+
+getErrorCount :: StateT (CompilerState a) IO Int
+getErrorCount = gets (length . errors)
+
+getBinOpPosition :: Parser.Expr -> Parser.Expr -> AST.Position
+getBinOpPosition x y =
+    let px = extractPosition x
+        py = extractPosition y
+     in case (px, py) of
+            (AST.Position (x1, x2), AST.Position (y1, y2))
+                | x1 >= 0 && y1 >= 0 ->
+                    AST.Position (min x1 y1, max x2 y2)
+            (AST.Position (p1, _), _) | p1 >= 0 -> px
+            (_, AST.Position (p2, _)) | p2 >= 0 -> py
+            _ -> AST.anyPosition
+
+compileBinOp :: String -> Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> StateT (CompilerState a) IO [Instruction]
+compileBinOp opName x y expectedType op = do
+    case (x, y) of
+        (Parser.Flexible{}, _) -> doBinOp opName x y expectedType op
+        (_, Parser.Flexible{}) -> doBinOp opName x y expectedType op
+        _ -> do
+            errorCountBefore <- getErrorCount
+            let pos = getBinOpPosition x y
+            _ <- compileExpr (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
+            errorCountAfter <- getErrorCount
+            if errorCountAfter > errorCountBefore
+                then return []
+                else doBinOp opName x y expectedType op
+
+compileBinOpSeq :: String -> Parser.Expr -> Parser.Expr -> Parser.Type -> [Instruction] -> StateT (CompilerState a) IO [Instruction]
+compileBinOpSeq opName x y expectedType ops = do
+    errorCountBefore <- getErrorCount
+    let pos = getBinOpPosition x y
+    _ <- compileExpr (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
+    errorCountAfter <- getErrorCount
+    if errorCountAfter > errorCountBefore
+        then return []
+        else do
+            id' <- allocId
+            let aName = "__op_a_" ++ show id'
+            let bName = "__op_b_" ++ show id'
+            x' <- compileExpr x expectedType
+            y' <- compileExpr y expectedType
+            cast <- case (x, y) of
+                (Parser.Flexible{}, Parser.Flexible{}) -> error "Double cast"
+                (Parser.Flexible{}, _) -> return $ Cast : y'
+                (_, Parser.Flexible{}) -> return $ [Swp, Cast] ++ x'
+                _ -> return []
+            return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ ops)
 
 allocId :: StateT (CompilerState a) IO Int
 allocId = do
@@ -131,7 +240,7 @@ preludeExpr = do
                     compileDry prog "<prelude>" >>= \case
                         Right err -> compileFail "<prelude>" err i >> error ""
                         Left p' -> return p'
-            return $ progExpr ++ [Parser.FuncDef "__sep" [] Parser.Placeholder]
+            return $ progExpr ++ [Parser.FuncDef "__sep" [] (Parser.Placeholder anyPosition) anyPosition]
 
 compileProgram :: Parser.Program -> StateT (CompilerState a) IO (Either [Instruction] [CompilerError])
 compileProgram (Parser.Program expr) = do
@@ -198,13 +307,15 @@ typeCompatible x y = do
     let x' = typeToString x
     let y' = typeToString y
     impls <- implsFor x'
-    let impls' = map (\x -> x ++ "." ++ y') impls
-    -- let compatible = x' == y' || x' == "Any" || y' == "Any"
-    let compatible = Parser.compareTypes x y
-    if compatible
+    let equal = Parser.compareTypes x y
+    if equal
         then return True
         else do
-            return $ y' `elem` impls
+            let numericTypes = ["Int", "Float", "Double"]
+            let bothNumeric = x' `elem` numericTypes && y' `elem` numericTypes
+            if bothNumeric
+                then return True
+                else return $ y' `elem` impls
 
 evaluateFunction :: [Parser.Type] -> Int -> Parser.Type
 evaluateFunction types taken = case drop (length types - taken + 1) types of
@@ -231,29 +342,58 @@ findSourceFile' fileName = findSourceFile fileName []
 preludeFile :: IO String
 preludeFile = findSourceFile' "std/prelude.in" >>= readFile
 
-doBinOp :: Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> StateT (CompilerState a) IO [Instruction]
-doBinOp x y expectedType op = do
+doBinOp :: String -> Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> StateT (CompilerState a) IO [Instruction]
+doBinOp opName x y expectedType op = do
     id' <- allocId
     functions' <- gets functions
+    funcDecs' <- gets funcDecs
     let f = findAnyFunction (Data.Text.unpack $ Data.Text.toLower $ Data.Text.pack $ show op) functions'
+    xType <- typeOf x
+    yType <- typeOf y
+    let argTypes = [xType, yType]
+    let foundFunc = findFunction opName functions' argTypes
+    let hasFuncDec = isJust $ find (\case Parser.FuncDec{name} -> name == opName; _ -> False) funcDecs'
     let aName = "__op_a_" ++ show id'
     let bName = "__op_b_" ++ show id'
     x' <- compileExpr x expectedType
     y' <- compileExpr y expectedType
 
-    cast <- case (x, y) of
+    let hasFlexible = case (x, y) of
+            (Parser.Flexible{}, _) -> True
+            (_, Parser.Flexible{}) -> True
+            _ -> False
+
+    castInstrs <- case (x, y) of
         (Parser.Flexible{}, Parser.Flexible{}) -> error "Double cast"
-        (Parser.Flexible{}, _) -> return $ Cast : y'
-        (_, Parser.Flexible{}) -> return $ [Swp, Cast] ++ x'
-        _ -> return []
+        (Parser.Flexible{}, _) -> do
+            let targetType = compileTypeFromType yType
+            return ([LLoad aName] ++ targetType ++ [Cast, LLoad bName])
+        (_, Parser.Flexible{}) -> do
+            let targetType = compileTypeFromType xType
+            return ([LLoad bName] ++ targetType ++ [Cast, LLoad aName, Swp])
+        _ -> return [LLoad aName, LLoad bName]
+    let finalOp = case (foundFunc, hasFuncDec, hasFlexible) of
+            (Just fun, _, False) -> Call (funame fun)
+            (Nothing, True, False) -> Call opName
+            _ -> op
     case (x, y) of
-        (Parser.Placeholder, Parser.Placeholder) -> return [PushPf (funame $ fromJust f) 0]
-        (Parser.Placeholder, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
-        (_, Parser.Placeholder) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
-        _ -> return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ [op])
+        (Parser.Placeholder _, Parser.Placeholder _) -> return [PushPf (funame $ fromJust f) 0]
+        (Parser.Placeholder _, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
+        (_, Parser.Placeholder _) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
+        _ -> return (x' ++ LStore aName : y' ++ [LStore bName] ++ castInstrs ++ [finalOp])
+  where
+    compileTypeFromType :: Parser.Type -> [Instruction]
+    compileTypeFromType (Parser.StructT "Int") = [Push $ DInt 0]
+    compileTypeFromType (Parser.StructT "Float") = [Push $ DFloat 0.0]
+    compileTypeFromType (Parser.StructT "Double") = [Push $ DDouble 0.0]
+    compileTypeFromType (Parser.StructT "Bool") = [Push $ DBool False]
+    compileTypeFromType (Parser.StructT "Char") = [Push $ DChar '\0']
+    compileTypeFromType (Parser.StructT "String") = [Push $ DString ""]
+    compileTypeFromType (Parser.StructT "CPtr") = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    compileTypeFromType _ = [Push DNone]
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
-typeOf (Parser.FuncCall{funcName, funcArgs}) = do
+typeOf Parser.FuncCall{funcName, funcArgs} = do
     funcDecs' <- gets funcDecs
     let a =
             maybe
@@ -261,11 +401,69 @@ typeOf (Parser.FuncCall{funcName, funcArgs}) = do
                 Parser.types
                 (find (\x -> x.name == funcName) funcDecs')
     return $ evaluateFunction a (length funcArgs)
-typeOf (Parser.Var{varName}) = do
+typeOf Parser.Var{varName = varName} = do
     lets' <- gets lets
-    let a = maybe Parser.Any vtype (find (\x -> x.name == varName) lets')
+    let a = maybe Parser.Unknown vtype (find (\x -> x.name == varName) lets')
     return a
-typeOf x = return $ Parser.typeOf x
+typeOf (Parser.IntLit _ _) = return $ Parser.StructT "Int"
+typeOf (Parser.FloatLit _ _) = return $ Parser.StructT "Float"
+typeOf (Parser.BoolLit _ _) = return $ Parser.StructT "Bool"
+typeOf (Parser.StringLit _ _) = return $ Parser.StructT "String"
+typeOf (Parser.Add x _ _) = typeOf x
+typeOf (Parser.Sub x _ _) = typeOf x
+typeOf (Parser.Mul x _ _) = typeOf x
+typeOf (Parser.Div x _ _) = typeOf x
+typeOf (Parser.Power x _ _) = typeOf x
+typeOf (Parser.UnaryMinus x _) = typeOf x
+typeOf (Parser.Eq{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Neq{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Lt{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Gt{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Le{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Ge{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.And{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Or{}) = return $ Parser.StructT "Bool"
+typeOf (Parser.Not _ _) = return $ Parser.StructT "Bool"
+typeOf (Parser.Placeholder _) = return Parser.Any
+typeOf (Parser.Let{}) = error "Cannot infer type of let"
+typeOf (Parser.If _ b _ _) = typeOf b
+typeOf (Parser.FuncDef{}) = error "Cannot infer type of function definition"
+typeOf x@(Parser.FuncDec{}) = error $ "Cannot infer type of function declaration " ++ show x
+typeOf (Parser.Function{}) = return Parser.Unknown -- error "Cannot infer type of modern function"
+typeOf (Parser.DoBlock x _) = if null x then return Parser.None else typeOf $ last x
+typeOf (Parser.ExternDec{}) = error "Cannot infer type of extern declaration"
+typeOf (Parser.Discard _ _) = error "Cannot infer type of discard"
+typeOf (Parser.Import{}) = error "Cannot infer type of import"
+typeOf (Parser.Ref _ _) = error "Cannot infer type of ref"
+typeOf (Parser.Struct{}) = error "Cannot infer type of struct"
+typeOf (Parser.StructLit x _ _) = return $ Parser.StructT x
+typeOf (Parser.ListLit [Parser.Var{varName}] _) = return $ Parser.List $ Parser.StructT varName
+typeOf (Parser.ListLit x _) = if null x then return $ Parser.List Parser.Any else typeOf (head x) <&> Parser.List
+typeOf (Parser.ArrayAccess{}) = error "Cannot infer type of array access"
+typeOf (Parser.Modulo x _ _) = typeOf x
+typeOf (Parser.Target{}) = error "Cannot infer type of target"
+typeOf (Parser.ListConcat x _ _) = typeOf x
+typeOf (Parser.ListPattern _ _) = return $ Parser.List Parser.Any
+typeOf (Parser.StructAccess _ s _) = typeOf s
+typeOf (Parser.Pipeline _ b _) = typeOf b
+typeOf (Parser.Lambda{}) = return $ Parser.Fn [] Parser.Any
+typeOf (Parser.Cast _ (Parser.Var to _) _) = return $ Parser.StructT to
+typeOf (Parser.Cast _ b _) = typeOf b
+typeOf (Parser.TypeLit x _) = return x
+typeOf (Parser.Flexible x _) = typeOf x
+typeOf (Parser.Trait{}) = error "Cannot infer type of trait"
+typeOf (Parser.Impl{}) = error "Cannot infer type of impl"
+typeOf (Parser.Then _ b _) = typeOf b
+typeOf (Parser.StrictEval x _) = typeOf x
+typeOf (Parser.External{}) = error "Cannot infer type of external"
+typeOf (Parser.CharLit _ _) = return $ Parser.StructT "Char"
+typeOf (Parser.DoubleLit _ _) = return $ Parser.StructT "Double"
+typeOf (Parser.ParenApply a _ _) = typeOf a
+typeOf (Parser.ListAdd x _ _) = typeOf x
+typeOf (Parser.When _ branches else_ _) =
+    if null branches
+        then maybe (return Parser.Unknown) typeOf else_
+        else typeOf (snd $ head branches)
 
 getStructFields :: String -> StateT (CompilerState a) IO [(String, Parser.Type)]
 getStructFields structName = do
@@ -376,7 +574,7 @@ compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedTyp
             elements' <- mapM (\p -> compilePatternMatch p nextLabel expectedType) (init listPatternExprs)
             let paramsWithIndex = zip elements' [0 ..]
             let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
-            l' <- compileExpr (Parser.ListLit{listLitExprs = listLitExprs}) expectedType
+            l' <- compileExpr (Parser.ListLit{listLitExprs = listLitExprs, listLitPos = anyPosition}) expectedType
             let listThing = [Comment "List thing", Dup, Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextLabel]
             return $ lengthCheck ++ concat xToY ++ listThing
         _ -> do
@@ -410,27 +608,27 @@ compilePatternMatch (Parser.StructLit{structLitName, structLitFields}) nextLabel
             )
             fields''
     return $ [Dup, Push $ DTypeQuery structLitName, TypeEq, Jf nextLabel] ++ fieldMappings ++ ([Pop | null fieldChecks]) ++ fieldChecks
-compilePatternMatch Parser.Placeholder _ _ = return []
+compilePatternMatch (Parser.Placeholder _) _ _ = return []
 compilePatternMatch x nextLabel expectedType = do
     x' <- compileExpr x expectedType
     return $ x' ++ [Eq, Jf nextLabel]
 
 compileExpr :: Parser.Expr -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
-compileExpr (Parser.Add{addLhs = x, addRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "+", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Sub{subLhs = x, subRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "-", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Mul{mulLhs = x, mulRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "*", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Div{divLhs = x, divRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "/", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Modulo{moduloLhs = x, moduloRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "%", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Power{powerBase = x, powerExponent = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "^", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Gt{gtLhs = x, gtRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = ">", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Lt{ltLhs = x, ltRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "<", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Ge{geLhs = x, geRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = ">=", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Le{leLhs = x, leRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "<=", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
+compileExpr (Parser.Add{addLhs = x, addRhs = y}) expectedType = compileBinOp "+" x y expectedType Add
+compileExpr (Parser.Sub{subLhs = x, subRhs = y}) expectedType = compileBinOp "-" x y expectedType Sub
+compileExpr (Parser.Mul{mulLhs = x, mulRhs = y}) expectedType = compileBinOp "*" x y expectedType Mul
+compileExpr (Parser.Div{divLhs = x, divRhs = y}) expectedType = compileBinOp "/" x y expectedType Div
+compileExpr (Parser.Modulo{moduloLhs = x, moduloRhs = y}) expectedType = compileBinOp "%" x y expectedType Mod
+compileExpr (Parser.Power{powerBase = x, powerExponent = y}) expectedType = compileBinOp "^" x y expectedType Pow
+compileExpr (Parser.Gt{gtLhs = x, gtRhs = y}) expectedType = compileBinOp ">" x y expectedType Gt
+compileExpr (Parser.Lt{ltLhs = x, ltRhs = y}) expectedType = compileBinOp "<" x y expectedType Lt
+compileExpr (Parser.Ge{geLhs = x, geRhs = y}) expectedType = compileBinOpSeq ">=" x y expectedType [Lt, Not]
+compileExpr (Parser.Le{leLhs = x, leRhs = y}) expectedType = compileBinOpSeq "<=" x y expectedType [Gt, Not]
 compileExpr (Parser.Not{notExpr = x}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Not])
-compileExpr (Parser.Eq{eqLhs = x, eqRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "==", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Neq{neqLhs = x, neqRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "!=", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.And{andLhs = x, andRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "&&", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
-compileExpr (Parser.Or{orLhs = x, orRhs = y}) expectedType = compileExpr (Parser.FuncCall{funcName = "||", funcArgs = [x, y], funcPos = zeroPosition}) expectedType >>= doBinOp x y expectedType . last
+compileExpr (Parser.Eq{eqLhs = x, eqRhs = y}) expectedType = compileBinOp "==" x y expectedType Eq
+compileExpr (Parser.Neq{neqLhs = x, neqRhs = y}) expectedType = compileBinOp "!=" x y expectedType Neq
+compileExpr (Parser.And{andLhs = x, andRhs = y}) expectedType = compileBinOp "&&" x y expectedType And
+compileExpr (Parser.Or{orLhs = x, orRhs = y}) expectedType = compileBinOp "||" x y expectedType Or
 compileExpr (Parser.IntLit{intValue = x}) _ = return [Push $ DInt $ fromIntegral x]
 compileExpr (Parser.UnaryMinus{unaryMinusExpr = Parser.FloatLit{floatValue = x}}) _ = return [Push $ DFloat (-x)]
 compileExpr (Parser.UnaryMinus{unaryMinusExpr = Parser.IntLit{intValue = x}}) _ = return [Push $ DInt $ -fromInteger x]
@@ -455,7 +653,7 @@ compileExpr (Parser.DoBlock{doBlockExprs = exprs}) expectedType = do
     isFuncCall :: Parser.Expr -> Bool
     isFuncCall (Parser.FuncCall{funcName}) = funcName `notElem` internalFunctions
     isFuncCall _ = False
-compileExpr Parser.Placeholder _ = return []
+compileExpr (Parser.Placeholder _) _ = return []
 compileExpr (Parser.FuncCall{funcName = "unsafeAdd", funcArgs = [x, y], ..}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Add])
 compileExpr (Parser.FuncCall{funcName = "unsafeSub", funcArgs = [x, y], ..}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Sub])
 compileExpr (Parser.FuncCall{funcName = "unsafeMul", funcArgs = [x, y], ..}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Mul])
@@ -510,7 +708,7 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     let funcDec = case find (\(Parser.FuncDec{name}) -> name == baseName fun) funcDecs' of
             Just fd -> do
                 case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
-                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = []}
+                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = [], funcDecPos = anyPosition}
                     Nothing -> Just fd
             Nothing -> find (\(Parser.FuncDec{name}) -> name == baseName fun) funcDecs'
     let external = find (\x -> x.name == funcName) externals'
@@ -521,10 +719,11 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
 
     (argsOk, msgs) <- case funcDec of
         Just fd -> do
-            let zippedArgs = zip argTypes (init $ Parser.types fd)
+            let expectedArgTypes = init $ Parser.types fd
+            let zippedArgs = zip argTypes expectedArgTypes
             wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
             let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
-            let tooManyArgs = ["Too many arguments provided." | length argTypes > length (init $ Parser.types fd)]
+            let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
             return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
         Nothing -> return (True, [])
 
@@ -572,7 +771,7 @@ compileExpr (Parser.FuncDef{name = origName, args, body}) expectedType = do
     -- let argTypes = map Parser.typeOf args
     modify (\s -> s{currentContext = name})
     funcDecs' <- gets funcDecs
-    when (isNothing $ find (\(Parser.FuncDec{name = name'}) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) expectedType) [] : funcDecs s})
+    when (isNothing $ find (\(Parser.FuncDec{name = name'}) -> name' == name) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) expectedType) [] anyPosition : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
     modify (\s -> s{functions = Function name funame [] [] curCon : functions s})
@@ -583,7 +782,7 @@ compileExpr (Parser.FuncDef{name = origName, args, body}) expectedType = do
     body' <- compileExpr body (last $ Parser.types funcDec)
 
     nextFunId <- gets lastLabel
-    args' <- concatMapM (`compileParameter` (name, funame, nextFunId)) (reverse (filter (/= Parser.Placeholder) args))
+    args' <- concatMapM (`compileParameter` (name, funame, nextFunId)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))
     let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
@@ -702,7 +901,7 @@ compileExpr (Parser.FloatLit{floatValue}) _ = return [Push $ DFloat floatValue]
 compileExpr (Parser.DoubleLit{doubleValue}) _ = return [Push $ DDouble doubleValue]
 compileExpr (Parser.BoolLit{boolValue}) _ = return [Push $ DBool boolValue]
 compileExpr (Parser.Cast{castExpr, castType}) _ = do
-    from' <- compileExpr castExpr Parser.Any
+    from' <- compileExpr castExpr Parser.Unknown
     let to' = compileType castType
     return $ from' ++ to' ++ [Cast]
   where
@@ -720,14 +919,14 @@ compileExpr (Parser.Cast{castExpr, castType}) _ = do
 compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
-    mapM_ ((`compileExpr` expectedType) . (\t -> Parser.Impl{trait = t, for = structName, methods = []})) is
+    mapM_ ((`compileExpr` expectedType) . (\t -> Parser.Impl{trait = t, for = structName, methods = [], implPos = anyPosition})) is
     return []
   where
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
-        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = []}]}
-        let impl = Parser.Impl{trait = traitName, for = Parser.name st, methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}}}]}
+        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], traitPos = anyPosition}
+        let impl = Parser.Impl{trait = traitName, for = Parser.name st, methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
         _ <- compileExpr trait Parser.Any
         _ <- compileExpr impl Parser.Any
         return ()
@@ -760,13 +959,13 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
         else concatMapM (`compileExpr` expectedType) expr
   where
     mangleAST :: Parser.Expr -> String -> Parser.Expr
-    mangleAST (Parser.FuncDec{name, types, ..}) alias = Parser.FuncDec{name = alias ++ "@" ++ name, types = types, generics = []}
-    mangleAST (Parser.Function{def = fdef, dec}) alias = Parser.Function{def = map (`mangleAST` alias) fdef, dec = mangleAST dec alias}
-    mangleAST (Parser.FuncDef{name, args, body}) alias = Parser.FuncDef{name = alias ++ "@" ++ name, args = args, body = mangleAST body alias}
+    mangleAST (Parser.FuncDec{name, types, ..}) alias = Parser.FuncDec{name = alias ++ "@" ++ name, types = types, generics = [], funcDecPos = anyPosition}
+    mangleAST (Parser.Function{def = fdef, dec}) alias = Parser.Function{def = map (`mangleAST` alias) fdef, dec = mangleAST dec alias, functionPos = anyPosition}
+    mangleAST (Parser.FuncDef{name, args, body}) alias = Parser.FuncDef{name = alias ++ "@" ++ name, args = args, body = mangleAST body alias, funcDefPos = anyPosition}
     mangleAST x _ = x
 compileExpr (Parser.Trait{name, methods}) expectedType = do
-    let methods' = map (\(Parser.FuncDec{name = name', types, ..}) -> Parser.FuncDec{name = name', types = types, generics = []}) methods
-    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods} : traits s})
+    let methods' = map (\(Parser.FuncDec{name = name', types, ..}) -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}) methods
+    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, traitPos = anyPosition} : traits s})
     mapM_ (`compileExpr` expectedType) methods'
     return []
 compileExpr (Parser.Impl{trait, for, methods}) expectedType = do
@@ -776,13 +975,13 @@ compileExpr (Parser.Impl{trait, for, methods}) expectedType = do
                 let fullyQualifiedName = trait ++ "." ++ for ++ "::" ++ name'
                 trait' <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == trait) traits'
                 let dec = fromJust $ find (\x -> Parser.name x == name') (Parser.methods trait')
-                let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself dec.types for, generics = dec.generics}
+                let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself dec.types for, generics = dec.generics, funcDecPos = anyPosition}
                 _ <- compileExpr newDec Parser.Any
                 modify (\s -> s{functionsByTrait = (for, name', fullyQualifiedName, newDec) : functionsByTrait s})
-                return $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body}
+                return $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body, funcDefPos = anyPosition}
             )
             methods
-    modify (\s -> s{impls = Parser.Impl{trait = trait, for = for, methods = methods} : impls s})
+    modify (\s -> s{impls = Parser.Impl{trait = trait, for = for, methods = methods, implPos = anyPosition} : impls s})
     mapM_ (`compileExpr` expectedType) methods'
     return []
   where
@@ -791,18 +990,18 @@ compileExpr (Parser.Impl{trait, for, methods}) expectedType = do
 compileExpr (Parser.Lambda{lambdaArgs, lambdaBody}) expectedType = do
     fId <- allocId
     curCon <- gets currentContext
-    let args' = if lambdaArgs == [Parser.Placeholder] then [] else lambdaArgs
+    let args' = if lambdaArgs == [Parser.Placeholder anyPosition] then [] else lambdaArgs
     let name = "__lambda" ++ show fId
-    let def = Parser.FuncDef{name = name, args = args', body = lambdaBody}
-    let dec = Parser.FuncDec{name = name, types = replicate (length args' + 1) Parser.Any, generics = []}
-    let fun = Parser.Function{def = [def], dec = dec}
+    let def = Parser.FuncDef{name = name, args = args', body = lambdaBody, funcDefPos = anyPosition}
+    let dec = Parser.FuncDec{name = name, types = replicate (length args' + 1) Parser.Any, generics = [], funcDecPos = anyPosition}
+    let fun = Parser.Function{def = [def], dec = dec, functionPos = anyPosition}
     _ <- compileExpr fun expectedType
     lets' <- gets functions
     let fullName = (fromJust $ findAnyFunction (curCon ++ "@" ++ name) lets').funame
     return [PushPf fullName 0]
 compileExpr (Parser.Pipeline{pipelineLhs = a, pipelineRhs = Parser.Var{varName = b, ..}}) expectedType = compileExpr (Parser.FuncCall{funcName = b, funcArgs = [a], funcPos = zeroPosition}) expectedType
 compileExpr (Parser.Pipeline{pipelineLhs = a, pipelineRhs = Parser.FuncCall{funcName = f, funcArgs, ..}}) expectedType = compileExpr (Parser.FuncCall{funcName = f, funcArgs = a : funcArgs, funcPos = zeroPosition}) expectedType
-compileExpr (Parser.Pipeline{pipelineLhs = a, pipelineRhs = Parser.Then{thenLhs = b, thenRhs = c}}) expectedType = compileExpr (Parser.Then{thenLhs = Parser.Pipeline{pipelineLhs = a, pipelineRhs = b}, thenRhs = c}) expectedType
+compileExpr (Parser.Pipeline{pipelineLhs = a, pipelineRhs = Parser.Then{thenLhs = b, thenRhs = c}}) expectedType = compileExpr (Parser.Then{thenLhs = Parser.Pipeline{pipelineLhs = a, pipelineRhs = b, pipelinePos = anyPosition}, thenRhs = c, thenPos = anyPosition}) expectedType
 compileExpr (Parser.Then{thenLhs = a, thenRhs = b}) expectedType = do
     a' <- compileExpr a expectedType
     b' <- compileExpr b expectedType
@@ -811,7 +1010,7 @@ compileExpr (Parser.UnaryMinus{unaryMinusExpr = x}) expectedType = compileExpr x
 compileExpr (Parser.External{externalArgs = [], ..}) _ = return []
 compileExpr (Parser.External{externalName = from, externalArgs = (Parser.FuncDec{name, types, ..} : xs)}) expectedType = do
     modify (\s -> s{externals = External{name, returnType = last types, args = init types, from} : externals s})
-    _ <- compileExpr (Parser.External{externalName = from, externalArgs = xs}) expectedType
+    _ <- compileExpr (Parser.External{externalName = from, externalArgs = xs, externalPos = anyPosition}) expectedType
     return []
 compileExpr (Parser.CharLit{charValue = x}) _ = return [Push $ DChar x]
 compileExpr x _ = error $ show x ++ " is not implemented"
