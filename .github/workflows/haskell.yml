@@ -23,6 +23,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             extra-experimental-features = nix-command flakes ca-derivations
+            download-buffer-size = 524288000
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
@@ -67,6 +68,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             extra-experimental-features = nix-command flakes ca-derivations
+            download-buffer-size = 524288000
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
@@ -112,6 +114,7 @@ jobs:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             extra-experimental-features = nix-command flakes ca-derivations impure-derivations
+            download-buffer-size = 524288000 
 
       - name: Set up Cachix
         uses: cachix/cachix-action@v14
