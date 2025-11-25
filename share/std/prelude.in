@@ -159,8 +159,9 @@ range a b inc = do
   end
 end
 
-sqrt :: Float -> Float
-sqrt x = x ** 0.5
+# TODO: Fix
+# sqrt :: Float -> Float
+# sqrt x = x ** 0.5
 
 abs :: Float -> Float
 abs x = do

@@ -11,7 +11,7 @@ import Data.Functor ((<&>))
 import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
 import Data.List.Split qualified
 import Data.Map qualified
-import Data.Maybe (fromJust, isJust, isNothing, maybeToList)
+import Data.Maybe (fromJust, isJust, isNothing, mapMaybe, maybeToList)
 import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -57,6 +57,7 @@ data CompilerError = CompilerError
 data CompilerState a = CompilerState
     { program :: Parser.Program
     , functions :: [Function]
+    , funcDefs :: [Parser.Expr]
     , funcDecs :: [Parser.Expr]
     , structDecs :: [Parser.Expr]
     , lastLabel :: Int
@@ -64,6 +65,7 @@ data CompilerState a = CompilerState
     , traits :: [Parser.Expr]
     , impls :: [Parser.Expr]
     , currentContext :: String -- TODO: Nested contexts
+    , contextPath :: [String]
     , externals :: [External]
     , functionsByTrait :: [(String, String, String, Parser.Expr)]
     , errors :: [CompilerError]
@@ -85,11 +87,13 @@ initCompilerState prog =
         []
         []
         []
+        []
         0
         []
         []
         []
         "__outside"
+        ["__outside"]
         []
         []
         []
@@ -103,11 +107,13 @@ initCompilerStateWithFile prog sourcePath' =
         []
         []
         []
+        []
         0
         []
         []
         []
         "__outside"
+        ["__outside"]
         []
         []
         []
@@ -742,8 +748,10 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     argTypes <- mapM typeOf funcArgs
     functions' <- gets functions
     funcDecs' <- gets funcDecs
+    funcDefs' <- gets funcDefs
     curCon <- gets currentContext
     externals' <- gets externals
+    contextPath' <- gets contextPath
     fbt <- gets functionsByTrait
     let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
     -- Find the function in any context using firstM
@@ -794,6 +802,17 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
 
     unless argsOk $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgs) funcPos
 
+    let curConFuncDefs = reverse $ mapMaybe (\ctx -> find (\case Parser.FuncDef{name} -> name == ctx; _ -> False) funcDefs') contextPath'
+        curConFuncDefParamsNames = concat [[varName | Parser.Var{varName} <- args] | Parser.FuncDef _ args _ _ <- curConFuncDefs]
+        inContext = funcName `elem` curConFuncDefParamsNames
+
+    unless
+        ( inContext
+            || isJust external
+            || isJust funcDec
+        )
+        $ cerror ("Function " ++ funcName ++ " not found.") funcPos
+
     case external of
         Just (External _ ereturnType _ from) -> do
             retT <- case typeToData ereturnType of
@@ -825,21 +844,24 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
 compileExpr fd@(Parser.FuncDec{}) _ = do
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
-compileExpr (Parser.FuncDef{name = origName, args, body}) expectedType = do
+compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
     curCon <- gets currentContext
     funs <- gets functions
     let previousContext = curCon
+    let previousContextPath = if curCon == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" curCon
     let name = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
     let origName' = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
     let isFirst = isNothing $ find (\x -> x.baseName == origName') funs
     -- when (not isFirst) $ traceM $ "Function " ++ name ++ " already exists"
     -- let argTypes = map Parser.typeOf args
-    modify (\s -> s{currentContext = name})
+    let newContextPath = if curCon == "__outside" then [origName] else previousContextPath ++ [origName]
+    modify (\s -> s{currentContext = name, contextPath = newContextPath})
     funcDecs' <- gets funcDecs
     when (isNothing $ find (\case Parser.FuncDec{name = name'} -> name' == name; _ -> False) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) expectedType) [] anyPosition : funcDecs s})
 
     funame <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
     modify (\s -> s{functions = Function name funame [] [] curCon : functions s})
+    modify (\s -> s{funcDefs = fd : funcDefs s})
     funcDecs'' <- gets funcDecs
 
     let funcDec = fromJust $ find (\case Parser.FuncDec{name = name'} -> name' == name; _ -> False) funcDecs''
@@ -851,7 +873,8 @@ compileExpr (Parser.FuncDef{name = origName, args, body}) expectedType = do
     let function = Label funame : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ ([Ret | name /= "main"])
     -- modify (\s -> s{functions = Function name funame function funcDec.types : tail (functions s)})
     modify (\s -> s{functions = Function name funame function funcDec.types curCon : functions s})
-    modify (\s -> s{currentContext = previousContext})
+    let restoredContextPath = if previousContext == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" previousContext
+    modify (\s -> s{currentContext = previousContext, contextPath = restoredContextPath})
     return [] -- Function definitions get appended at the last stage of compilation
   where
     compileParameter :: Parser.Expr -> (String, String, Int) -> StateT (CompilerState a) IO [Instruction]

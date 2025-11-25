@@ -294,3 +294,37 @@ spec = do
                 let main : IO = unsafePrint (identity "hello")
                 |]
                 `shouldReturn` [Label "identity#0", StoreSideStack, LStore "x", LLoad "x", ClearSideStack, Ret, Label "main", StoreSideStack, Push $ DString "hello", Call "identity#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
+    describe "Function resolution" $ do
+        it "Should find function in context when it matches a parameter name" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let outer (f: Any) : Int = f 42
+                let main : IO = unsafePrint (outer (\x -> x + 1))
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should find function when it is declared via FuncDec" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                myFunc :: Int -> Int
+                myFunc (x: Int) : Int = x + 1
+                let main : IO = unsafePrint (myFunc 5)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should error when function is not found" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let main : IO = unsafePrint (undefinedFunc 42)
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Function undefinedFunc not found." `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected compilation error for undefined function"
