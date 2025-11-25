@@ -68,7 +68,7 @@ viewFunctionsAndBindings onLoadCode =
         [ h2 [] [ text "Functions and bindings" ]
         , p [] [ text "Indigo doesn't differentiate between functions and bindings. They are both defined using the let keyword." ]
         , viewCodeBlock """let name = "Rocko"
-let main = println "Hello " : name""" onLoadCode True "indigo"
+let main = println "Hello " ++ name""" onLoadCode True "indigo"
         , p [] [ text "The above code defines a binding name and a function main. The function main is called when the program is run." ]
         , viewCodeBlock """let multiple_args (a: Int b: Int): Int = a + b
 let main = print (multiple_args 2, 3)""" onLoadCode True "indigo"
