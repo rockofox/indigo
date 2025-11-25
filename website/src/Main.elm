@@ -63,8 +63,8 @@ let main : IO = do
 end""" )
     , ( "Bottles", """let bottles (i: Int) : IO = do
     if i > 0 then do
-        println ^i : " bottles of beer on the wall, " : ^i : " bottles of beer."
-        println "Take one down and pass it around, " : ((i) - 1) as String : " bottles of beer on the wall.\\n"
+        println ^i ++ " bottles of beer on the wall, " ++ ^i ++ " bottles of beer."
+        println "Take one down and pass it around, " ++ ((i) - 1) as String ++ " bottles of beer on the wall.\n"
         bottles (i)-1
     else do
         println "No more bottles of beer on the wall, no more bottles of beer."
