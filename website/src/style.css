@@ -55,6 +55,11 @@ body {
     color: var(--text-color);
 }
 
+.main-nav a.active {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
 .container {
     max-width: 1200px;
     margin: 0 auto;

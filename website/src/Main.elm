@@ -229,7 +229,7 @@ view model =
     { title = "Indigo Programming Language"
     , body =
         [ div [ class "app-container" ]
-            [ viewHeader
+            [ viewHeader model
             , main_ [ class "main-content" ]
                 (case model.page of
                     Home ->
@@ -249,15 +249,29 @@ view model =
     }
 
 
-viewHeader : Html Msg
-viewHeader =
+viewHeader : Model -> Html Msg
+viewHeader model =
+    let
+        currentPath =
+            model.url.path
+
+        isActive href =
+            if String.startsWith "http" href then
+                False
+            else if href == "/" then
+                currentPath == "/"
+            else if href == "/docs" then
+                currentPath == "/docs" || String.startsWith "/docs/" currentPath
+            else
+                currentPath == href || String.startsWith (href ++ "/") currentPath
+    in
     header [ class "site-header" ]
         [ div [ class "container header-content" ]
             [ h1 [ class "logo" ] [ text "Indigo" ]
             , nav [ class "main-nav" ]
-                [ a [ href "/" ] [ text "Home" ]
-                , a [ href "/playground" ] [ text "Playground" ]
-                , a [ href "/docs" ] [ text "Documentation" ]
+                [ a [ href "/", class (if isActive "/" then "active" else "") ] [ text "Home" ]
+                , a [ href "/playground", class (if isActive "/playground" then "active" else "") ] [ text "Playground" ]
+                , a [ href "/docs", class (if isActive "/docs" then "active" else "") ] [ text "Documentation" ]
                 , a [ href "https://github.com/rockofox/indigo" ] [ text "GitHub" ]
                 ]
             ]
