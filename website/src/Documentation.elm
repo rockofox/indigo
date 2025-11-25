@@ -17,7 +17,7 @@ type Topic
 view : Topic -> (String -> msg) -> Html msg
 view currentTopic onLoadCode =
     div [ class "docs-container" ]
-        [ viewSidebar
+        [ viewSidebar currentTopic
         , div [ class "docs-content" ]
             [ case currentTopic of
                 FunctionsAndBindings -> viewFunctionsAndBindings onLoadCode
@@ -31,24 +31,24 @@ view currentTopic onLoadCode =
             ]
         ]
 
-viewSidebar : Html msg
-viewSidebar =
+viewSidebar : Topic -> Html msg
+viewSidebar currentTopic =
     div [ class "docs-sidebar" ]
         [ h3 [] [ text "Language Basics" ]
-        , sidebarLink "Functions & Bindings" "/docs/functions-and-bindings"
-        , sidebarLink "Comments" "/docs/comments"
-        , sidebarLink "Pattern Matching" "/docs/pattern-matching"
-        , sidebarLink "Tuples" "/docs/tuples"
-        , sidebarLink "Structs & Traits" "/docs/structs-and-traits"
+        , sidebarLink currentTopic FunctionsAndBindings "Functions & Bindings" "/docs/functions-and-bindings"
+        , sidebarLink currentTopic Comments "Comments" "/docs/comments"
+        , sidebarLink currentTopic PatternMatching "Pattern Matching" "/docs/pattern-matching"
+        , sidebarLink currentTopic Tuples "Tuples" "/docs/tuples"
+        , sidebarLink currentTopic StructsAndTraits "Structs & Traits" "/docs/structs-and-traits"
         , h3 [] [ text "Advanced Features" ]
-        , sidebarLink "FFI" "/docs/ffi"
-        , sidebarLink "Generics" "/docs/generics"
-        , sidebarLink "Refinement Types" "/docs/refinement-types"
+        , sidebarLink currentTopic FFI "FFI" "/docs/ffi"
+        , sidebarLink currentTopic Generics "Generics" "/docs/generics"
+        , sidebarLink currentTopic RefinementTypes "Refinement Types" "/docs/refinement-types"
         ]
 
-sidebarLink : String -> String -> Html msg
-sidebarLink label path =
-    a [ href path ] [ text label ]
+sidebarLink : Topic -> Topic -> String -> String -> Html msg
+sidebarLink currentTopic linkTopic label path =
+    a [ href path, class (if currentTopic == linkTopic then "active" else "") ] [ text label ]
 
 viewCodeBlock : String -> (String -> msg) -> Bool -> String -> Html msg
 viewCodeBlock code onLoadCode showTryButton language =

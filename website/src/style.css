@@ -281,6 +281,11 @@ xterm-display {
     color: var(--primary-color);
 }
 
+.docs-sidebar a.active {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
 .docs-content {
     flex-grow: 1;
     max-width: 800px;
