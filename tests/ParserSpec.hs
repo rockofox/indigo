@@ -9,7 +9,26 @@ import Test.QuickCheck.Arbitrary.Generic
 import Text.RawString.QQ (r)
 
 instance Arbitrary Type where
-    arbitrary = genericArbitrary
+    arbitrary = sized $ \n ->
+        if n <= 0
+            then oneof [return Any, return Unknown, return None, return Self, StructT <$> elements ["Int", "String", "Bool", "Float", "Char"]]
+            else
+                oneof
+                    [ return Any
+                    , return Unknown
+                    , return None
+                    , return Self
+                    , StructT <$> elements ["Int", "String", "Bool", "Float", "Char"]
+                    , List <$> resize (n `div` 2) arbitrary
+                    , do
+                        size <- choose (2, min 4 (n `div` 2))
+                        Tuple <$> vectorOf size (resize (n `div` 2) arbitrary)
+                    , do
+                        argCount <- choose (0, min 2 (n `div` 2))
+                        args <- vectorOf argCount (resize (n `div` 2) arbitrary)
+                        ret <- resize (n `div` 2) arbitrary
+                        return $ AST.Fn args ret
+                    ]
     shrink = genericShrink
 
 isFn :: Type -> Bool
@@ -63,6 +82,12 @@ spec = do
         it "StructT types should be equal if their fields are equal" $
             property $
                 \t -> compareTypes (StructT t) (StructT t) `shouldBe` True
+        it "Tuple types should be equal if their element types are equal" $
+            compareTypes (Tuple [StructT "Int", StructT "String"]) (Tuple [StructT "Int", StructT "String"]) `shouldBe` True
+        it "Tuple types should not be equal if lengths differ" $
+            compareTypes (Tuple [StructT "Int"]) (Tuple [StructT "Int", StructT "String"]) `shouldBe` False
+        it "Tuple types should not be equal if element types differ" $
+            compareTypes (Tuple [StructT "Int", StructT "String"]) (Tuple [StructT "String", StructT "Int"]) `shouldBe` False
     describe "Basic" $ do
         it "Should parse a simple program" $
             parseProgram "let main : IO = print \"Hello, world!\"" parserCompilerFlags
@@ -234,3 +259,40 @@ spec = do
             parseProgram "x || y" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Or{orLhs = Var{varName = "x", varPos = anyPosition}, orRhs = Var{varName = "y", varPos = anyPosition}, orPos = anyPosition}])
+    describe "Tuples" $ do
+        it "Should parse tuple literal with 2 elements" $
+            parseProgram "(1, 2)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, IntLit{intValue = 2, intPos = anyPosition}], tupleLitPos = anyPosition}])
+        it "Should parse tuple literal with 3 elements" $
+            parseProgram "(1, \"hello\", True)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "hello", stringPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}])
+        it "Should parse tuple type" $
+            parseProgram "let x : (Int, String) = (1, \"test\")" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int", StructT "String"]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+        it "Should parse tuple access" $
+            parseProgram "tuple.0" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [TupleAccess{tupleAccessTuple = Var{varName = "tuple", varPos = anyPosition}, tupleAccessIndex = 0, tupleAccessPos = anyPosition}])
+        it "Should parse tuple access with index 1" $
+            parseProgram "tuple.1" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [TupleAccess{tupleAccessTuple = Var{varName = "tuple", varPos = anyPosition}, tupleAccessIndex = 1, tupleAccessPos = anyPosition}])
+        it "Should parse nested tuple types" $
+            parseProgram "let x : ((Int, String), Bool) = ((1, \"test\"), True)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [Tuple [StructT "Int", StructT "String"], StructT "Bool"]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+        it "Should parse single-element parentheses as parenthesized expression, not tuple" $
+            parseProgram "(x)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Var{varName = "x", varPos = anyPosition}])
+        it "Should parse tuple pattern in function definition" $
+            parseProgram "f (x, y) = x" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDef{name = "f", args = [TupleLit{tupleLitExprs = [Var{varName = "x", varPos = anyPosition}, Var{varName = "y", varPos = anyPosition}], tupleLitPos = anyPosition}], body = Var{varName = "x", varPos = anyPosition}, funcDefPos = anyPosition}])
+        it "Should parse tuple pattern with literals" $
+            parseProgram "f (1, 2) = 3" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDef{name = "f", args = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, IntLit{intValue = 2, intPos = anyPosition}], tupleLitPos = anyPosition}], body = IntLit{intValue = 3, intPos = anyPosition}, funcDefPos = anyPosition}])

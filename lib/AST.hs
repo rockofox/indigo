@@ -1,6 +1,7 @@
 module AST where
 
 import Data.Binary qualified
+import Data.List (intercalate)
 import Data.Maybe (maybeToList)
 import GHC.Generics (Generic)
 
@@ -63,6 +64,8 @@ data Expr
     | CharLit {charValue :: Char, charPos :: Position}
     | ParenApply {parenApplyExpr :: Expr, parenApplyArgs :: [Expr], parenApplyPos :: Position}
     | When {whenExpr :: Expr, whenBranches :: [(Expr, Expr)], whenElse :: Maybe Expr, whenPos :: Position}
+    | TupleLit {tupleLitExprs :: [Expr], tupleLitPos :: Position}
+    | TupleAccess {tupleAccessTuple :: Expr, tupleAccessIndex :: Int, tupleAccessPos :: Position}
     deriving
         ( Show
         , Generic
@@ -126,6 +129,8 @@ children (DoubleLit _ _) = []
 children (ParenApply a b _) = a : b
 children (ListAdd a b _) = [a, b]
 children (When expr branches else_ _) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
+children (TupleLit a _) = a
+children (TupleAccess a _ _) = [a]
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 
@@ -150,6 +155,7 @@ data Type
     | Unknown
     | Fn {args :: [Type], ret :: Type}
     | List Type
+    | Tuple [Type]
     | StructT String
     | Self
     deriving (Eq, Ord, Generic)
@@ -167,6 +173,7 @@ instance Show Type where
     show Unknown = "Unknown"
     show (Fn fnArgs fnRet) = "Fn (" ++ (if null fnArgs then "" else unwords $ fmap (++ " ->") (init $ fmap show fnArgs)) ++ (if null fnArgs then "" else " ") ++ show fnRet ++ ")"
     show (List t) = "[" ++ show t ++ "]"
+    show (Tuple ts) = "(" ++ intercalate ", " (map show ts) ++ ")"
     show (StructT structName) = structName
     show Self = "Self"
 
@@ -192,6 +199,7 @@ compareTypes Self StructT{} = True
 compareTypes StructT{} Self = True
 compareTypes (StructT x) (StructT y) = x == y
 compareTypes (List x) (List y) = compareTypes x y
+compareTypes (Tuple xs) (Tuple ys) = length xs == length ys && all (uncurry compareTypes) (zip xs ys)
 compareTypes Unknown _ = True
 compareTypes _ Unknown = True
 compareTypes Any Any = True
@@ -262,6 +270,10 @@ typeOf (ListAdd x _ _) = typeOf x
 typeOf (When _ branches else_ _) = case branches of
     [] -> maybe Unknown typeOf else_
     ((_, body) : _) -> typeOf body
+typeOf (TupleLit exprs _) = Tuple (map typeOf exprs)
+typeOf (TupleAccess tupleExpr index _) = case typeOf tupleExpr of
+    Tuple types -> if index >= 0 && index < length types then types !! index else Unknown
+    _ -> Unknown
 
 typesMatch :: [Type] -> [Type] -> Bool
 typesMatch [] [] = True
@@ -275,4 +287,5 @@ typeToString None = "None"
 typeToString Unknown = "Unknown"
 typeToString (Fn args ret) = "Fn{" ++ show args ++ " -> " ++ show ret ++ "}"
 typeToString (List t) = "List{" ++ typeToString t ++ "}"
+typeToString (Tuple ts) = "(" ++ intercalate ", " (map typeToString ts) ++ ")"
 typeToString Self = "Self"

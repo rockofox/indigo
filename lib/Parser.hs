@@ -82,7 +82,7 @@ type Parser = ParsecT Void Text (State ParserState)
 binOpTable :: [[Operator Parser Expr]]
 binOpTable =
     [ [prefix "^" Flexible]
-    , [binary "." StructAccess]
+    , [binary "." tupleOrStructAccess]
     , [binary "as" Cast]
     , [prefix "$" StrictEval]
     , [prefix "!" Not]
@@ -172,6 +172,8 @@ getExprPosition (Impl{implPos}) = implPos
 getExprPosition (StrictEval{strictEvalPos}) = strictEvalPos
 getExprPosition (External{externalPos}) = externalPos
 getExprPosition (When{whenPos}) = whenPos
+getExprPosition (TupleLit{tupleLitPos}) = tupleLitPos
+getExprPosition (TupleAccess{tupleAccessPos}) = tupleAccessPos
 
 combinePositions :: Position -> Position -> Position
 combinePositions (Position (x1, x2)) (Position (y1, y2))
@@ -184,6 +186,14 @@ binary :: Text -> (Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
 binary name f = InfixL $ do
     _ <- symbol name
     return $ \a b -> f a b (combinePositions (getExprPosition a) (getExprPosition b))
+
+tupleOrStructAccess :: Expr -> Expr -> Position -> Expr
+tupleOrStructAccess a b pos = case b of
+    IntLit{intValue} -> TupleAccess a (fromIntegral intValue) pos
+    FloatLit{floatValue}
+        | fromInteger (round floatValue) == floatValue ->
+            TupleAccess a (round floatValue) pos
+    _ -> StructAccess a b pos
 
 binaryAny :: (String -> Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
 binaryAny f = InfixL $ do
@@ -314,23 +324,35 @@ expr = makeExprParser term binOpTable
 
 validType :: Parser Type
 validType =
-    do
-        do
-            keyword "Any"
-            return Any
-        <|> do
-            parens $ do
-                args <- sepBy validType (symbol "->")
-                let ret = last args
-                return $ Fn args ret
-        <|> do
-            squareBrackets $ List <$> validType
-        <|> do
-            keyword "Self"
-            return Self
-        <|> do
-            lookAhead $ satisfy isUpper
-            StructT <$> identifier
+    ( do
+        keyword "Any"
+        return Any
+    )
+        <|> try
+            ( do
+                parens $ do
+                    types <- sepBy1 validType (symbol ",")
+                    if length types >= 2
+                        then return $ Tuple types
+                        else fail "Tuple type must have at least 2 elements"
+            )
+        <|> ( do
+                parens $ do
+                    args <- sepBy1 validType (symbol "->")
+                    let ret = last args
+                    return $ Fn args ret
+            )
+        <|> ( do
+                squareBrackets $ List <$> validType
+            )
+        <|> ( do
+                keyword "Self"
+                return Self
+            )
+        <|> ( do
+                lookAhead $ satisfy isUpper
+                StructT <$> identifier
+            )
         <?> "type"
 
 stringLit :: Parser String
@@ -352,6 +374,7 @@ funcDec = do
 defArg :: Parser Expr
 defArg =
     try structLit
+        <|> try tupleLit
         <|> var
         <|> parens listPattern
         <|> array
@@ -673,6 +696,8 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (StrictEval a _) = StrictEval (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (External n a _) = External n (map replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (ParenApply a b _) = ParenApply (replacePositionWithAnyPosition a) (map replacePositionWithAnyPosition b) anyPosition
+    replacePositionWithAnyPosition (TupleLit a _) = TupleLit (map replacePositionWithAnyPosition a) anyPosition
+    replacePositionWithAnyPosition (TupleAccess a i _) = TupleAccess (replacePositionWithAnyPosition a) i anyPosition
     replacePositionWithAnyPosition (When e b el _) =
         When
             (replacePositionWithAnyPosition e)
@@ -804,12 +829,24 @@ unaryMinus = parens $ do
     end <- getOffset
     return $ UnaryMinus expr' (Position (start, end))
 
+tupleLit :: Parser Expr
+tupleLit = do
+    start <- getOffset
+    symbol "("
+    exprs <- sepBy1 expr (symbol ",")
+    symbol ")"
+    end <- getOffset
+    if length exprs >= 2
+        then return $ TupleLit exprs (Position (start, end))
+        else fail "Tuple must have at least 2 elements"
+
 term :: Parser Expr
 term =
     choice
         [ placeholder
         , try unaryMinus
         , try parenApply
+        , try tupleLit
         , parens expr
         , do
             start <- getOffset

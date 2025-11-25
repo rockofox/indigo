@@ -181,6 +181,8 @@ extractPosition (Parser.Impl{implPos}) = implPos
 extractPosition (Parser.StrictEval{strictEvalPos}) = strictEvalPos
 extractPosition (Parser.External{externalPos}) = externalPos
 extractPosition (Parser.When{whenPos}) = whenPos
+extractPosition (Parser.TupleLit{tupleLitPos}) = tupleLitPos
+extractPosition (Parser.TupleAccess{tupleAccessPos}) = tupleAccessPos
 
 getErrorCount :: StateT (CompilerState a) IO Int
 getErrorCount = gets (length . errors)
@@ -522,6 +524,12 @@ typeOf (Parser.When _ branches else_ _) =
     case branches of
         [] -> maybe (return Parser.Unknown) typeOf else_
         ((_, body) : _) -> typeOf body
+typeOf (Parser.TupleLit exprs _) = mapM typeOf exprs <&> Parser.Tuple
+typeOf (Parser.TupleAccess tupleExpr index _) = do
+    tupleType <- typeOf tupleExpr
+    case tupleType of
+        Parser.Tuple types -> if index >= 0 && index < length types then return $ types !! index else return Parser.Unknown
+        _ -> return Parser.Unknown
 
 getStructFields :: String -> StateT (CompilerState a) IO [(String, Parser.Type)]
 getStructFields structName = do
@@ -592,6 +600,7 @@ extractPatternVars (Parser.Var{varName}) = [varName]
 extractPatternVars (Parser.ListLit{listLitExprs}) = concatMap extractPatternVars listLitExprs
 extractPatternVars (Parser.ListPattern{listPatternExprs}) = concatMap extractPatternVars listPatternExprs
 extractPatternVars (Parser.StructLit{structLitFields}) = concatMap (\(_, e) -> extractPatternVars e) structLitFields
+extractPatternVars (Parser.TupleLit{tupleLitExprs}) = concatMap extractPatternVars tupleLitExprs
 extractPatternVars _ = []
 
 compilePatternMatch :: Parser.Expr -> String -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
@@ -643,6 +652,26 @@ compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedTyp
             let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
             let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ last elements'
             return $ lengthCheck ++ concat xToY ++ rest
+compilePatternMatch tup@(Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
+    if null tupleLitExprs
+        then return [Dup, Push $ DList [], Eq, Jf nextLabel, Pop]
+        else do
+            let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length tupleLitExprs, Eq, Jf nextLabel]
+            bindingsList <-
+                mapM
+                    ( \(pat, index) -> do
+                        case pat of
+                            Parser.Var{varName} ->
+                                return [Dup, Push $ DInt index, Index, LStore varName]
+                            Parser.TupleLit{} -> do
+                                nestedInstrs <- compilePatternMatch pat nextLabel expectedType
+                                return $ [Dup, Push $ DInt index, Index] ++ nestedInstrs
+                            _ -> do
+                                literalInstrs <- compilePatternMatch pat nextLabel expectedType
+                                return $ [Dup, Push $ DInt index, Index] ++ literalInstrs
+                    )
+                    (zip tupleLitExprs [0 ..])
+            return $ lengthCheck ++ concat bindingsList ++ [Pop]
 compilePatternMatch (Parser.StructLit{structLitName, structLitFields}) nextLabel expectedType = do
     let fields' =
             concatMap
@@ -950,6 +979,12 @@ compileExpr (Parser.ListAdd{listAddLhs = a, listAddRhs = b}) expectedType = do
 compileExpr (Parser.ListLit{listLitExprs}) expectedType = do
     elems <- concatMapM (`compileExpr` expectedType) listLitExprs
     return $ elems ++ [PackList $ length listLitExprs]
+compileExpr (Parser.TupleLit{tupleLitExprs}) expectedType = do
+    elems <- concatMapM (`compileExpr` expectedType) tupleLitExprs
+    return $ elems ++ [PackList $ length tupleLitExprs]
+compileExpr (Parser.TupleAccess{tupleAccessTuple, tupleAccessIndex}) expectedType = do
+    tuple' <- compileExpr tupleAccessTuple expectedType
+    return $ tuple' ++ [Push $ DInt tupleAccessIndex, Index]
 compileExpr (Parser.When{whenExpr = expr, whenBranches = branches, whenElse = else_}) expectedType = do
     expr' <- compileExpr expr expectedType
     endLabel <- allocId >>= \x -> return $ "when_end" ++ show x
@@ -1017,6 +1052,7 @@ compileExpr (Parser.Cast{castExpr, castType}) _ = do
     compileType (Parser.Var{varName = "String"}) = [Push $ DString ""]
     compileType (Parser.Var{varName = "CPtr"}) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit{listLitExprs = [x]}) = compileType x ++ [PackList 1]
+    compileType (Parser.TupleLit{tupleLitExprs}) = concatMap compileType tupleLitExprs ++ [PackList $ length tupleLitExprs]
     compileType (Parser.Var{}) = [Push DNone]
     compileType x = error $ "Cannot cast to type " ++ show x
 compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do

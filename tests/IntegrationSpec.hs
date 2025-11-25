@@ -730,3 +730,135 @@ spec = do
                     end
                 |]
                 `shouldReturn` "1\n2\n100\n200\n"
+    describe "Tuples" $ do
+        it "Should create and access tuple elements" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (1, "hello", True)
+                    println t.0
+                    println t.1
+                    println t.2
+                end
+            |]
+                `shouldReturn` "1\nhello\nTrue\n"
+        it "Should work with tuple type annotations" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t: (Int, String) = (42, "test")
+                    println t.0
+                    println t.1
+                end
+            |]
+                `shouldReturn` "42\ntest\n"
+        it "Should work with nested tuples" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = ((1, 2), (3, 4))
+                    let first = t.0
+                    let second = t.1
+                    println first.0
+                    println first.1
+                    println second.0
+                    println second.1
+                end
+            |]
+                `shouldReturn` "1\n2\n3\n4\n"
+        it "Should work with tuples in function parameters" $ do
+            compileAndRun
+                [r|
+                f :: (Int, String) -> Int
+                f t = t.0
+                let main : IO = println (f (42, "test"))
+            |]
+                `shouldReturn` "42\n"
+        it "Should work with tuples as function return types" $ do
+            compileAndRun
+                [r|
+                f :: Int -> (Int, Int)
+                f x = (x, x * 2)
+                let main : IO = println (f 5).0
+            |]
+                `shouldReturn` "5\n"
+        it "Should work with tuple comparison" $ do
+            compileAndRun
+                [r|
+                let main : IO = println ((1, 2) == (1, 2))
+            |]
+                `shouldReturn` "True\n"
+        it "Should work with tuples in lists" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let list = [(1, 2), (3, 4)]
+                    let first = list.0
+                    let second = list.1
+                    println first.0
+                    println second.1
+                end
+            |]
+                `shouldReturn` "1\n4\n"
+        it "Should work with tuple pattern matching in function definitions" $ do
+            compileAndRun
+                [r|
+                f :: (Int, String) -> Int
+                f (x, y) = x
+                let main : IO = println (f (42, "test"))
+            |]
+                `shouldReturn` "42\n"
+        it "Should work with tuple pattern matching extracting both values" $ do
+            compileAndRun
+                [r|
+                f :: (Int, String) -> String
+                f (x, y) = y
+                let main : IO = println (f (42, "hello"))
+            |]
+                `shouldReturn` "hello\n"
+        it "Should work with nested tuple pattern matching" $ do
+            compileAndRun
+                [r|
+                f :: ((Int, Int), (Int, Int)) -> Int
+                f ((a, b), (c, d)) = a + b + c + d
+                let main : IO = println (f ((1, 2), (3, 4)))
+            |]
+                `shouldReturn` "10\n"
+        it "Should work with tuple pattern matching in when statements" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (1, "hello")
+                    when t of
+                        (1, "hello") -> println "matched (1, hello)"
+                        (2, "world") -> println "matched (2, world)"
+                        (x, y) -> println "matched other"
+                    end
+                end
+            |]
+                `shouldReturn` "matched (1, hello)\n"
+        it "Should work with tuple pattern matching with variables in when" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (42, "test")
+                    when t of
+                        (x, y) -> println x
+                    end
+                end
+            |]
+                `shouldReturn` "42\n"
+        it "Should work with tuple pattern matching with mixed literals and variables" $ do
+            compileAndRun
+                [r|
+                f :: (Int, String) -> String
+                f (1, y) = y
+                f (2, y) = "two: " ++ y
+                f (x, y) = "other"
+                let main : IO = do
+                    println (f (1, "one"))
+                    println (f (2, "two"))
+                    println (f (3, "three"))
+                end
+            |]
+                `shouldReturn` "one\ntwo: two\nother\n"

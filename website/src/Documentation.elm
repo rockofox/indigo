@@ -8,6 +8,7 @@ type Topic
     = FunctionsAndBindings
     | Comments
     | PatternMatching
+    | Tuples
     | StructsAndTraits
     | FFI
     | Generics
@@ -22,6 +23,7 @@ view currentTopic onLoadCode =
                 FunctionsAndBindings -> viewFunctionsAndBindings onLoadCode
                 Comments -> viewComments onLoadCode
                 PatternMatching -> viewPatternMatching onLoadCode
+                Tuples -> viewTuples onLoadCode
                 StructsAndTraits -> viewStructsAndTraits onLoadCode
                 FFI -> viewFFI onLoadCode
                 Generics -> viewGenerics onLoadCode
@@ -36,6 +38,7 @@ viewSidebar =
         , sidebarLink "Functions & Bindings" "/docs/functions-and-bindings"
         , sidebarLink "Comments" "/docs/comments"
         , sidebarLink "Pattern Matching" "/docs/pattern-matching"
+        , sidebarLink "Tuples" "/docs/tuples"
         , sidebarLink "Structs & Traits" "/docs/structs-and-traits"
         , h3 [] [ text "Advanced Features" ]
         , sidebarLink "FFI" "/docs/ffi"
@@ -236,6 +239,133 @@ end""" onLoadCode True "indigo"
   else -> println("other")
 end""" onLoadCode True "indigo"
         , p [] [ text "This allows for concise pattern matching in function definitions." ]
+        , h3 [] [ text "Tuple Pattern Matching" ]
+        , p [] [ text "You can pattern match on tuples to extract their elements:" ]
+        , viewCodeBlock """let t = (42, "hello")
+when t of
+  (x, y) -> do
+    println x
+    println y
+  end
+end""" onLoadCode True "indigo"
+        , p [] [ text "Tuple patterns allow you to destructure tuples and bind their elements to variables. You can also match against specific tuple values:" ]
+        , viewCodeBlock """let t = (1, "test")
+when t of
+  (1, "hello") -> println "matched (1, hello)"
+  (2, "world") -> println "matched (2, world)"
+  (x, y) -> println "matched other tuple"
+end""" onLoadCode True "indigo"
+        , p [] [ text "Functions can also pattern match on tuple arguments:" ]
+        , viewCodeBlock """let fst :: (Int, String) -> Int
+let fst (x, y) = x
+
+let snd :: (Int, String) -> String
+let snd (x, y) = y
+
+let main: IO = do
+  println (fst (42, "hello"))
+  println (snd (42, "hello"))
+end""" onLoadCode True "indigo"
+        ]
+
+viewTuples : (String -> msg) -> Html msg
+viewTuples onLoadCode =
+    section [ id "tuples" ]
+        [ h2 [] [ text "Tuples" ]
+        , p [] [ text "Tuples are fixed-size collections of values of potentially different types. They provide a way to group multiple values together without defining a custom struct." ]
+        , h3 [] [ text "Creating Tuples" ]
+        , p [] [ text "Tuples are created using parentheses with comma-separated values:" ]
+        , viewCodeBlock """let main: IO = do
+    let point = (10, 20)
+    let person = ("Alice", 30, True)
+    println point
+    println person
+end""" onLoadCode True "indigo"
+        , p [] [ text "A tuple must have at least 2 elements. Single-element parentheses are treated as parenthesized expressions, not tuples." ]
+        , h3 [] [ text "Tuple Types" ]
+        , p [] [ text "Tuple types are specified using parentheses with type names:" ]
+        , viewCodeBlock """let point: (Int, Int) = (10, 20)
+let person: (String, Int, Bool) = ("Alice", 30, True)
+let main: IO = do
+    println point
+    println person
+end""" onLoadCode True "indigo"
+        , p [] [ text "Each position in the tuple type corresponds to the type of the value at that position." ]
+        , h3 [] [ text "Accessing Tuple Elements" ]
+        , p [] [ text "Tuple elements are accessed using dot notation with zero-based numeric indices:" ]
+        , viewCodeBlock """let main: IO = do
+    let t = (42, "hello", True)
+    println t.0
+    println t.1
+    println t.2
+end""" onLoadCode True "indigo"
+        , p [] [ text "The first element is accessed with .0, the second with .1, and so on. For nested tuple access, use intermediate variables:" ]
+        , viewCodeBlock """let main: IO = do
+    let t = ((1, 2), (3, 4))
+    let first = t.0
+    let second = t.1
+    println first.0
+    println first.1
+    println second.0
+    println second.1
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuples in Functions" ]
+        , p [] [ text "Tuples can be used as function parameters and return types:" ]
+        , viewCodeBlock """let swap :: (Int, String) -> (String, Int)
+let swap (x, y) = (y, x)
+
+let main: IO = do
+    let result = swap (42, "hello")
+    println result.0
+    println result.1
+end""" onLoadCode True "indigo"
+        , p [] [ text "Functions can return tuples to provide multiple values:" ]
+        , viewCodeBlock """let divide :: Int -> Int -> (Int, Int)
+let divide a b = (a / b, a % b)
+
+let main: IO = do
+    let (quotient, remainder) = divide 10 3
+    println quotient
+    println remainder
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuple Pattern Matching" ]
+        , p [] [ text "Tuples can be destructured using pattern matching in function definitions and when expressions:" ]
+        , viewCodeBlock """let fst :: (Int, String) -> Int
+let fst (x, y) = x
+
+let main: IO = do
+    println (fst (42, "test"))
+end""" onLoadCode True "indigo"
+        , p [] [ text "Pattern matching allows you to extract tuple elements directly in the function signature or when branches:" ]
+        , viewCodeBlock """let main: IO = do
+    let t = (1, "hello")
+    when t of
+        (1, "hello") -> println "matched (1, hello)"
+        (2, "world") -> println "matched (2, world)"
+        (x, y) -> do
+            println "matched other: "
+            println x
+            println y
+        end
+    end
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Nested Tuples" ]
+        , p [] [ text "Tuples can contain other tuples, allowing you to create more complex data structures:" ]
+        , viewCodeBlock """let main: IO = do
+    let nested = ((1, 2), (3, 4))
+    let first = nested.0
+    let second = nested.1
+    println first.0
+    println first.1
+    println second.0
+    println second.1
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuples vs Lists" ]
+        , p [] [ text "Tuples differ from lists in several important ways:" ]
+        , p [] [ text "• Tuples have a fixed size determined at compile time, while lists can have any length" ]
+        , p [] [ text "• Tuple elements can be of different types, while list elements must all be the same type" ]
+        , p [] [ text "• Tuples use numeric indices (.0, .1, etc.) for access, while lists use bracket notation ([0], [1], etc.)" ]
+        , p [] [ text "• Tuples are best for grouping a known number of related values, while lists are for collections of unknown size" ]
         ]
 
 viewGenerics : (String -> msg) -> Html msg
