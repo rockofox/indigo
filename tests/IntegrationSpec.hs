@@ -862,3 +862,62 @@ spec = do
                 end
             |]
                 `shouldReturn` "one\ntwo: two\nother\n"
+        it "Should handle tuple pattern matching where first pattern fails but later pattern matches" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (12, "hello")
+                    when t of
+                        (1, "hello") -> println "matched (1, hello)"
+                        (2, "world") -> println "matched (2, world)"
+                        (x, y) -> do
+                            println "matched other: "
+                            println x
+                            println y
+                        end
+                    end
+                end
+            |]
+                `shouldReturn` "matched other: \n12\nhello\n"
+        it "Should handle tuple pattern matching with multiple failing patterns before a match" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (99, "test")
+                    when t of
+                        (1, "a") -> println "one"
+                        (2, "b") -> println "two"
+                        (3, "c") -> println "three"
+                        (99, "test") -> println "matched 99"
+                        (x, y) -> println "other"
+                    end
+                end
+            |]
+                `shouldReturn` "matched 99\n"
+        it "Should handle nested tuple pattern matching" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = ((1, 2), (3, 4))
+                    when t of
+                        ((1, 2), (3, 4)) -> println "matched nested"
+                        ((1, 2), (x, y)) -> println "matched partial"
+                        (x, y) -> println "matched outer"
+                    end
+                end
+            |]
+                `shouldReturn` "matched nested\n"
+        it "Should handle tuple pattern matching with mixed literal/variable patterns that fail early" $ do
+            compileAndRun
+                [r|
+                let main : IO = do
+                    let t = (5, "five")
+                    when t of
+                        (1, x) -> println "one"
+                        (2, x) -> println "two"
+                        (5, "five") -> println "matched five"
+                        (x, y) -> println "other"
+                    end
+                end
+            |]
+                `shouldReturn` "matched five\n"

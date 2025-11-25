@@ -652,23 +652,28 @@ compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedTyp
             let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
             let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ last elements'
             return $ lengthCheck ++ concat xToY ++ rest
-compilePatternMatch tup@(Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
+compilePatternMatch (Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
     if null tupleLitExprs
         then return [Dup, Push $ DList [], Eq, Jf nextLabel, Pop]
         else do
-            let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length tupleLitExprs, Eq, Jf nextLabel]
+            tempVarId <- allocId
+            let tempVarName = "__tuple_temp_" ++ show tempVarId
+            cleanupLabel <- allocId >>= \x -> return $ "__tuple_cleanup_" ++ show x
+            let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length tupleLitExprs, Eq, Jf nextLabel, Dup, LStore tempVarName]
             bindingsList <-
                 mapM
                     ( \(pat, index) -> do
                         case pat of
                             Parser.Var{varName} ->
-                                return [Dup, Push $ DInt index, Index, LStore varName]
+                                return [LLoad tempVarName, Dup, Push $ DInt index, Index, LStore varName, LLoad tempVarName]
                             Parser.TupleLit{} -> do
                                 nestedInstrs <- compilePatternMatch pat nextLabel expectedType
-                                return $ [Dup, Push $ DInt index, Index] ++ nestedInstrs
+                                return $ [LLoad tempVarName, Dup, Push $ DInt index, Index] ++ nestedInstrs ++ [LLoad tempVarName]
                             _ -> do
-                                literalInstrs <- compilePatternMatch pat nextLabel expectedType
-                                return $ [Dup, Push $ DInt index, Index] ++ literalInstrs
+                                successLabel <- allocId >>= \x -> return $ "__tuple_success_" ++ show x
+                                literalInstrs <- compilePatternMatch pat cleanupLabel expectedType
+                                let afterMatch = [Jmp successLabel, Label cleanupLabel, Pop, LLoad tempVarName, Jmp nextLabel, Label successLabel, Pop]
+                                return $ [LLoad tempVarName, Dup, Push $ DInt index, Index] ++ literalInstrs ++ afterMatch
                     )
                     (zip tupleLitExprs [0 ..])
             return $ lengthCheck ++ concat bindingsList ++ [Pop]
