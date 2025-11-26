@@ -3,6 +3,5 @@ packages: .
 
 tests: True
 
-optimization: False
 jobs: $ncpus
 index-state: HEAD
