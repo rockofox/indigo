@@ -37,15 +37,12 @@ library
         megaparsec,
         parser-combinators,
         mtl,
-        -- binaryen,
         directory,
         bytestring,
         binary,
         split,
         vector,
-        -- pretty-simple,
         monad-loops,
-        executable-path,
         filepath,
         random
     if flag(ffi)
@@ -95,7 +92,7 @@ test-suite spec
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     hs-source-dirs:   tests
-    build-depends:    base, hspec, hspec-contrib, QuickCheck, HUnit, indigo, generic-arbitrary, text, vector, megaparsec, mtl, raw-strings-qq, hspec-megaparsec
+    build-depends:    base, hspec, hspec-contrib, QuickCheck, indigo, generic-arbitrary, text, vector, megaparsec, mtl, raw-strings-qq
     other-modules:
         ParserSpec
         BytecodeCompilerSpec

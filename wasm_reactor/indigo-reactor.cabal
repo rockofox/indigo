@@ -1,20 +1,28 @@
 cabal-version: 3.0
 name: indigo-wasm-reactor
 version:            0.1.0.0
+synopsis:           WASM reactor for the Indigo programming language
+description:        A WebAssembly reactor executable that provides Indigo language runtime capabilities for web environments and WASM-based deployments.
+license:            GPL-3.0-only
+license-file:       ../LICENSE
+author:             rockofox
+maintainer:         ofelix@pm.me
+homepage:           https://github.com/rockofox/indigo
+bug-reports:        https://github.com/rockofox/indigo/issues
+category:           Language, WebAssembly
+build-type:         Simple
 
 executable indigo-wasm-reactor
     main-is:          WASMReactor.hs
     c-sources:        cbits/init.c
     hs-source-dirs:   app
     build-depends:    base ^>=4.16.4.0,
-                      megaparsec >= 9.3,
-                      mtl,
-                      text,
-                      bytestring,
-                      vector,
+                      megaparsec ^>=9.3,
+                      mtl ^>=2.2.2,
+                      text ^>=2.0,
+                      bytestring ^>=0.11.4.0,
+                      vector ^>=0.12.3.1,
                       indigo
-    -- other-modules:    Parser, VM
-    -- Language Extensions
     default-extensions: OverloadedStrings,
                         ImportQualifiedPost,
                         DisambiguateRecordFields,
@@ -22,6 +30,9 @@ executable indigo-wasm-reactor
                         LambdaCase
 
     ghc-options:
-        -Wall -Wunused-packages -no-hs-main -optl-mexec-model=reactor
+        -Wall
+        -Wunused-packages
+        -no-hs-main
+        -optl-mexec-model=reactor
         "-optl-Wl,--export=mallocPtr,--export=mallocBytes,--export=free_,--export=runProgramRawBuffered,--export=runProgramRaw,--export=runProgramRawBuffered"
 
