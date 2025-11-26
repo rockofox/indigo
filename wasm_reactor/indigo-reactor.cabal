@@ -1,38 +1,38 @@
 cabal-version: 3.0
-name: indigo-wasm-reactor
-version:            0.1.0.0
-synopsis:           WASM reactor for the Indigo programming language
-description:        A WebAssembly reactor executable that provides Indigo language runtime capabilities for web environments and WASM-based deployments.
-license:            GPL-3.0-only
-license-file:       ../LICENSE
-author:             rockofox
-maintainer:         ofelix@pm.me
-homepage:           https://github.com/rockofox/indigo
-bug-reports:        https://github.com/rockofox/indigo/issues
-category:           Language, WebAssembly
-build-type:         Simple
+name:          indigo-wasm-reactor
+version:       0.1.0.0
+license:       MPL-2.0
+license-file:  ../LICENSE
+maintainer:    ofelix@pm.me
+author:        rockofox
+homepage:      https://github.com/rockofox/indigo
+bug-reports:   https://github.com/rockofox/indigo/issues
+synopsis:      WASM reactor for the Indigo programming language
+description:
+    A WebAssembly reactor executable that provides Indigo language runtime capabilities for web environments and WASM-based deployments.
+
+category:      Language, WebAssembly
+build-type:    Simple
 
 executable indigo-wasm-reactor
-    main-is:          WASMReactor.hs
-    c-sources:        cbits/init.c
-    hs-source-dirs:   app
-    build-depends:    base ^>=4.16.4.0,
-                      megaparsec ^>=9.3,
-                      mtl ^>=2.2.2,
-                      text ^>=2.0,
-                      bytestring ^>=0.11.4.0,
-                      vector ^>=0.12.3.1,
-                      indigo
-    default-extensions: OverloadedStrings,
-                        ImportQualifiedPost,
-                        DisambiguateRecordFields,
-                        DuplicateRecordFields,
-                        LambdaCase
+    main-is:            WASMReactor.hs
+    c-sources:          cbits/init.c
+    hs-source-dirs:     app
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
+        DuplicateRecordFields LambdaCase
 
     ghc-options:
-        -Wall
-        -Wunused-packages
-        -no-hs-main
+        -Wall -Wunused-packages -O2 -no-hs-main
         -optl-mexec-model=reactor
-        "-optl-Wl,--export=mallocPtr,--export=mallocBytes,--export=free_,--export=runProgramRawBuffered,--export=runProgramRaw,--export=runProgramRawBuffered"
+        "-optl-Wl,--export=mallocPtr,--export=mallocBytes,--export=free_,--export=runProgramRawBuffered,--export=runProgramRaw"
 
+    build-depends:
+        base ^>=4.16.4.0,
+        megaparsec ^>=9.3,
+        mtl >=2.2.2 && <2.4,
+        text ^>=2.0,
+        bytestring >=0.11.4.0 && <0.13,
+        vector ^>=0.12.3.1,
+        indigo

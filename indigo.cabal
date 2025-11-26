@@ -1,107 +1,114 @@
-cabal-version:      3.0
-name:               indigo
--- PVP summary:     +-+------- breaking API changes
---                  | | +----- non-breaking API additions
---                  | | | +--- code changes with no API change
-version:            0.1.0.0
-license:            GPL-3.0-only
-license-file:       LICENSE
-author:             rockofox
-maintainer:         ofelix@pm.me
-build-type:         Simple
-data-files:         **/*.in
-data-dir:           share
-
-common warnings
-    ghc-options: -Wall
+cabal-version: 3.0
+name:          indigo
+version:       0.1.0.0
+license:       MPL-2.0
+license-file:  LICENSE
+maintainer:    ofelix@pm.me
+author:        rockofox
+build-type:    Simple
+data-files:    **/*.in
+data-dir:      share
 
 flag ffi
     description: FFI
-    default: True
 
 library
-    import:           warnings
-    exposed-modules: , Parser
-                     , VM
-                     , BytecodeCompiler
-                     , AST
-                     , Util
-                     , RegInst
-                     , Ffi
-                     , Optimizer
-                     , ErrorRenderer
-    other-modules: Paths_indigo
-    build-depends: base,
-        containers,
-        text,
+    exposed-modules:
+        Parser
+        VM
+        BytecodeCompiler
+        AST
+        Util
+        RegInst
+        Ffi
+        Optimizer
+        ErrorRenderer
+
+    hs-source-dirs:     lib
+    other-modules:      Paths_indigo
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
+        DuplicateRecordFields DeriveGeneric BlockArguments LambdaCase
+        OverloadedRecordDot RecordWildCards NamedFieldPuns
+
+    ghc-options:        -Wall -O2
+    build-depends:
+        base >=4.17,
+        containers >=0.6,
+        text >=2.0,
         megaparsec,
         parser-combinators,
-        mtl,
-        directory,
-        bytestring,
-        binary,
+        mtl >=2.2,
+        directory >=1.3,
+        bytestring >=0.11,
+        binary >=0.8,
         split,
         vector,
         monad-loops,
-        filepath,
+        filepath >=1.4,
         random
+
     if flag(ffi)
-        build-depends:
-            libffi,
+        cpp-options:   -DFFI
+        build-depends: libffi
+
         if os(windows)
             build-depends: Win32
+
         else
-            build-depends: unix
-        cpp-options: -DFFI
+            build-depends: unix >=2.7
 
-    hs-source-dirs:   lib
-    default-language: Haskell2010
-    default-extensions: OverloadedStrings,
-                        ImportQualifiedPost,
-                        DisambiguateRecordFields,
-                        DuplicateRecordFields,
-                        DeriveGeneric,
-                        BlockArguments,
-                        LambdaCase,
-                        OverloadedRecordDot,
-                        RecordWildCards,
-                        NamedFieldPuns
-    
 executable indigo
-    main-is:          Main.hs
-    hs-source-dirs:   app
-    build-depends:    base,
-                      optparse-applicative,
-                      megaparsec,
-                      mtl,
-                      text,
-                      bytestring,
-                      indigo,
-                      vector,
-                      timeit,
-                      repline,
-                      containers,
+    main-is:            Main.hs
+    hs-source-dirs:     app
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
+        DuplicateRecordFields TemplateHaskell
 
-    default-extensions: OverloadedStrings,
-                        ImportQualifiedPost,
-                        DisambiguateRecordFields,
-                        DuplicateRecordFields,
-                        TemplateHaskell
-    default-language: Haskell2010
+    ghc-options:        -O2
+    build-depends:
+        base >=4.17,
+        optparse-applicative,
+        megaparsec,
+        mtl >=2.2,
+        text >=2.0,
+        bytestring >=0.11,
+        indigo,
+        vector,
+        timeit,
+        repline,
+        containers >=0.6
+
 test-suite spec
-    type:             exitcode-stdio-1.0
-    main-is:          Spec.hs
-    hs-source-dirs:   tests
-    build-depends:    base, hspec, hspec-contrib, QuickCheck, indigo, generic-arbitrary, text, vector, megaparsec, mtl, raw-strings-qq
+    type:               exitcode-stdio-1.0
+    main-is:            Spec.hs
+    build-tool-depends: hspec-discover:hspec-discover >=2 && <3
+    hs-source-dirs:     tests
     other-modules:
         ParserSpec
         BytecodeCompilerSpec
         IntegrationSpec
         RegInstSpec
         OptimizerSpec
-    build-tool-depends: hspec-discover:hspec-discover == 2.*
-    default-language: Haskell2010
-    default-extensions: OverloadedStrings, ImportQualifiedPost, QuasiQuotes, DisambiguateRecordFields, DuplicateRecordFields, OverloadedRecordDot, LambdaCase
 
-    -- https://github.com/typeable/generic-arbitrary/issues/17
-    ghc-options: -fconstraint-solver-iterations=100
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost QuasiQuotes
+        DisambiguateRecordFields DuplicateRecordFields OverloadedRecordDot
+        LambdaCase
+
+    ghc-options:        -fconstraint-solver-iterations=100
+    build-depends:
+        base >=4.17,
+        hspec,
+        hspec-contrib,
+        QuickCheck,
+        indigo,
+        generic-arbitrary,
+        text >=2.0,
+        vector,
+        megaparsec,
+        mtl >=2.2,
+        raw-strings-qq
