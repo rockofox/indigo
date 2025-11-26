@@ -324,7 +324,9 @@ typeCompatible x y = do
         else do
             let numericTypes = ["Int", "Float", "Double"]
             let bothNumeric = x' `elem` numericTypes && y' `elem` numericTypes
-            if bothNumeric
+            let boolAliases = ["Bool", "Boolean"]
+            let bothBool = x' `elem` boolAliases && y' `elem` boolAliases
+            if bothNumeric || bothBool
                 then return True
                 else return $ y' `elem` impls
 
@@ -449,6 +451,27 @@ doBinOp opName x y expectedType op = do
     compileTypeFromType (Parser.StructT "String") = [Push $ DString ""]
     compileTypeFromType (Parser.StructT "CPtr") = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileTypeFromType _ = [Push DNone]
+
+safeTypeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
+safeTypeOf (Parser.Let{}) = return Parser.Unknown
+safeTypeOf (Parser.FuncDef{}) = return Parser.Unknown
+safeTypeOf (Parser.FuncDec{}) = return Parser.Unknown
+safeTypeOf (Parser.ExternDec{}) = return Parser.Unknown
+safeTypeOf (Parser.Discard{}) = return Parser.Unknown
+safeTypeOf (Parser.Import{}) = return Parser.Unknown
+safeTypeOf (Parser.Ref{}) = return Parser.Unknown
+safeTypeOf (Parser.Struct{}) = return Parser.Unknown
+safeTypeOf (Parser.ArrayAccess{}) = return Parser.Unknown
+safeTypeOf (Parser.Target{}) = return Parser.Unknown
+safeTypeOf (Parser.Trait{}) = return Parser.Unknown
+safeTypeOf (Parser.Impl{}) = return Parser.Unknown
+safeTypeOf (Parser.External{}) = return Parser.Unknown
+safeTypeOf (Parser.DoBlock exprs _) = if null exprs then return Parser.None else safeTypeOf $ last exprs
+safeTypeOf (Parser.If _ b _ _) = safeTypeOf b
+safeTypeOf (Parser.When _ branches else_ _) = case branches of
+    [] -> maybe (return Parser.Unknown) safeTypeOf else_
+    ((_, body) : _) -> safeTypeOf body
+safeTypeOf expr = typeOf expr
 
 typeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
 typeOf Parser.FuncCall{funcName, funcArgs} = do
@@ -903,6 +926,47 @@ compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
     let funcDec = fromJust $ find (\case Parser.FuncDec{name = name'} -> name' == name; _ -> False) funcDecs''
 
     body' <- compileExpr body (last $ Parser.types funcDec)
+
+    let expectedReturnType = last $ Parser.types funcDec
+    let argTypes = init $ Parser.types funcDec
+    let argsWithTypes = zip args argTypes
+    let paramBindings = concatMap extractParamBindings argsWithTypes
+          where
+            extractParamBindings (Parser.Var{varName}, t) = [Let{name = varName, vtype = t, context = name}]
+            extractParamBindings _ = []
+    letsBefore <- gets lets
+    modify (\s -> s{lets = paramBindings ++ lets s})
+    bodyType <- safeTypeOf body
+    modify (\s -> s{lets = letsBefore})
+    let generics = Parser.generics funcDec
+    let genericNames = map (\(Parser.GenericExpr n _) -> n) generics
+    let genericReturnInfo = case expectedReturnType of
+            Parser.StructT t
+                | t `elem` genericNames ->
+                    find (\(Parser.GenericExpr n _) -> n == t) generics
+            _ -> Nothing
+    let isIOReturn = expectedReturnType == Parser.StructT "IO"
+    let shouldCheck =
+            expectedReturnType /= Parser.Any
+                && expectedReturnType /= Parser.Unknown
+                && bodyType /= Parser.Unknown
+                && bodyType /= Parser.Any
+                && name /= "main"
+                && not isIOReturn
+    when shouldCheck $ case genericReturnInfo of
+        Just (Parser.GenericExpr genericName (Just constraint)) -> do
+            let constraintName = typeToString constraint
+            let bodyTypeName = typeToString bodyType
+            let isGenericItself = bodyTypeName == genericName
+            bodyImpls <- implsFor bodyTypeName
+            let satisfiesConstraint = isGenericItself || constraintName `elem` bodyImpls || bodyTypeName == constraintName
+            unless satisfiesConstraint $
+                cerror ("Return type mismatch in function `" ++ origName ++ "`: " ++ show bodyType ++ " does not implement " ++ constraintName) (extractPosition body)
+        Just (Parser.GenericExpr _ Nothing) -> return ()
+        Nothing -> do
+            compatible <- typeCompatible bodyType expectedReturnType
+            unless compatible $
+                cerror ("Return type mismatch in function `" ++ origName ++ "`: expected " ++ show expectedReturnType ++ ", got " ++ show bodyType) (extractPosition body)
 
     nextFunId <- gets lastLabel
     args' <- concatMapM (`compileParameter` (name, funame, nextFunId)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))

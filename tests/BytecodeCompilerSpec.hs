@@ -328,3 +328,47 @@ spec = do
                     any ("Function undefinedFunc not found." `isInfixOf`) errorMessages
                         `shouldBe` True
                 Right _ -> expectationFailure "Expected compilation error for undefined function"
+    describe "Return type checking" $ do
+        it "Should compile when return type matches declaration" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let add (x: Int) : Int = x + 1
+                let main : IO = unsafePrint (add 5)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should error when return type mismatches declaration" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let wrong (x: Int) : Int = "hello"
+                let main : IO = unsafePrint (wrong 5)
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Return type mismatch" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected return type mismatch error"
+        it "Should pass with compatible numeric types" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let toFloat (x: Int) : Float = x as Float
+                let main : IO = unsafePrint (toFloat 5)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should pass when return type is Any" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let identity (x: Int) : Any = x
+                let main : IO = unsafePrint (identity 5)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
