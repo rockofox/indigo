@@ -656,9 +656,7 @@ compilePatternMatch (Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
     if null tupleLitExprs
         then return [Dup, Push $ DList [], Eq, Jf nextLabel, Pop]
         else do
-            tempVarId <- allocId
-            let tempVarName = "__tuple_temp_" ++ show tempVarId
-            cleanupLabel <- allocId >>= \x -> return $ "__tuple_cleanup_" ++ show x
+            let tempVarName = "__tuple_temp_" ++ nextLabel
             let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length tupleLitExprs, Eq, Jf nextLabel, Dup, LStore tempVarName]
             bindingsList <-
                 mapM
@@ -667,10 +665,14 @@ compilePatternMatch (Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
                             Parser.Var{varName} ->
                                 return [LLoad tempVarName, Dup, Push $ DInt index, Index, LStore varName, LLoad tempVarName]
                             Parser.TupleLit{} -> do
-                                nestedInstrs <- compilePatternMatch pat nextLabel expectedType
-                                return $ [LLoad tempVarName, Dup, Push $ DInt index, Index] ++ nestedInstrs ++ [LLoad tempVarName]
+                                let nestedLabel = nextLabel ++ "_nested_" ++ show index
+                                let nestedSuccessLabel = nextLabel ++ "_nested_ok_" ++ show index
+                                nestedInstrs <- compilePatternMatch pat nestedLabel expectedType
+                                let nestedCleanup = [Jmp nestedSuccessLabel, Label nestedLabel, Pop, LLoad tempVarName, Jmp nextLabel, Label nestedSuccessLabel]
+                                return $ [LLoad tempVarName, Dup, Push $ DInt index, Index] ++ nestedInstrs ++ nestedCleanup ++ [LLoad tempVarName]
                             _ -> do
-                                successLabel <- allocId >>= \x -> return $ "__tuple_success_" ++ show x
+                                let cleanupLabel = "__tuple_cleanup_" ++ nextLabel ++ "_" ++ show index
+                                let successLabel = "__tuple_success_" ++ nextLabel ++ "_" ++ show index
                                 literalInstrs <- compilePatternMatch pat cleanupLabel expectedType
                                 let afterMatch = [Jmp successLabel, Label cleanupLabel, Pop, LLoad tempVarName, Jmp nextLabel, Label successLabel, Pop]
                                 return $ [LLoad tempVarName, Dup, Push $ DInt index, Index] ++ literalInstrs ++ afterMatch
