@@ -57,7 +57,7 @@ map fun [] = []
 map fun (x:xs) = (fun x) : (map fun, xs)
 
 mapM :: (Any -> IO) -> [Any] -> IO
-mapM fun [] = []
+mapM fun [] = nop
 mapM fun (x:xs) = do
     fun x
     mapM fun, xs

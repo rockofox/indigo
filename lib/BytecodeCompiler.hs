@@ -378,7 +378,7 @@ functionTypesAcceptable use def generics = do
     return $ typesMatch' && genericsMatch
 
 evaluateFunction :: [Parser.Type] -> Int -> Parser.Type
-evaluateFunction types taken = case drop (length types - taken + 1) types of
+evaluateFunction types taken = case drop taken types of
     [] -> Parser.Unknown
     [x] -> x
     xs -> Parser.Fn xs (last xs)
@@ -945,14 +945,11 @@ compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
                 | t `elem` genericNames ->
                     find (\(Parser.GenericExpr n _) -> n == t) generics
             _ -> Nothing
-    let isIOReturn = expectedReturnType == Parser.StructT "IO"
     let shouldCheck =
             expectedReturnType /= Parser.Any
                 && expectedReturnType /= Parser.Unknown
                 && bodyType /= Parser.Unknown
                 && bodyType /= Parser.Any
-                && name /= "main"
-                && not isIOReturn
     when shouldCheck $ case genericReturnInfo of
         Just (Parser.GenericExpr genericName (Just constraint)) -> do
             let constraintName = typeToString constraint

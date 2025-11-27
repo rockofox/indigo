@@ -86,6 +86,7 @@ spec = do
         it "Should work properly with function calls" $
             compile
                 [r|
+                f :: Int -> Int
                 f x = x + 1
                 let main : IO = unsafePrint (f 2) + 4|]
                 `shouldReturn` [Label "f#0", StoreSideStack, LStore "x", LLoad "x", LStore "__op_a_1", Push 1, LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 2, Call "f#0", LStore "__op_a_2", Push 4, LStore "__op_b_2", LLoad "__op_a_2", LLoad "__op_b_2", Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
