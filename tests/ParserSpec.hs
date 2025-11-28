@@ -100,13 +100,25 @@ spec = do
                     (Program [StructAccess{structAccessStruct = StructLit{structLitName = "bello", structLitFields = [], structLitPos = anyPosition}, structAccessField = Var{varName = "name", varPos = anyPosition}, structAccessPos = anyPosition}])
         it "Can define" $
             parseProgram "struct Teacher = ()" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, structPos = anyPosition}])
         it "Can define with is" $ do
             parseProgram "struct Teacher = () is Person" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"], isValueStruct = False, structPos = anyPosition}])
         it "Can define with multiple is" $ do
             parseProgram "struct Teacher = () is Person, Employee" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"], isValueStruct = False, structPos = anyPosition}])
+    describe "Value structs" $ do
+        it "Can define value struct without refinement" $ do
+            parseProgram "value struct PositiveInt = (num: Int)" parserCompilerFlags
+                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int")], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = True, structPos = anyPosition}])
+        it "Can define value struct with refinement" $ do
+            let result = parseProgram "value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)" parserCompilerFlags
+            case result of
+                Right (Program [Struct{name = "EvenNumber", fields = [("num", StructT "Int")], refinement = Just (Eq (Modulo (Var "num" _) (IntLit 2 _) _) (IntLit 0 _) _), isValueStruct = True, structPos = _}]) -> return ()
+                _ -> expectationFailure $ "Failed to parse value struct with refinement: " ++ show result
+        it "Can define value struct with is clause" $ do
+            parseProgram "value struct PositiveInt = (num: Int) is Printable" parserCompilerFlags
+                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int")], refinement = Nothing, refinementSrc = "", is = ["Printable"], isValueStruct = True, structPos = anyPosition}])
     describe "Traits" $ do
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags

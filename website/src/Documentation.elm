@@ -429,4 +429,31 @@ end""" onLoadCode True "indigo"
         , p [] [ text "This example shows a Person struct that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
         , h3 [] [ text "Field References" ]
         , p [] [ text "Field names from the struct can be referenced directly in the refinement expression. The refinement expression is evaluated with the struct literal's field values to determine if the constraint is satisfied." ]
+        , h3 [] [ text "Value Structs" ]
+        , p [] [ text "Value structs are a special kind of struct that have exactly one field and can be constructed using type casts. They provide a convenient way to create refined types that can be implicitly or explicitly converted from their underlying type." ]
+        , viewCodeBlock """value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+
+let main: IO = do
+    # Valid - 12 is even
+    println (12 as EvenNumber)
+    
+    # Error - 5 is not even, refinement fails
+    # println (5 as EvenNumber)
+    
+    # Error - String cannot be cast to EvenNumber
+    # println ("hello" as EvenNumber)
+end""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, EvenNumber is a value struct with a single field num of type Int. The refinement ensures that only even numbers can be cast to EvenNumber. The cast expression 12 as EvenNumber creates an EvenNumber struct with num = 12, but only if the refinement passes at compile time." ]
+        , p [] [ text "Value structs can also be defined without refinements, allowing any value of the field type to be cast:" ]
+        , viewCodeBlock """value struct PositiveInt = (num: Int)
+
+let main: IO = do
+    let x = 42 as PositiveInt
+    println x
+end""" onLoadCode True "indigo"
+        , p [] [ text "When casting to a value struct, the compiler checks:" ]
+        , p [] [ text "• That the source type is compatible with the value struct's field type" ]
+        , p [] [ text "• That the refinement constraint is satisfied (if a refinement is defined)" ]
+        , p [] [ text "If either check fails, or if the refinement cannot be verified at compile time, the compilation will fail with an appropriate error message." ]
+        , p [] [ text "Value structs are particularly useful for creating type-safe wrappers around primitive types, ensuring that only values meeting certain criteria can be used in specific contexts." ]
         ]

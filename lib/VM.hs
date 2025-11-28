@@ -686,7 +686,12 @@ runInstruction Abs =
         DInt num -> DInt $ abs num
         DFloat num -> DFloat $ abs num
         _ -> error $ "Cannot take absolute value of " ++ show x
-runInstruction Mod = stackPopN 2 >>= \case [y, x] -> stackPush $ x `mod` y; _ -> error "Mod: expected 2 values"
+runInstruction Mod =
+    stackPopN 2 >>= \case
+        [y, x] -> case (x, y) of
+            (DInt a, DInt b) -> stackPush $ DInt $ a `mod` b
+            _ -> error $ "Mod: expected two integers, got " ++ show x ++ " and " ++ show y
+        _ -> error "Mod: expected 2 values"
 -- IO
 runInstruction (Builtin Print) = do
     vm <- get
@@ -931,7 +936,12 @@ runInstruction Cast = do
                 else error $ "Cast not implemented: " ++ debugShowData x ++ " to " ++ debugShowData to
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
-runInstruction (Access x) = stackPop >>= \case DMap m -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; m -> error $ "Invalid type for access. Tried to access " ++ show m ++ " on " ++ show x
+runInstruction (Access x) =
+    stackPop >>= \case
+        DMap m -> case Data.Map.lookup x m of
+            Just value -> stackPush value
+            Nothing -> error $ "Field '" ++ x ++ "' not found in struct. Available fields: " ++ show (Data.Map.keys m)
+        m -> error $ "Invalid type for access. Tried to access field '" ++ x ++ "' on " ++ show m
 runInstruction AAccess = stackPopN 2 >>= \case (DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "AAccess: expected String and Map"
 runInstruction Keys = stackPop >>= \case DMap m -> stackPush $ DList $ map DString $ Data.Map.keys m; _ -> error "Invalid type for keys"
 runInstruction Update = stackPopN 3 >>= \case (value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m; _ -> error "Update: expected value, String key, and Map"

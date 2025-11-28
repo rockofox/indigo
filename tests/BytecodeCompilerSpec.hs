@@ -107,6 +107,68 @@ spec = do
         it "Casts are compatible with binary operations" $
             compile [r|(2 as Float) + 4.0|]
                 `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Call "+", ClearSideStack, Push $ DInt 0, Exit]
+    describe "Value structs" $ do
+        it "Can cast to value struct without refinement" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                value struct PositiveInt = (num: Int)
+                let main : IO = unsafePrint (42 as PositiveInt)
+            |]
+            case result of
+                Right _ -> return ()
+                Left errors -> expectationFailure $ "Should compile successfully, but got errors: " ++ show errors
+        it "Can cast to value struct with refinement (passing)" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+                let main : IO = unsafePrint (12 as EvenNumber)
+            |]
+            case result of
+                Right _ -> return ()
+                Left errors -> expectationFailure $ "Should compile successfully, but got errors: " ++ show errors
+        it "Fails to cast to value struct with refinement (failing)" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+                let main : IO = unsafePrint (5 as EvenNumber)
+            |]
+            case result of
+                Left errors -> not (null errors) `shouldBe` True
+                Right _ -> expectationFailure "Should fail with refinement error"
+        it "Fails to cast incompatible type to value struct" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                value struct PositiveInt = (num: Int)
+                let main : IO = unsafePrint ("hello" as PositiveInt)
+            |]
+            case result of
+                Left errors -> not (null errors) `shouldBe` True
+                Right _ -> expectationFailure "Should fail with type mismatch error"
+    describe "Struct field type checking" $ do
+        it "Fails when field type doesn't match" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Person = (name: String, age: Int)
+                let main : IO = unsafePrint (Person{name: "Alice", age: "30"})
+            |]
+            case result of
+                Left errors -> length errors `shouldBe` 1
+                Right _ -> expectationFailure "Should fail with type mismatch error"
+        it "Succeeds when field types match" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Person = (name: String, age: Int)
+                let main : IO = unsafePrint (Person{name: "Alice", age: 30})
+            |]
+            case result of
+                Right _ -> return ()
+                Left errors -> expectationFailure $ "Should compile successfully, but got errors: " ++ show errors
     xdescribe "typesMatch" $ do
         it "Should be true for exact matches" $
             property $

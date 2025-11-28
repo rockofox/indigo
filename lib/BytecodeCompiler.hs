@@ -3,7 +3,7 @@ module BytecodeCompiler where
 import AST (Position (..), anyPosition, zeroPosition)
 import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
-import Control.Monad (unless, when, (>=>))
+import Control.Monad (forM_, unless, when, (>=>))
 import Control.Monad.Loops (allM, firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, modify)
 import Data.Bifunctor (second)
@@ -11,7 +11,7 @@ import Data.Functor ((<&>))
 import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
 import Data.List.Split qualified
 import Data.Map qualified
-import Data.Maybe (fromJust, isJust, isNothing, mapMaybe, maybeToList)
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
 import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -1106,10 +1106,43 @@ compileExpr (Parser.If{ifCond, ifThen, ifElse}) expectedType = do
 compileExpr (Parser.FloatLit{floatValue}) _ = return [Push $ DFloat floatValue]
 compileExpr (Parser.DoubleLit{doubleValue}) _ = return [Push $ DDouble doubleValue]
 compileExpr (Parser.BoolLit{boolValue}) _ = return [Push $ DBool boolValue]
-compileExpr (Parser.Cast{castExpr, castType}) _ = do
-    from' <- compileExpr castExpr Parser.Unknown
-    let to' = compileType castType
-    return $ from' ++ to' ++ [Cast]
+compileExpr (Parser.Cast{castExpr, castType, castPos}) expectedType = do
+    structDecs' <- gets structDecs
+    let targetStructName = case castType of
+            Parser.Var{varName} -> Just varName
+            _ -> Nothing
+    let targetStruct = case targetStructName of
+            Just name -> find (\case Parser.Struct{name = name'} -> name' == name; _ -> False) structDecs'
+            Nothing -> Nothing
+    case targetStruct of
+        Just (Parser.Struct{isValueStruct = True, fields, refinement, refinementSrc}) -> do
+            when (length fields /= 1) $ cerror "value struct must have exactly one field" castPos
+            let (fieldName, fieldType) = head fields
+            fromType <- typeOf castExpr
+            if not (Parser.compareTypes fromType fieldType)
+                then do
+                    cerror ("Type mismatch: cannot cast " ++ show fromType ++ " to value struct field type " ++ show fieldType) castPos
+                    return []
+                else do
+                    let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitPos = castPos}
+                    skipCheck <- gets skipRefinementCheck
+                    unless skipCheck $ do
+                        case refinement of
+                            Just rf -> do
+                                r <- runRefinement rf structLit
+                                case r of
+                                    Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") castPos
+                                    Just True -> return ()
+                                    Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - value contains variables without refinement guarantees") castPos
+                            Nothing -> return ()
+                    modify (\s -> s{skipRefinementCheck = True})
+                    result <- compileExpr structLit expectedType
+                    modify (\s -> s{skipRefinementCheck = skipCheck})
+                    return result
+        _ -> do
+            from' <- compileExpr castExpr Parser.Unknown
+            let to' = compileType castType
+            return $ from' ++ to' ++ [Cast]
   where
     compileType :: Parser.Expr -> [Instruction]
     compileType (Parser.Var{varName = "Int"}) = [Push $ DInt 0]
@@ -1139,30 +1172,45 @@ compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
         return ()
 compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitPos}) _ = do
     skipCheck <- gets skipRefinementCheck
-    unless skipCheck $ do
-        structDecs' <- gets structDecs
-        let struct = find (\case Parser.Struct{name = name'} -> name' == structLitName; _ -> False) structDecs'
-        case struct of
-            Just expr -> case expr of
-                Parser.Struct{refinement, refinementSrc} -> do
-                    case refinement of
-                        Just rf -> do
-                            r <- runRefinement rf sl
-                            case r of
-                                Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
-                                Just True -> return ()
-                                Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - struct fields contain variables without refinement guarantees") structLitPos
-                        Nothing -> return ()
-                _ -> return ()
-            Nothing -> return ()
+    structDecs' <- gets structDecs
+    let struct = find (\case Parser.Struct{name = name'} -> name' == structLitName; _ -> False) structDecs'
+    case struct of
+        Just expr -> case expr of
+            Parser.Struct{fields = declaredFields} -> do
+                let declaredFieldMap = Data.Map.fromList declaredFields
+                forM_ structLitFields $ \(fieldName, fieldValue) -> do
+                    case Data.Map.lookup fieldName declaredFieldMap of
+                        Just declaredType -> do
+                            actualType <- typeOf fieldValue
+                            unless (Parser.compareTypes actualType declaredType) $ do
+                                cerror ("Type mismatch for field '" ++ fieldName ++ "': expected " ++ show declaredType ++ ", got " ++ show actualType) structLitPos
+                        Nothing -> do
+                            cerror ("Unknown field '" ++ fieldName ++ "' in struct " ++ structLitName) structLitPos
+                unless skipCheck $ do
+                    case expr of
+                        Parser.Struct{refinement, refinementSrc} -> do
+                            case refinement of
+                                Just rf -> do
+                                    r <- runRefinement rf sl
+                                    case r of
+                                        Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
+                                        Just True -> return ()
+                                        Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - struct fields contain variables without refinement guarantees") structLitPos
+                                Nothing -> return ()
+            _ -> return ()
+        Nothing -> return ()
     fields' <- mapM ((`compileExpr` Parser.Any) . snd) structLitFields
     let names = map (DString . fst) structLitFields
     let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
     implsForStruct <- implsFor structLitName
     return $ instructions ++ [Push $ DString structLitName, Push $ DString "__name", Push $ DList (map DString implsForStruct), Push $ DString "__traits", PackMap $ length structLitFields * 2 + 4]
-compileExpr (Parser.StructAccess{structAccessStruct, structAccessField = Parser.Var{varName = field}}) expectedType = do
+compileExpr (Parser.StructAccess{structAccessStruct, structAccessField}) expectedType = do
     struct' <- compileExpr structAccessStruct expectedType
-    return $ struct' ++ [Access field]
+    case structAccessField of
+        Parser.Var{varName = field} -> return $ struct' ++ [Access field]
+        _ -> do
+            fieldExpr' <- compileExpr structAccessField expectedType
+            return $ struct' ++ fieldExpr' ++ [AAccess]
 compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) expectedType = do
     when (o /= ["*"]) $ error "Only * imports are supported right now"
     sourcePath' <- gets sourcePath
@@ -1257,6 +1305,8 @@ transformRefinementExpr expr fieldNames = case expr of
         Parser.Mul (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) mulPos
     Parser.Div{divLhs = x, divRhs = y, divPos} ->
         Parser.Div (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) divPos
+    Parser.Modulo{moduloLhs = x, moduloRhs = y, moduloPos} ->
+        Parser.Modulo (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) moduloPos
     Parser.Gt{gtLhs = x, gtRhs = y, gtPos} ->
         Parser.Gt (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) gtPos
     Parser.Lt{ltLhs = x, ltRhs = y, ltPos} ->
@@ -1278,7 +1328,7 @@ transformRefinementExpr expr fieldNames = case expr of
     Parser.UnaryMinus{unaryMinusExpr = x, unaryMinusPos} ->
         Parser.UnaryMinus (transformRefinementExpr x fieldNames) unaryMinusPos
     Parser.StructAccess{structAccessStruct = s, structAccessField = f, structAccessPos} ->
-        Parser.StructAccess (transformRefinementExpr s fieldNames) (transformRefinementExpr f fieldNames) structAccessPos
+        Parser.StructAccess (transformRefinementExpr s fieldNames) f structAccessPos
     Parser.FuncCall{funcName, funcArgs, funcPos} ->
         Parser.FuncCall funcName (map (`transformRefinementExpr` fieldNames) funcArgs) funcPos
     _ -> expr

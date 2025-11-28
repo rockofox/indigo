@@ -7,6 +7,7 @@ module Parser (Expr (..), Program (..), parseProgram', parseProgramPure, ParserS
 
 import AST
 import Control.Applicative.Combinators (someTill)
+import Control.Monad (when)
 import Control.Monad qualified
 import Control.Monad.Combinators
     ( between
@@ -585,7 +586,34 @@ struct = do
         keyword "is"
         sepBy extra (symbol ",") <?> "struct interfaces"
     end <- getOffset
-    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, structPos = Position (start, end)}
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = False, structPos = Position (start, end)}
+  where
+    structField = do
+        fieldName <- identifier <?> "field name"
+        symbol ":"
+        fieldType <- validType <?> "field type"
+        return (fieldName, fieldType)
+
+valueStruct :: Parser Expr
+valueStruct = do
+    start <- getOffset
+    _ <- lexeme $ try (string "value" *> notFollowedBy alphaNumChar)
+    keyword "struct"
+    name <- extra <?> "value struct name"
+    symbol "="
+    fields <- parens (structField `sepBy` symbol ",") <?> "value struct field"
+    when (length fields /= 1) $ fail "value struct must have exactly one field"
+    refinementSrc <- lookAhead $ optional $ do
+        keyword "satisfies"
+        parens (many (noneOf [')'])) <?> "refinement source"
+    refinement <- optional $ do
+        keyword "satisfies"
+        parens expr <?> "refinement"
+    is <- optional $ do
+        keyword "is"
+        sepBy extra (symbol ",") <?> "struct interfaces"
+    end <- getOffset
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = True, structPos = Position (start, end)}
   where
     structField = do
         fieldName <- identifier <?> "field name"
@@ -698,7 +726,7 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (Discard a _) = Discard (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (Import o f q a _) = Import o f q a anyPosition
     replacePositionWithAnyPosition (Ref a _) = Ref (replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (Struct n f r s i _) = Struct n f (fmap replacePositionWithAnyPosition r) s i anyPosition
+    replacePositionWithAnyPosition (Struct n f r s i v _) = Struct n f (fmap replacePositionWithAnyPosition r) s i v anyPosition
     replacePositionWithAnyPosition (StructLit n f _) = StructLit n (map (second replacePositionWithAnyPosition) f) anyPosition
     replacePositionWithAnyPosition (StructAccess a b _) = StructAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (ListLit a _) = ListLit (map replacePositionWithAnyPosition a) anyPosition
@@ -919,6 +947,7 @@ term =
             end <- getOffset
             return $ BoolLit False (Position (start, end))
         , external
+        , try valueStruct
         , struct
         , import_
         , impl

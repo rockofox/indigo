@@ -40,7 +40,7 @@ data Expr
     | Discard {discardExpr :: Expr, discardPos :: Position}
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String, importPos :: Position}
     | Ref {refExpr :: Expr, refPos :: Position}
-    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], structPos :: Position}
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], isValueStruct :: Bool, structPos :: Position}
     | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitPos :: Position}
     | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr, structAccessPos :: Position}
     | ListLit {listLitExprs :: [Expr], listLitPos :: Position}
