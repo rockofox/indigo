@@ -112,6 +112,22 @@ let main: IO = do
     println name mauzi
 end""" onLoadCode True "indigo"
         , p [] [ text "The above example shows simple data structures. The name method gets created automatically. Name collisions (shoud be) resolved automatically." ]
+        , h3 [] [ text "Generic Structs" ]
+        , p [] [ text "Structs can have type parameters, allowing you to create reusable data structures that work with different types:" ]
+        , viewCodeBlock """trait Number
+impl Number for Int
+impl Number for Float
+
+struct Example<N: Number> = (content: N)
+
+let main: IO = do
+    let x = Example<Int>{content: 42}
+    let y = Example<Float>{content: 3.14}
+    println x.content
+    println y.content
+end""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the Example struct has a generic type parameter N constrained to the Number trait. This means you can create Example instances with any type that implements Number, such as Int or Float." ]
+        , p [] [ text "When creating a struct literal with type arguments, you specify the concrete type in angle brackets: Example<Int>{content: 42}. The compiler validates that the type argument (Int) satisfies the trait constraint (Number)." ]
         , viewCodeBlock """trait Animal = do
     makeNoise :: Self -> IO
 end
@@ -130,6 +146,13 @@ let main: IO = do
 end""" onLoadCode True "indigo"
         , p [] [ text "The above example defines a trait called Animal with a method makeNoise." ]
         , p [] [ text "Then, two implementations of the Animal trait are provided for the types Dog and Cat. The implementation for Dog specifies that when makeNoise is called, it will print \"Woof,\" and the implementation for Cat will print \"Meow.\"" ]
+        , h3 [] [ text "Generic Traits" ]
+        , p [] [ text "Traits can also have type parameters:" ]
+        , viewCodeBlock """trait Monad<T> = do
+    bind :: Self -> (Any -> Self) -> Self
+    return :: Any -> Self
+end""" onLoadCode True "indigo"
+        , p [] [ text "Generic traits allow you to define reusable abstractions that work with different types. The type parameter T can be used in the trait's method signatures." ]
         ]
 
 viewFFI : (String -> msg) -> Html msg
@@ -382,7 +405,8 @@ viewGenerics : (String -> msg) -> Html msg
 viewGenerics onLoadCode =
     section [ id "generics" ]
         [ h2 [] [ text "Generics" ]
-        , p [] [ text "Indigo supports generic types on functions." ]
+        , p [] [ text "Indigo supports generic type parameters on functions, structs, and traits. This allows you to write reusable code that works with different types while maintaining type safety." ]
+        , h3 [] [ text "Generic Functions" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
@@ -397,6 +421,61 @@ end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]
         , p [] [ text "This function takes two parameters of type N and returns a result of the same type." ]
         , p [] [ text "The call to add only suceeds if the given parameters are of the same Number type. The return type N gets type erased to Number." ]
+        , h3 [] [ text "Generic Structs" ]
+        , viewCodeBlock """trait Number
+impl Number for Int
+impl Number for Float
+
+struct Container<T: Number> = (value: T)
+
+let main: IO = do
+    let intContainer = Container<Int>{value: 42}
+    let floatContainer = Container<Float>{value: 3.14}
+    println intContainer.value
+    println floatContainer.value
+end""" onLoadCode True "indigo"
+        , p [] [ text "Structs can have generic type parameters with optional trait constraints. When creating a struct literal, you provide the type arguments in angle brackets: Container<Int>{value: 42}." ]
+        , p [] [ text "The compiler validates that the type argument satisfies any trait constraints specified in the struct definition." ]
+        , h3 [] [ text "Generic Traits" ]
+        , viewCodeBlock """trait Monad<T> = do
+    bind :: Self -> (Any -> Self) -> Self
+    return :: Any -> Self
+end""" onLoadCode True "indigo"
+        , p [] [ text "Traits can also have type parameters, allowing you to define reusable abstractions that work with different types. The type parameters can be used in the trait's method signatures." ]
+        , h3 [] [ text "Implementing Generic Traits" ]
+        , viewCodeBlock """trait Monad<T> = do
+    bind :: Self -> (Any -> Self) -> Self
+    return :: Any -> Self
+end
+
+struct Optional = (value: Any)
+
+impl Monad<Optional> for Optional = do
+    bind Optional{value: x} f = f x
+    bind None{} f = None{}
+    return x = Optional{value: x}
+end""" onLoadCode True "indigo"
+        , p [] [ text "When implementing a generic trait, you provide the type arguments in angle brackets after the trait name: impl Monad<Optional> for Optional. The compiler validates that the number of type arguments matches the trait's generic parameters." ]
+        , p [] [ text "The type arguments are substituted into the trait's method signatures during compilation, allowing the implementation to work with the specific types you've chosen." ]
+        , h3 [] [ text "Trait Constraints" ]
+        , p [] [ text "Type parameters can be constrained to traits using the colon syntax. This ensures that only types implementing the specified trait can be used:" ]
+        , viewCodeBlock """trait Number
+impl Number for Int
+impl Number for Float
+
+struct Example<N: Number> = (content: N)
+
+let main: IO = do
+    # Valid - Int implements Number
+    let x = Example<Int>{content: 42}
+    
+    # Valid - Float implements Number
+    let y = Example<Float>{content: 3.14}
+    
+    # Error - String does not implement Number
+    # let z = Example<String>{content: "hello"}
+end""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the generic parameter N is constrained to the Number trait. This means you can only use types that implement Number (like Int or Float) when creating Example instances." ]
         ]
 
 viewRefinementTypes : (String -> msg) -> Html msg

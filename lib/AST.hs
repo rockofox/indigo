@@ -40,8 +40,8 @@ data Expr
     | Discard {discardExpr :: Expr, discardPos :: Position}
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String, importPos :: Position}
     | Ref {refExpr :: Expr, refPos :: Position}
-    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], isValueStruct :: Bool, structPos :: Position}
-    | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitPos :: Position}
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], isValueStruct :: Bool, generics :: [GenericExpr], structPos :: Position}
+    | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitTypeArgs :: [Type], structLitPos :: Position}
     | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr, structAccessPos :: Position}
     | ListLit {listLitExprs :: [Expr], listLitPos :: Position}
     | ListPattern {listPatternExprs :: [Expr], listPatternPos :: Position}
@@ -57,8 +57,8 @@ data Expr
     | Cast {castExpr :: Expr, castType :: Expr, castPos :: Position}
     | TypeLit {typeLitType :: Type, typeLitPos :: Position}
     | Flexible {flexibleExpr :: Expr, flexiblePos :: Position}
-    | Trait {name :: String, methods :: [Expr], traitPos :: Position}
-    | Impl {trait :: String, for :: String, methods :: [Expr], implPos :: Position}
+    | Trait {name :: String, methods :: [Expr], generics :: [GenericExpr], traitPos :: Position}
+    | Impl {trait :: String, traitTypeArgs :: [Type], for :: String, methods :: [Expr], implPos :: Position}
     | StrictEval {strictEvalExpr :: Expr, strictEvalPos :: Position}
     | External {externalName :: String, externalArgs :: [Expr], externalPos :: Position}
     | CharLit {charValue :: Char, charPos :: Position}
@@ -103,7 +103,7 @@ children (FloatLit _ _) = []
 children (Discard a _) = [a]
 children (Import{}) = []
 children (Ref a _) = [a]
-children (Struct{}) = []
+children (Struct{refinement = r}) = maybeToList r
 children (StructLit{structLitFields}) = map snd structLitFields
 children (StructAccess a b _) = [a, b]
 children (ListLit a _) = a
@@ -119,8 +119,8 @@ children (Lambda _ a _) = [a]
 children (Cast a b _) = [a, b]
 children (TypeLit _ _) = []
 children (Flexible a _) = [a]
-children (Trait _ a _) = a
-children (Impl _ _ a _) = a
+children (Trait _ a _ _) = a
+children (Impl _ _ _ a _) = a
 children (FuncDec{}) = []
 children (StrictEval a _) = [a]
 children (External _ a _) = a
@@ -156,25 +156,27 @@ data Type
     | Fn {args :: [Type], ret :: Type}
     | List Type
     | Tuple [Type]
-    | StructT String
+    | StructT String [Type]
     | Self
     deriving (Eq, Ord, Generic)
 
 instance Show Type where
-    show (StructT "Int") = "Int"
-    show (StructT "Float") = "Float"
-    show (StructT "Double") = "Double"
-    show (StructT "Bool") = "Bool"
-    show (StructT "String") = "String"
-    show (StructT "CPtr") = "CPtr"
-    show (StructT "Char") = "Char"
+    show (StructT "Int" []) = "Int"
+    show (StructT "Float" []) = "Float"
+    show (StructT "Double" []) = "Double"
+    show (StructT "Bool" []) = "Bool"
+    show (StructT "String" []) = "String"
+    show (StructT "CPtr" []) = "CPtr"
+    show (StructT "Char" []) = "Char"
     show Any = "Any"
     show None = "None"
     show Unknown = "Unknown"
     show (Fn fnArgs fnRet) = "Fn (" ++ (if null fnArgs then "" else unwords $ fmap (++ " ->") (init $ fmap show fnArgs)) ++ (if null fnArgs then "" else " ") ++ show fnRet ++ ")"
     show (List t) = "[" ++ show t ++ "]"
     show (Tuple ts) = "(" ++ intercalate ", " (map show ts) ++ ")"
-    show (StructT structName) = structName
+    show (StructT structName typeArgs)
+        | null typeArgs = structName
+        | otherwise = structName ++ "<" ++ intercalate ", " (map show typeArgs) ++ ">"
     show Self = "Self"
 
 newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
@@ -195,9 +197,9 @@ compareTypes (Fn x y) (Fn a b) = do
     let retMatch = compareTypes y b
     argsMatch && retMatch
 compareTypes Self Self = True
-compareTypes Self StructT{} = True
-compareTypes StructT{} Self = True
-compareTypes (StructT x) (StructT y) = x == y
+compareTypes Self (StructT _ _) = True
+compareTypes (StructT _ _) Self = True
+compareTypes (StructT x xArgs) (StructT y yArgs) = x == y && length xArgs == length yArgs && all (uncurry compareTypes) (zip xArgs yArgs)
 compareTypes (List x) (List y) = compareTypes x y
 compareTypes (Tuple xs) (Tuple ys) = length xs == length ys && all (uncurry compareTypes) (zip xs ys)
 compareTypes Unknown _ = True
@@ -208,25 +210,25 @@ compareTypes Any _ = False
 compareTypes x y = x == y
 
 typeOf :: Expr -> Type
-typeOf (IntLit _ _) = StructT "Int"
-typeOf (FloatLit _ _) = StructT "Float"
-typeOf (BoolLit _ _) = StructT "Bool"
-typeOf (StringLit _ _) = StructT "String"
+typeOf (IntLit _ _) = StructT "Int" []
+typeOf (FloatLit _ _) = StructT "Float" []
+typeOf (BoolLit _ _) = StructT "Bool" []
+typeOf (StringLit _ _) = StructT "String" []
 typeOf (Add x _ _) = typeOf x
 typeOf (Sub x _ _) = typeOf x
 typeOf (Mul x _ _) = typeOf x
 typeOf (Div x _ _) = typeOf x
 typeOf (Power x _ _) = typeOf x
 typeOf (UnaryMinus x _) = typeOf x
-typeOf (Eq{}) = StructT "Bool"
-typeOf (Neq{}) = StructT "Bool"
-typeOf (Lt{}) = StructT "Bool"
-typeOf (Gt{}) = StructT "Bool"
-typeOf (Le{}) = StructT "Bool"
-typeOf (Ge{}) = StructT "Bool"
-typeOf (And{}) = StructT "Bool"
-typeOf (Or{}) = StructT "Bool"
-typeOf (Not _ _) = StructT "Bool"
+typeOf (Eq{}) = StructT "Bool" []
+typeOf (Neq{}) = StructT "Bool" []
+typeOf (Lt{}) = StructT "Bool" []
+typeOf (Gt{}) = StructT "Bool" []
+typeOf (Le{}) = StructT "Bool" []
+typeOf (Ge{}) = StructT "Bool" []
+typeOf (And{}) = StructT "Bool" []
+typeOf (Or{}) = StructT "Bool" []
+typeOf (Not _ _) = StructT "Bool" []
 typeOf (FuncCall{}) = Any
 typeOf (Placeholder _) = Any
 typeOf Var{} = error "This should never happen"
@@ -241,8 +243,8 @@ typeOf (Discard _ _) = error "Cannot infer type of discard"
 typeOf (Import{}) = error "Cannot infer type of import"
 typeOf (Ref _ _) = error "Cannot infer type of ref"
 typeOf (Struct{}) = error "Cannot infer type of struct"
-typeOf (StructLit x _ _) = StructT x
-typeOf (ListLit [Var{varName}] _) = List $ StructT varName
+typeOf (StructLit x _ typeArgs _) = StructT x typeArgs
+typeOf (ListLit [Var{varName}] _) = List $ StructT varName []
 typeOf (ListLit x _) = case x of
     [] -> List Any
     (y : _) -> List $ typeOf y
@@ -254,7 +256,7 @@ typeOf (ListPattern _ _) = List Any
 typeOf (StructAccess _ s _) = typeOf s
 typeOf (Pipeline _ b _) = typeOf b
 typeOf (Lambda{}) = Fn [] Any
-typeOf (Cast _ (Var to _) _) = StructT to
+typeOf (Cast _ (Var to _) _) = StructT to []
 typeOf (Cast _ b _) = typeOf b
 typeOf (TypeLit x _) = x
 typeOf (Flexible x _) = typeOf x
@@ -263,8 +265,8 @@ typeOf (Impl{}) = error "Cannot infer type of impl"
 typeOf (Then _ b _) = typeOf b
 typeOf (StrictEval x _) = typeOf x
 typeOf (External{}) = error "Cannot infer type of external"
-typeOf (CharLit _ _) = StructT "Char"
-typeOf (DoubleLit _ _) = StructT "Double"
+typeOf (CharLit _ _) = StructT "Char" []
+typeOf (DoubleLit _ _) = StructT "Double" []
 typeOf (ParenApply a _ _) = typeOf a
 typeOf (ListAdd x _ _) = typeOf x
 typeOf (When _ branches else_ _) = case branches of
@@ -281,7 +283,9 @@ typesMatch (x : xs) (y : ys) = compareTypes x y && typesMatch xs ys
 typesMatch _ _ = False
 
 typeToString :: Type -> String
-typeToString (StructT x) = x
+typeToString (StructT x typeArgs)
+    | null typeArgs = x
+    | otherwise = x ++ "<" ++ intercalate ", " (map typeToString typeArgs) ++ ">"
 typeToString Any = "Any"
 typeToString None = "None"
 typeToString Unknown = "Unknown"

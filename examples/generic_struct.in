@@ -1,0 +1,13 @@
+trait Number
+impl Number for Int
+impl Number for Float
+
+struct Example<N: Number> = (content: N)
+
+let main: IO = do
+    let x = Example<Int>{content: 42}
+    let y = Example<Float>{content: 3.4}
+    println x.content
+    println y.content
+end
+

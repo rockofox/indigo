@@ -3,7 +3,7 @@ module BytecodeCompiler where
 import AST (Position (..), anyPosition, zeroPosition)
 import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
-import Control.Monad (forM_, unless, when, (>=>))
+import Control.Monad (forM_, unless, when, zipWithM, (>=>))
 import Control.Monad.Loops (allM, firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, modify)
 import Data.Bifunctor (second)
@@ -11,7 +11,7 @@ import Data.Functor ((<&>))
 import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
 import Data.List.Split qualified
 import Data.Map qualified
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
 import Data.String
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -177,7 +177,7 @@ extractPosition (Parser.Cast{castPos}) = castPos
 extractPosition (Parser.TypeLit{typeLitPos}) = typeLitPos
 extractPosition (Parser.Flexible{flexiblePos}) = flexiblePos
 extractPosition (Parser.Trait{traitPos}) = traitPos
-extractPosition (Parser.Impl{implPos}) = implPos
+extractPosition (Parser.Impl{implPos = pos}) = pos
 extractPosition (Parser.StrictEval{strictEvalPos}) = strictEvalPos
 extractPosition (Parser.External{externalPos}) = externalPos
 extractPosition (Parser.When{whenPos}) = whenPos
@@ -332,17 +332,20 @@ typeCompatible x y = do
 
 compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> StateT (CompilerState a) IO Bool
 compareTypes' (Parser.List x) (Parser.List y) generics = compareTypes' x y generics
-compareTypes' (Parser.List Parser.Any) (Parser.StructT "String") _ = return True
-compareTypes' (Parser.List (Parser.StructT "Char")) (Parser.StructT "String") _ = return True
-compareTypes' (Parser.StructT "String") (Parser.List (Parser.StructT "Char")) _ = return True
-compareTypes' (Parser.StructT "String") (Parser.List Parser.Any) _ = return True
-compareTypes' aT (Parser.StructT b) generics = case aT of
-    Parser.StructT a -> do
-        let gen = find (\(Parser.GenericExpr name _) -> name == b) generics
-        case gen of
-            Just (Parser.GenericExpr _ (Just (Parser.StructT t))) -> compStructs a t
-            Just (Parser.GenericExpr _ _) -> return True
-            Nothing -> compStructs a b
+compareTypes' (Parser.List Parser.Any) (Parser.StructT "String" []) _ = return True
+compareTypes' (Parser.List (Parser.StructT "Char" [])) (Parser.StructT "String" []) _ = return True
+compareTypes' (Parser.StructT "String" []) (Parser.List (Parser.StructT "Char" [])) _ = return True
+compareTypes' (Parser.StructT "String" []) (Parser.List Parser.Any) _ = return True
+compareTypes' aT (Parser.StructT b bArgs) generics = case aT of
+    Parser.StructT a aArgs -> do
+        if length aArgs == length bArgs && all (uncurry (==)) (zip aArgs bArgs)
+            then do
+                let gen = find (\(Parser.GenericExpr name _) -> name == b) generics
+                case gen of
+                    Just (Parser.GenericExpr _ (Just (Parser.StructT t _))) -> compStructs a t
+                    Just (Parser.GenericExpr _ _) -> return True
+                    Nothing -> compStructs a b
+            else return False
     Parser.Unknown -> return True
     _ -> do
         let gen = find (\(Parser.GenericExpr name _) -> name == b) generics
@@ -370,9 +373,9 @@ functionTypesAcceptable :: [Parser.Type] -> [Parser.Type] -> [Parser.GenericExpr
 functionTypesAcceptable use def generics = do
     let genericNames = map (\(Parser.GenericExpr name _) -> name) generics
     let useAndDef = zip use def
-    let udStructs = concatMap (\(a, b) -> case (a, b) of (_, Parser.StructT _) -> [(a, b)]; (Parser.List c'@(Parser.StructT _), Parser.List c@(Parser.StructT _)) -> [(c', c)]; _ -> []) useAndDef
-    let udStructsGeneric = filter (\case (_, Parser.StructT b) -> b `elem` genericNames; (_, Parser.List (Parser.StructT b)) -> b `elem` genericNames; _ -> error "Impossible") udStructs
-    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, Parser.StructT b) -> b == x; (_, Parser.List (Parser.StructT b)) -> b == x; _ -> error "Impossible") udStructsGeneric)) genericNames
+    let udStructs = concatMap (\(a, b) -> case (a, b) of (_, Parser.StructT _ _) -> [(a, b)]; (Parser.List c'@(Parser.StructT _ _), Parser.List c@(Parser.StructT _ _)) -> [(c', c)]; _ -> []) useAndDef
+    let udStructsGeneric = filter (\case (_, Parser.StructT b _) -> b `elem` genericNames; (_, Parser.List (Parser.StructT b _)) -> b `elem` genericNames; _ -> error "Impossible") udStructs
+    let groupedUdStructsGeneric = map (\x -> (x, fst <$> filter (\case (_, Parser.StructT b _) -> b == x; (_, Parser.List (Parser.StructT b _)) -> b == x; _ -> error "Impossible") udStructsGeneric)) genericNames
     let genericsMatch = all (\(_, types) -> allTheSame types) groupedUdStructsGeneric
     typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
     return $ typesMatch' && genericsMatch
@@ -443,13 +446,13 @@ doBinOp opName x y expectedType op = do
         _ -> return (x' ++ LStore aName : y' ++ [LStore bName] ++ castInstrs ++ [finalOp])
   where
     compileTypeFromType :: Parser.Type -> [Instruction]
-    compileTypeFromType (Parser.StructT "Int") = [Push $ DInt 0]
-    compileTypeFromType (Parser.StructT "Float") = [Push $ DFloat 0.0]
-    compileTypeFromType (Parser.StructT "Double") = [Push $ DDouble 0.0]
-    compileTypeFromType (Parser.StructT "Bool") = [Push $ DBool False]
-    compileTypeFromType (Parser.StructT "Char") = [Push $ DChar '\0']
-    compileTypeFromType (Parser.StructT "String") = [Push $ DString ""]
-    compileTypeFromType (Parser.StructT "CPtr") = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    compileTypeFromType (Parser.StructT "Int" []) = [Push $ DInt 0]
+    compileTypeFromType (Parser.StructT "Float" []) = [Push $ DFloat 0.0]
+    compileTypeFromType (Parser.StructT "Double" []) = [Push $ DDouble 0.0]
+    compileTypeFromType (Parser.StructT "Bool" []) = [Push $ DBool False]
+    compileTypeFromType (Parser.StructT "Char" []) = [Push $ DChar '\0']
+    compileTypeFromType (Parser.StructT "String" []) = [Push $ DString ""]
+    compileTypeFromType (Parser.StructT "CPtr" []) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileTypeFromType _ = [Push DNone]
 
 safeTypeOf :: Parser.Expr -> StateT (CompilerState a) IO Parser.Type
@@ -486,25 +489,25 @@ typeOf Parser.Var{varName = varName} = do
     lets' <- gets lets
     let a = maybe Parser.Unknown vtype (find (\x -> x.name == varName) lets')
     return a
-typeOf (Parser.IntLit _ _) = return $ Parser.StructT "Int"
-typeOf (Parser.FloatLit _ _) = return $ Parser.StructT "Float"
-typeOf (Parser.BoolLit _ _) = return $ Parser.StructT "Bool"
-typeOf (Parser.StringLit _ _) = return $ Parser.StructT "String"
+typeOf (Parser.IntLit _ _) = return $ Parser.StructT "Int" []
+typeOf (Parser.FloatLit _ _) = return $ Parser.StructT "Float" []
+typeOf (Parser.BoolLit _ _) = return $ Parser.StructT "Bool" []
+typeOf (Parser.StringLit _ _) = return $ Parser.StructT "String" []
 typeOf (Parser.Add x _ _) = typeOf x
 typeOf (Parser.Sub x _ _) = typeOf x
 typeOf (Parser.Mul x _ _) = typeOf x
 typeOf (Parser.Div x _ _) = typeOf x
 typeOf (Parser.Power x _ _) = typeOf x
 typeOf (Parser.UnaryMinus x _) = typeOf x
-typeOf (Parser.Eq{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Neq{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Lt{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Gt{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Le{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Ge{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.And{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Or{}) = return $ Parser.StructT "Bool"
-typeOf (Parser.Not _ _) = return $ Parser.StructT "Bool"
+typeOf (Parser.Eq{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Neq{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Lt{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Gt{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Le{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Ge{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.And{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Or{}) = return $ Parser.StructT "Bool" []
+typeOf (Parser.Not _ _) = return $ Parser.StructT "Bool" []
 typeOf (Parser.Placeholder _) = return Parser.Any
 typeOf (Parser.Let{}) = error "Cannot infer type of let"
 typeOf (Parser.If _ b _ _) = typeOf b
@@ -517,8 +520,8 @@ typeOf (Parser.Discard _ _) = error "Cannot infer type of discard"
 typeOf (Parser.Import{}) = error "Cannot infer type of import"
 typeOf (Parser.Ref _ _) = error "Cannot infer type of ref"
 typeOf (Parser.Struct{}) = error "Cannot infer type of struct"
-typeOf (Parser.StructLit x _ _) = return $ Parser.StructT x
-typeOf (Parser.ListLit [Parser.Var{varName}] _) = return $ Parser.List $ Parser.StructT varName
+typeOf (Parser.StructLit x _ typeArgs _) = return $ Parser.StructT x typeArgs
+typeOf (Parser.ListLit [Parser.Var{varName}] _) = return $ Parser.List $ Parser.StructT varName []
 typeOf (Parser.ListLit x _) = case x of
     [] -> return $ Parser.List Parser.Any
     (y : _) -> typeOf y <&> Parser.List
@@ -529,8 +532,11 @@ typeOf (Parser.ListConcat x _ _) = typeOf x
 typeOf (Parser.ListPattern _ _) = return $ Parser.List Parser.Any
 typeOf (Parser.StructAccess _ s _) = typeOf s
 typeOf (Parser.Pipeline _ b _) = typeOf b
-typeOf (Parser.Lambda{}) = return $ Parser.Fn [] Parser.Any
-typeOf (Parser.Cast _ (Parser.Var to _) _) = return $ Parser.StructT to
+typeOf (Parser.Lambda{lambdaArgs, lambdaBody}) = do
+    returnType <- typeOf lambdaBody
+    let argTypes = replicate (length lambdaArgs) Parser.Any
+    return $ Parser.Fn argTypes returnType
+typeOf (Parser.Cast _ (Parser.Var to _) _) = return $ Parser.StructT to []
 typeOf (Parser.Cast _ b _) = typeOf b
 typeOf (Parser.TypeLit x _) = return x
 typeOf (Parser.Flexible x _) = typeOf x
@@ -539,8 +545,8 @@ typeOf (Parser.Impl{}) = error "Cannot infer type of impl"
 typeOf (Parser.Then _ b _) = typeOf b
 typeOf (Parser.StrictEval x _) = typeOf x
 typeOf (Parser.External{}) = error "Cannot infer type of external"
-typeOf (Parser.CharLit _ _) = return $ Parser.StructT "Char"
-typeOf (Parser.DoubleLit _ _) = return $ Parser.StructT "Double"
+typeOf (Parser.CharLit _ _) = return $ Parser.StructT "Char" []
+typeOf (Parser.DoubleLit _ _) = return $ Parser.StructT "Double" []
 typeOf (Parser.ParenApply a _ _) = typeOf a
 typeOf (Parser.ListAdd x _ _) = typeOf x
 typeOf (Parser.When _ branches else_ _) =
@@ -598,24 +604,26 @@ findBaseDecInTraits funcName = do
     return $ firstJust id baseDecs
 
 typeToData :: Parser.Type -> VM.Data
-typeToData (Parser.StructT "Int") = VM.DInt 0
-typeToData (Parser.StructT "Float") = VM.DFloat 0
-typeToData (Parser.StructT "Double") = VM.DDouble 0
-typeToData (Parser.StructT "Bool") = VM.DBool False
-typeToData (Parser.StructT "String") = VM.DString ""
-typeToData (Parser.StructT "IO") = VM.DNone -- Hmmm...
-typeToData (Parser.StructT "Char") = VM.DChar ' '
-typeToData (Parser.StructT "CPtr") = VM.DCPtr 0
-typeToData Parser.StructT{} = VM.DMap Data.Map.empty
+typeToData (Parser.StructT "Int" []) = VM.DInt 0
+typeToData (Parser.StructT "Float" []) = VM.DFloat 0
+typeToData (Parser.StructT "Double" []) = VM.DDouble 0
+typeToData (Parser.StructT "Bool" []) = VM.DBool False
+typeToData (Parser.StructT "String" []) = VM.DString ""
+typeToData (Parser.StructT "IO" []) = VM.DNone -- Hmmm...
+typeToData (Parser.StructT "Char" []) = VM.DChar ' '
+typeToData (Parser.StructT "CPtr" []) = VM.DCPtr 0
+typeToData (Parser.StructT _ _) = VM.DMap Data.Map.empty
 typeToData Parser.Any = VM.DNone
 typeToData x = error $ "Cannot convert type " ++ show x ++ " to data"
 
 typeToString :: Parser.Type -> String
-typeToString (Parser.StructT x) = x
+typeToString (Parser.StructT x typeArgs)
+    | null typeArgs = x
+    | otherwise = x ++ "<" ++ intercalate ", " (map typeToString typeArgs) ++ ">"
 typeToString x = show x
 
 typesEqual :: Parser.Type -> Parser.Type -> Bool
-typesEqual (Parser.StructT x) (Parser.StructT y) = x == y
+typesEqual (Parser.StructT x xArgs) (Parser.StructT y yArgs) = x == y && xArgs == yArgs
 typesEqual x y = x == y
 
 extractPatternVars :: Parser.Expr -> [String]
@@ -732,6 +740,16 @@ compilePatternMatch x nextLabel expectedType = do
     x' <- compileExpr x expectedType
     return $ x' ++ [Eq, Jf nextLabel]
 
+substituteGenerics :: Parser.Type -> [(String, Parser.Type)] -> Parser.Type
+substituteGenerics (Parser.StructT name typeArgs) substitutions =
+    case lookup name substitutions of
+        Just subType -> subType
+        Nothing -> Parser.StructT name (map (`substituteGenerics` substitutions) typeArgs)
+substituteGenerics (Parser.List t) substitutions = Parser.List (substituteGenerics t substitutions)
+substituteGenerics (Parser.Tuple ts) substitutions = Parser.Tuple (map (`substituteGenerics` substitutions) ts)
+substituteGenerics (Parser.Fn args ret) substitutions = Parser.Fn (map (`substituteGenerics` substitutions) args) (substituteGenerics ret substitutions)
+substituteGenerics t _ = t
+
 compileExpr :: Parser.Expr -> Parser.Type -> StateT (CompilerState a) IO [Instruction]
 compileExpr (Parser.Add{addLhs = x, addRhs = y}) expectedType = compileBinOp "+" x y expectedType Add
 compileExpr (Parser.Sub{subLhs = x, subRhs = y}) expectedType = compileBinOp "-" x y expectedType Sub
@@ -804,7 +822,6 @@ compileExpr (Parser.FuncCall{funcName = "root", funcArgs = [x, Parser.FloatLit{f
 compileExpr (Parser.FuncCall{funcName = "sqrt", funcArgs = [x]}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
 compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     implsForExpectedType <- implsFor (typeToString expectedType)
-    argTypes <- mapM typeOf funcArgs
     functions' <- gets functions
     funcDecs' <- gets funcDecs
     funcDefs' <- gets funcDefs
@@ -812,26 +829,101 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     externals' <- gets externals
     contextPath' <- gets contextPath
     fbt <- gets functionsByTrait
+
+    -- Try to get expected argument types from function declarations for better lambda type inference
+    let maybeExpectedArgTypes = case find (\x -> x.name == funcName) funcDecs' of
+            Just fd -> Just $ init $ Parser.types fd
+            Nothing -> Nothing
+
+    -- Compute argument types, using expected types for lambdas when available
+    argTypes <-
+        zipWithM
+            ( \arg idx -> case (arg, maybeExpectedArgTypes) of
+                (Parser.Lambda{lambdaArgs, lambdaBody}, Just expectedTypes) | idx < length expectedTypes -> do
+                    let expectedArgType = expectedTypes !! idx
+                    returnType <- typeOf lambdaBody
+                    case expectedArgType of
+                        Parser.Fn expectedArgTypes expectedReturnType -> do
+                            -- Use expected types for lambda arguments if available
+                            let argTypes' =
+                                    if length lambdaArgs == length expectedArgTypes
+                                        then expectedArgTypes
+                                        else replicate (length lambdaArgs) Parser.Any
+                            return $ Parser.Fn argTypes' returnType
+                        _ -> do
+                            returnType <- typeOf lambdaBody
+                            return $ Parser.Fn (replicate (length lambdaArgs) Parser.Any) returnType
+                _ -> typeOf arg
+            )
+            funcArgs
+            [0 ..]
     let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
-    -- Find the function in any context using firstM
     let contextFunctions = firstJust (\context -> findFunction (Data.Text.unpack context ++ "@" ++ funcName) functions' argTypes) contexts
     let implsForExpectedTypePrefixes = map (\x -> x ++ "." ++ typeToString expectedType ++ "::" ++ funcName) implsForExpectedType
 
-    let fun = case find (\(Function{baseName}) -> baseName `elem` implsForExpectedTypePrefixes) functions' of
-            Just funf -> funf
-            Nothing -> case contextFunctions of
-                (Just lf) -> lf
-                Nothing -> case findFunction funcName functions' argTypes of
-                    (Just f) -> f
-                    Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
+    traitMethodMatch <-
+        if not (null funcArgs) && not (null argTypes)
+            then do
+                let firstArgType = head argTypes
+                let firstArgTypeStr = typeToString firstArgType
+                implsForFirstArg <- implsFor firstArgTypeStr
+                let implsForFirstArgPrefixes = map (\x -> x ++ "." ++ firstArgTypeStr ++ "::" ++ funcName) implsForFirstArg
+                let traitFunc = find (\(Function{baseName}) -> baseName `elem` implsForFirstArgPrefixes) functions'
+                case traitFunc of
+                    Just tf -> return $ Just tf
+                    Nothing -> do
+                        let traitMethod = find (\(for, n, _, newDec) -> for == firstArgTypeStr && n == funcName && length funcArgs <= length (Parser.types newDec) - 1) fbt
+                        case traitMethod of
+                            Just (_, _, fqn, newDec) -> do
+                                let traitFuncFound = find (\(Function{baseName = bn}) -> bn == fqn) functions'
+                                case traitFuncFound of
+                                    Just tf -> return $ Just tf
+                                    Nothing ->
+                                        case findFunction funcName functions' argTypes of
+                                            Just vf -> return $ Just vf
+                                            Nothing -> return Nothing
+                            Nothing -> return Nothing
+            else return Nothing
+
+    let virtualFunction = findFunction funcName functions' argTypes
+    let virtualFunctionAny = findAnyFunction funcName functions'
+
+    let fun = case traitMethodMatch of
+            Just _ ->
+                case virtualFunctionAny of
+                    Just vf -> vf
+                    Nothing ->
+                        fromMaybe
+                            (Function{baseName = funcName, funame = funcName ++ "#0", function = [], types = [], context = "__outside"})
+                            virtualFunction
+            Nothing -> case virtualFunction of
+                Just tm -> tm
+                Nothing -> case virtualFunctionAny of
+                    Just tm -> tm
+                    Nothing -> case find (\(Function{baseName}) -> baseName `elem` implsForExpectedTypePrefixes) functions' of
+                        Just funf -> funf
+                        Nothing -> case contextFunctions of
+                            (Just lf) -> lf
+                            Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
     -- traceShowM $ "Looking for function " ++ funcName ++ " in context " ++ curCon ++ " with types " ++ show argTypes ++ " and expected type " ++ show expectedType
     -- traceShowM fbt
-    let funcDec = case find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs' of
-            Just fd -> do
-                case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
+    let traitMethodDec = case traitMethodMatch of
+            Just _ ->
+                let firstArgType = head argTypes
+                    firstArgTypeStr = typeToString firstArgType
+                    traitMethod = find (\(for, n, _, newDec) -> for == firstArgTypeStr && n == funcName && length funcArgs <= length (Parser.types newDec) - 1) fbt
+                 in case traitMethod of
+                        Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = [], funcDecPos = anyPosition}
+                        Nothing -> Nothing
+            Nothing -> Nothing
+
+    let funcDec = case traitMethodDec of
+            Just fd -> Just fd
+            Nothing -> case find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs' of
+                Just fd -> case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
                     Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = Parser.generics fd, funcDecPos = anyPosition}
                     Nothing -> Just fd
-            Nothing -> find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs'
+                Nothing -> Nothing
     let external = find (\x -> x.name == funcName) externals'
 
     let isLocal = T.pack (takeWhile (/= '@') curCon ++ "@") `isPrefixOf` T.pack fun.funame
@@ -941,7 +1033,7 @@ compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
     let generics = Parser.generics funcDec
     let genericNames = map (\(Parser.GenericExpr n _) -> n) generics
     let genericReturnInfo = case expectedReturnType of
-            Parser.StructT t
+            Parser.StructT t []
                 | t `elem` genericNames ->
                     find (\(Parser.GenericExpr n _) -> n == t) generics
             _ -> Nothing
@@ -1124,7 +1216,7 @@ compileExpr (Parser.Cast{castExpr, castType, castPos}) expectedType = do
                     cerror ("Type mismatch: cannot cast " ++ show fromType ++ " to value struct field type " ++ show fieldType) castPos
                     return []
                 else do
-                    let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitPos = castPos}
+                    let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitTypeArgs = [], structLitPos = castPos}
                     skipCheck <- gets skipRefinementCheck
                     unless skipCheck $ do
                         case refinement of
@@ -1156,30 +1248,54 @@ compileExpr (Parser.Cast{castExpr, castType, castPos}) expectedType = do
     compileType (Parser.TupleLit{tupleLitExprs}) = concatMap compileType tupleLitExprs ++ [PackList $ length tupleLitExprs]
     compileType (Parser.Var{}) = [Push DNone]
     compileType x = error $ "Cannot cast to type " ++ show x
-compileExpr st@(Parser.Struct{name = structName, fields, is}) expectedType = do
+compileExpr st@(Parser.Struct{name = structName, fields, is, generics}) expectedType = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
-    mapM_ ((`compileExpr` expectedType) . (\t -> Parser.Impl{trait = t, for = structName, methods = [], implPos = anyPosition})) is
+    mapM_ ((`compileExpr` expectedType) . (\t -> Parser.Impl{trait = t, traitTypeArgs = [], for = structName, methods = [], implPos = anyPosition})) is
     return []
   where
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
-        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], traitPos = anyPosition}
-        let impl = Parser.Impl{trait = traitName, for = Parser.name st, methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
+        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}
+        let impl = Parser.Impl{trait = traitName, traitTypeArgs = [], for = Parser.name st, methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
         _ <- compileExpr trait Parser.Any
         _ <- compileExpr impl Parser.Any
         return ()
-compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitPos}) _ = do
+compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeArgs, structLitPos}) _ = do
     skipCheck <- gets skipRefinementCheck
     structDecs' <- gets structDecs
     let struct = find (\case Parser.Struct{name = name'} -> name' == structLitName; _ -> False) structDecs'
     case struct of
         Just expr -> case expr of
-            Parser.Struct{fields = declaredFields} -> do
+            Parser.Struct{fields = declaredFields, generics = structGenerics} -> do
+                when (not (null structGenerics) && length structLitTypeArgs /= length structGenerics) $ do
+                    cerror ("Type argument count mismatch for struct " ++ structLitName ++ ": expected " ++ show (length structGenerics) ++ ", got " ++ show (length structLitTypeArgs)) structLitPos
+                let genericSubstitutions =
+                        if null structGenerics || null structLitTypeArgs
+                            then []
+                            else zip (map (\(Parser.GenericExpr n _) -> n) structGenerics) structLitTypeArgs
+                unless (null structLitTypeArgs) $ do
+                    forM_ (zip structGenerics structLitTypeArgs) $ \(Parser.GenericExpr genName genConstraint, typeArg) -> do
+                        case genConstraint of
+                            Just constraint -> do
+                                constraintName <- case constraint of
+                                    Parser.StructT traitName [] -> return traitName
+                                    _ -> do
+                                        cerror "Trait constraint must be a struct type" structLitPos
+                                        return ""
+                                impls <- implsFor (typeToString typeArg)
+                                unless (constraintName `elem` impls || typeToString typeArg == constraintName) $ do
+                                    cerror ("Type argument " ++ show typeArg ++ " does not satisfy trait constraint " ++ constraintName ++ " for generic parameter " ++ genName) structLitPos
+                            Nothing -> return ()
                 let declaredFieldMap = Data.Map.fromList declaredFields
+                let substitutedFields =
+                        if null genericSubstitutions
+                            then declaredFields
+                            else map (second (`substituteGenerics` genericSubstitutions)) declaredFields
+                let substitutedFieldMap = Data.Map.fromList substitutedFields
                 forM_ structLitFields $ \(fieldName, fieldValue) -> do
-                    case Data.Map.lookup fieldName declaredFieldMap of
+                    case Data.Map.lookup fieldName substitutedFieldMap of
                         Just declaredType -> do
                             actualType <- typeOf fieldValue
                             unless (Parser.compareTypes actualType declaredType) $ do
@@ -1235,32 +1351,52 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     mangleAST (Parser.Function{def = fdef, dec}) alias = Parser.Function{def = map (`mangleAST` alias) fdef, dec = mangleAST dec alias, functionPos = anyPosition}
     mangleAST (Parser.FuncDef{name, args, body}) alias = Parser.FuncDef{name = alias ++ "@" ++ name, args = args, body = mangleAST body alias, funcDefPos = anyPosition}
     mangleAST x _ = x
-compileExpr (Parser.Trait{name, methods}) expectedType = do
+compileExpr (Parser.Trait{name, methods, generics}) expectedType = do
     let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> error "Expected FuncDec in Trait methods") methods
-    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, traitPos = anyPosition} : traits s})
+    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, traitPos = anyPosition} : traits s})
     mapM_ (`compileExpr` expectedType) methods'
     return []
-compileExpr (Parser.Impl{trait, for, methods}) expectedType = do
+compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expectedType = do
+    trait' <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == trait) traits'
+    let traitGenerics = Parser.generics trait'
+    when (not (null traitGenerics) && length traitTypeArgs /= length traitGenerics) $ do
+        cerror ("Trait type argument count mismatch for impl " ++ trait ++ " for " ++ for ++ ": expected " ++ show (length traitGenerics) ++ ", got " ++ show (length traitTypeArgs)) implPos
+    when (null traitGenerics && not (null traitTypeArgs)) $ do
+        cerror ("Trait '" ++ trait ++ "' has no type parameters, but impl provides type arguments") implPos
+    let genericSubstitutions =
+            if null traitGenerics || null traitTypeArgs
+                then []
+                else zip (map (\(Parser.GenericExpr n _) -> n) traitGenerics) traitTypeArgs
     methods' <-
-        mapM
-            ( \case
-                Parser.FuncDef{name = name', args, body} -> do
-                    let fullyQualifiedName = trait ++ "." ++ for ++ "::" ++ name'
-                    trait' <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == trait) traits'
-                    let dec = fromJust $ find (\x -> Parser.name x == name') (Parser.methods trait')
-                    let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself dec.types for, generics = dec.generics, funcDecPos = anyPosition}
-                    _ <- compileExpr newDec Parser.Any
-                    modify (\s -> s{functionsByTrait = (for, name', fullyQualifiedName, newDec) : functionsByTrait s})
-                    return $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body, funcDefPos = anyPosition}
-                _ -> error "Expected FuncDef in Impl methods"
-            )
-            methods
-    modify (\s -> s{impls = Parser.Impl{trait = trait, for = for, methods = methods, implPos = anyPosition} : impls s})
+        catMaybes
+            <$> mapM
+                ( \case
+                    Parser.FuncDef{name = name', args, body, funcDefPos} -> do
+                        let traitTypeArgsStr = if null traitTypeArgs then "" else "<" ++ intercalate "," (map typeToString traitTypeArgs) ++ ">"
+                        let fullyQualifiedName = trait ++ traitTypeArgsStr ++ "." ++ for ++ "::" ++ name'
+                        let dec = find (\x -> Parser.name x == name') (Parser.methods trait')
+                        case dec of
+                            Nothing -> do
+                                cerror ("Method '" ++ name' ++ "' is not declared in trait '" ++ trait ++ "'") funcDefPos
+                                return Nothing
+                            Just dec' -> do
+                                let substitutedTypes =
+                                        if null genericSubstitutions
+                                            then Parser.types dec'
+                                            else map (`substituteGenerics` genericSubstitutions) (Parser.types dec')
+                                let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself substitutedTypes for, generics = Parser.generics dec', funcDecPos = anyPosition}
+                                _ <- compileExpr newDec Parser.Any
+                                modify (\s -> s{functionsByTrait = (for, name', fullyQualifiedName, newDec) : functionsByTrait s})
+                                return $ Just $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body, funcDefPos = anyPosition}
+                    _ -> error "Expected FuncDef in Impl methods"
+                )
+                methods
+    modify (\s -> s{impls = impl : impls s})
     mapM_ (`compileExpr` expectedType) methods'
     return []
   where
     unself :: [Parser.Type] -> String -> [Parser.Type]
-    unself types self = map (\case Parser.Self -> Parser.StructT self; x -> x) types
+    unself types self = map (\case Parser.Self -> Parser.StructT self []; x -> x) types
 compileExpr (Parser.Lambda{lambdaArgs, lambdaBody}) expectedType = do
     fId <- allocId
     curCon <- gets currentContext
@@ -1422,9 +1558,9 @@ runRefinement refinement value = do
             let progExprs =
                     maybeToList structDef
                         ++ functionDefs
-                        ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition
+                        ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool" []] [] Parser.anyPosition
                            , Parser.FuncDef "__refinement" [Parser.Var "it" Parser.zeroPosition] transformedRefinement Parser.anyPosition
-                           , Parser.FuncDec "main" [Parser.StructT "IO"] [] Parser.anyPosition
+                           , Parser.FuncDec "main" [Parser.StructT "IO" []] [] Parser.anyPosition
                            , Parser.FuncDef
                                 "main"
                                 []
@@ -1436,7 +1572,7 @@ runRefinement refinement value = do
                 extractedFuncDecs = filter (\case Parser.FuncDec{} -> True; _ -> False) functionDefs
                 stateWithContext =
                     freshState
-                        { funcDecs = currentState.funcDecs ++ extractedFuncDecs ++ [Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition]
+                        { funcDecs = currentState.funcDecs ++ extractedFuncDecs ++ [Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool" []] [] Parser.anyPosition]
                         , structDecs = currentState.structDecs
                         , skipRefinementCheck = True
                         }
@@ -1470,11 +1606,23 @@ createVirtualFunctions = do
     createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT (CompilerState a) IO ()
     createBaseDef (Parser.FuncDec{name, types = typess}) trait fors = do
         let traitName = Parser.name trait
+        impls' <- gets impls
+        let funame = name ++ "#0"
         let body =
-                Label name
-                    : concatMap (\for -> [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery for, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ "." ++ for ++ "::" ++ name)]) fors
+                Label funame
+                    : concatMap
+                        ( \for ->
+                            let implForFor = find (\impl -> Parser.for impl == for && Parser.trait impl == traitName) impls'
+                             in case implForFor of
+                                    Just impl ->
+                                        let traitTypeArgs = Parser.traitTypeArgs impl
+                                            traitTypeArgsStr = if null traitTypeArgs then "" else "<" ++ intercalate "," (map typeToString traitTypeArgs) ++ ">"
+                                         in [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery for, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ traitTypeArgsStr ++ "." ++ for ++ "::" ++ name)]
+                                    Nothing -> []
+                        )
+                        fors
                     ++ [Push $ DString $ "\npanic: No matching implementation of " ++ traitName ++ ", tried calling " ++ name ++ "\n", Builtin Print, Exit]
-        modify (\s -> s{functions = functions s ++ [Function name (name ++ "#0") body typess "__outside"]})
+        modify (\s -> s{functions = functions s ++ [Function name funame body typess "__outside"]})
         return ()
     createBaseDef _ _ _ = return ()
 

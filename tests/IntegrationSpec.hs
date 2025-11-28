@@ -377,6 +377,50 @@ spec = do
                     end
                 |]
                 `shouldReturn` "x\nIO{__traits: [Monad,__field_inner], inner: 2}\n"
+        it "Can use parametric trait with impl" $ do
+            compileAndRun
+                [r|
+                    trait Monad<T> = do
+                        bind :: Self -> (Any -> Self) -> Self
+                        return :: Any -> Self
+                    end
+
+                    struct Optional = (value: Any)
+
+                    impl Monad<Optional> for Optional = do
+                        bind Optional{value: x} f = f x
+                        bind None{} f = None{}
+                        return x = Optional{value: x}
+                    end
+
+                    let main : IO = do
+                        let opt = Optional{value: 42}
+                        println opt.value
+                    end
+                |]
+                `shouldReturn` "42\n"
+        it "Can use parametric trait with multiple type parameters" $ do
+            compileAndRun
+                [r|
+                    trait Pair<T, U> = do
+                        first :: Self -> T
+                        second :: Self -> U
+                    end
+
+                    struct IntStringPair = (first: Int, second: String)
+
+                    impl Pair<Int, String> for IntStringPair = do
+                        first self = self.first
+                        second self = self.second
+                    end
+
+                    let main : IO = do
+                        let p = IntStringPair{first: 42, second: "hello"}
+                        println p.first
+                        println p.second
+                    end
+                |]
+                `shouldReturn` "42\nhello\n"
     describe "Lambdas" $ do
         it "Can use a lambda in the map function" $ do
             compileAndRun

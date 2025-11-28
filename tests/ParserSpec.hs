@@ -11,14 +11,14 @@ import Text.RawString.QQ (r)
 instance Arbitrary Type where
     arbitrary = sized $ \n ->
         if n <= 0
-            then oneof [return Any, return Unknown, return None, return Self, StructT <$> elements ["Int", "String", "Bool", "Float", "Char"]]
+            then oneof [return Any, return Unknown, return None, return Self, StructT <$> elements ["Int", "String", "Bool", "Float", "Char"] <*> return []]
             else
                 oneof
                     [ return Any
                     , return Unknown
                     , return None
                     , return Self
-                    , StructT <$> elements ["Int", "String", "Bool", "Float", "Char"]
+                    , StructT <$> elements ["Int", "String", "Bool", "Float", "Char"] <*> return []
                     , List <$> resize (n `div` 2) arbitrary
                     , do
                         size <- choose (2, min 4 (n `div` 2))
@@ -81,59 +81,80 @@ spec = do
                 \t -> compareTypes (List t) (List t) `shouldBe` True
         it "StructT types should be equal if their fields are equal" $
             property $
-                \t -> compareTypes (StructT t) (StructT t) `shouldBe` True
+                \t -> compareTypes (StructT t []) (StructT t []) `shouldBe` True
         it "Tuple types should be equal if their element types are equal" $
-            compareTypes (Tuple [StructT "Int", StructT "String"]) (Tuple [StructT "Int", StructT "String"]) `shouldBe` True
+            compareTypes (Tuple [StructT "Int" [], StructT "String" []]) (Tuple [StructT "Int" [], StructT "String" []]) `shouldBe` True
         it "Tuple types should not be equal if lengths differ" $
-            compareTypes (Tuple [StructT "Int"]) (Tuple [StructT "Int", StructT "String"]) `shouldBe` False
+            compareTypes (Tuple [StructT "Int" []]) (Tuple [StructT "Int" [], StructT "String" []]) `shouldBe` False
         it "Tuple types should not be equal if element types differ" $
-            compareTypes (Tuple [StructT "Int", StructT "String"]) (Tuple [StructT "String", StructT "Int"]) `shouldBe` False
+            compareTypes (Tuple [StructT "Int" [], StructT "String" []]) (Tuple [StructT "String" [], StructT "Int" []]) `shouldBe` False
     describe "Basic" $ do
         it "Should parse a simple program" $
             parseProgram "let main : IO = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall{funcName = "print", funcArgs = [StringLit{stringValue = "Hello, world!", stringPos = anyPosition}], funcPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO"], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall{funcName = "print", funcArgs = [StringLit{stringValue = "Hello, world!", stringPos = anyPosition}], funcPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [StructAccess{structAccessStruct = StructLit{structLitName = "bello", structLitFields = [], structLitPos = anyPosition}, structAccessField = Var{varName = "name", varPos = anyPosition}, structAccessPos = anyPosition}])
+                    (Program [StructAccess{structAccessStruct = StructLit{structLitName = "bello", structLitFields = [], structLitTypeArgs = [], structLitPos = anyPosition}, structAccessField = Var{varName = "name", varPos = anyPosition}, structAccessPos = anyPosition}])
+        it "Should parse generic struct" $ do
+            parseProgram "struct Example<N: Number> = (content: N)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Struct{name = "Example", fields = [("content", StructT "N" [])], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, generics = [GenericExpr "N" (Just $ StructT "Number" [])], structPos = anyPosition}])
+        it "Should parse struct literal with type arguments" $ do
+            parseProgram "Example<Int>{content: 42}" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [StructLit{structLitName = "Example", structLitFields = [("content", IntLit{intValue = 42, intPos = anyPosition})], structLitTypeArgs = [StructT "Int" []], structLitPos = anyPosition}])
         it "Can define" $
             parseProgram "struct Teacher = ()" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, generics = [], structPos = anyPosition}])
         it "Can define with is" $ do
             parseProgram "struct Teacher = () is Person" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"], isValueStruct = False, structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"], isValueStruct = False, generics = [], structPos = anyPosition}])
         it "Can define with multiple is" $ do
             parseProgram "struct Teacher = () is Person, Employee" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"], isValueStruct = False, structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"], isValueStruct = False, generics = [], structPos = anyPosition}])
+        it "Should parse generic struct" $ do
+            parseProgram "struct Example<N: Number> = (content: N)" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Struct{name = "Example", fields = [("content", StructT "N" [])], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, generics = [GenericExpr "N" (Just $ StructT "Number" [])], structPos = anyPosition}])
+        it "Should parse struct literal with type arguments" $ do
+            parseProgram "Example<Int>{content: 42}" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [StructLit{structLitName = "Example", structLitFields = [("content", IntLit{intValue = 42, intPos = anyPosition})], structLitTypeArgs = [StructT "Int" []], structLitPos = anyPosition}])
     describe "Value structs" $ do
         it "Can define value struct without refinement" $ do
             parseProgram "value struct PositiveInt = (num: Int)" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int")], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = True, structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int" [])], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = True, generics = [], structPos = anyPosition}])
         it "Can define value struct with refinement" $ do
             let result = parseProgram "value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)" parserCompilerFlags
             case result of
-                Right (Program [Struct{name = "EvenNumber", fields = [("num", StructT "Int")], refinement = Just (Eq (Modulo (Var "num" _) (IntLit 2 _) _) (IntLit 0 _) _), isValueStruct = True, structPos = _}]) -> return ()
+                Right (Program [Struct{name = "EvenNumber", fields = [("num", StructT "Int" [])], refinement = Just (Eq (Modulo (Var "num" _) (IntLit 2 _) _) (IntLit 0 _) _), isValueStruct = True, generics = [], structPos = _}]) -> return ()
                 _ -> expectationFailure $ "Failed to parse value struct with refinement: " ++ show result
         it "Can define value struct with is clause" $ do
             parseProgram "value struct PositiveInt = (num: Int) is Printable" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int")], refinement = Nothing, refinementSrc = "", is = ["Printable"], isValueStruct = True, structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int" [])], refinement = Nothing, refinementSrc = "", is = ["Printable"], isValueStruct = True, generics = [], structPos = anyPosition}])
     describe "Traits" $ do
+        it "Should parse generic trait" $ do
+            parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Trait{name = "Monad", methods = [FuncDec{name = "bind", types = [Self, AST.Fn [Any] Self, Self], generics = [], funcDecPos = anyPosition}], generics = [GenericExpr "T" Nothing], traitPos = anyPosition}])
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String"], generics = [], funcDecPos = anyPosition}], traitPos = anyPosition}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}])
         it "Should parse a trait declaration with multiple methods" $
             parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String"], generics = [], funcDecPos = anyPosition}, FuncDec{name = "show2", types = [Self, StructT "String"], generics = [], funcDecPos = anyPosition}], traitPos = anyPosition}])
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}, FuncDec{name = "show2", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}])
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right
                     ( Program
                         [ Impl
                             { trait = "Show"
+                            , traitTypeArgs = []
                             , for = "Point"
                             , methods =
                                 [ FuncDef{name = "show", args = [Var{varName = "point", varPos = anyPosition}], body = parseFreeUnsafe "\"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"", funcDefPos = anyPosition}
@@ -142,6 +163,31 @@ spec = do
                             }
                         ]
                     )
+        it "Should parse impl with type parameters" $ do
+            parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend\nimpl Monad<Optional> for Optional = do\n  bind x f = f x\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Monad", generics = [GenericExpr "T" Nothing]}, Impl{trait = "Monad", traitTypeArgs = [StructT "Optional" []]}]) -> True
+                    _ -> False
+        it "Should parse trait with multiple type parameters" $ do
+            parseProgram "trait Functor<F, A> = do\n  map :: Self -> (A -> A) -> Self\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Functor", generics = [GenericExpr "F" Nothing, GenericExpr "A" Nothing]}]) -> True
+                    _ -> False
+        it "Should parse trait with constrained type parameters" $ do
+            parseProgram "trait Number\nimpl Number for Int\nimpl Number for Float\ntrait Container<T: Number> = do\n  get :: Self -> T\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Number"}, Impl{}, Impl{}, Trait{name = "Container", generics = [GenericExpr "T" (Just (StructT "Number" []))]}]) -> True
+                    _ -> False
+        it "Should parse impl with multiple type arguments" $ do
+            parseProgram "trait Pair<T, U> = do\n  first :: Self -> T\n  second :: Self -> U\nend\nstruct IntStringPair = (first: Int, second: String)\nimpl Pair<Int, String> for IntStringPair = do\n  first self = self.first\n  second self = self.second\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Pair", generics = [GenericExpr "T" Nothing, GenericExpr "U" Nothing]}, Struct{}, Impl{trait = "Pair", traitTypeArgs = [StructT "Int" [], StructT "String" []]}]) -> True
+                    _ -> False
+        it "Should parse impl with generic struct type argument" $ do
+            parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend\nstruct Option<T> = (value: T)\nstruct Optional = (value: Any)\nimpl Monad<Option<Int>> for Optional = do\n  bind x f = f x.value\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Monad"}, Struct{name = "Option", generics = [_]}, Struct{name = "Optional"}, Impl{trait = "Monad", traitTypeArgs = [StructT "Option" [StructT "Int" []]], for = "Optional"}]) -> True
+                    _ -> False
     describe "Gravis" $ do
         it "Should parse operators escaped using gravis in dec correctly" $ do
             parseProgram
@@ -201,7 +247,7 @@ spec = do
             |]
                 parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = DoBlock{doBlockExprs = [Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}, addPos = anyPosition}], doBlockPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = DoBlock{doBlockExprs = [Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}, addPos = anyPosition}], doBlockPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "add", types = [StructT "N" [], StructT "N" [], StructT "N" []], generics = [GenericExpr "N" (Just $ StructT "Number" [])], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse classic decleration generics" $ do
             parseProgram
                 [r|
@@ -209,7 +255,7 @@ spec = do
             |]
                 parserCompilerFlags
                 `shouldBe` Right
-                    (Program [FuncDec{name = "add", types = [StructT "N", StructT "N", StructT "N"], generics = [GenericExpr "N" (Just $ StructT "Number")], funcDecPos = anyPosition}])
+                    (Program [FuncDec{name = "add", types = [StructT "N" [], StructT "N" [], StructT "N" []], generics = [GenericExpr "N" (Just $ StructT "Number" [])], funcDecPos = anyPosition}])
     describe "Binary Operators" $ do
         it "Should parse addition" $
             parseProgram "1 + 2" parserCompilerFlags
@@ -291,7 +337,7 @@ spec = do
         it "Should parse tuple type" $
             parseProgram "let x : (Int, String) = (1, \"test\")" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int", StructT "String"]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int" [], StructT "String" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse tuple access" $
             parseProgram "tuple.0" parserCompilerFlags
                 `shouldBe` Right
@@ -303,7 +349,7 @@ spec = do
         it "Should parse nested tuple types" $
             parseProgram "let x : ((Int, String), Bool) = ((1, \"test\"), True)" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [Tuple [StructT "Int", StructT "String"], StructT "Bool"]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [Tuple [StructT "Int" [], StructT "String" []], StructT "Bool" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse single-element parentheses as parenthesized expression, not tuple" $
             parseProgram "(x)" parserCompilerFlags
                 `shouldBe` Right
@@ -320,28 +366,28 @@ spec = do
         it "Should parse single parenthesized type as the type itself" $
             parseProgram "let x : (Int) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int"], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse function type with one argument" $
             parseProgram "let x : (Int -> String) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int"] (StructT "String")], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" []] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse thunk function type (zero arguments)" $
             parseProgram "let x : (-> String) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [] (StructT "String")], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse function type with multiple arguments" $
             parseProgram "let x : (Int -> String -> Bool) = True" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = BoolLit{boolValue = True, boolPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int", StructT "String"] (StructT "Bool")], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = BoolLit{boolValue = True, boolPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" [], StructT "String" []] (StructT "Bool" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse nested parenthesized type" $
             parseProgram "let x : ((Int)) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int"], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse nested function type" $
             parseProgram "let x : ((Int -> String)) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int"] (StructT "String")], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" []] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
         it "Should parse single-element tuple type with trailing comma" $
             parseProgram "let x : (Int,) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int"]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])
+                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}])

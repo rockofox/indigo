@@ -58,7 +58,7 @@ compile prog = do
                     Left p -> return p
                 )
                 (initCompilerState program)
-                    { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] [] AST.anyPosition]
+                    { funcDecs = [AST.FuncDec "+" [AST.StructT "Int" [], AST.StructT "Int" [], AST.StructT "Int" []] [] AST.anyPosition]
                     }
 
 compileWithErrors :: String -> IO (Either [BytecodeCompiler.CompilerError] [VM.Instruction])
@@ -71,7 +71,7 @@ compileWithErrors prog = do
                 evalStateT
                     (compileProgram program)
                     (initCompilerState program)
-                        { funcDecs = [AST.FuncDec "+" [AST.StructT "Int", AST.StructT "Int", AST.StructT "Int"] [] AST.anyPosition]
+                        { funcDecs = [AST.FuncDec "+" [AST.StructT "Int" [], AST.StructT "Int" [], AST.StructT "Int" []] [] AST.anyPosition]
                         }
             return $ case result of
                 Left instructions -> Right instructions
@@ -356,6 +356,61 @@ spec = do
                 let main : IO = unsafePrint (add 1, 2.0)
                 |]
             compile prog `shouldThrow` (const True :: SomeException -> Bool)
+        it "Should compile generic trait with type parameters" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                trait Monad<T> = do
+                    bind :: Self -> (Any -> Self) -> Self
+                end
+                struct Optional = (value: Any)
+                impl Monad<Optional> for Optional = do
+                    bind Optional{value: x} f = f x
+                end
+                let main : IO = unsafePrint 42
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should error when impl type argument count mismatches trait generics" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                trait Monad<T> = do
+                    bind :: Self -> (Any -> Self) -> Self
+                end
+                struct Optional = (value: Any)
+                impl Monad<Optional, Int> for Optional = do
+                    bind Optional{value: x} f = f x
+                end
+                let main : IO = unsafePrint 42
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map (\(BytecodeCompiler.CompilerError msg _) -> msg) errors
+                    any ("type argument count mismatch" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure $ "Expected compilation error for type argument count mismatch, but got: " ++ show result
+        it "Should error when impl method not in trait" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                trait Monad<T> = do
+                    bind :: Self -> (Any -> Self) -> Self
+                end
+                struct Optional = (value: Any)
+                impl Monad<Optional> for Optional = do
+                    bind Optional{value: x} f = f x
+                    return x = Optional{value: x}
+                end
+                let main : IO = unsafePrint 42
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Method 'return' is not declared in trait 'Monad'" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected compilation error for method not in trait"
         it "Should compile generic function with struct types" $ do
             result <-
                 compile

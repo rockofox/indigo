@@ -374,9 +374,16 @@ validType =
                 keyword "Self"
                 return Self
             )
-        <|> ( do
+        <|> try
+            ( do
                 lookAhead $ satisfy isUpper
-                StructT <$> identifier
+                structName <- identifier
+                typeArgs <- optional $ do
+                    symbol "<"
+                    args <- sepBy1 validType (symbol ",") <?> "type arguments"
+                    symbol ">"
+                    return args
+                return $ StructT structName (fromMaybe [] typeArgs)
             )
         <?> "type"
 
@@ -574,6 +581,7 @@ struct = do
     start <- getOffset
     keyword "struct"
     name <- extra <?> "struct name"
+    generics <- fromMaybe [] <$> optional generic <?> "struct generics"
     symbol "="
     fields <- parens (structField `sepBy` symbol ",") <?> "struct fields"
     refinementSrc <- lookAhead $ optional $ do
@@ -586,7 +594,7 @@ struct = do
         keyword "is"
         sepBy extra (symbol ",") <?> "struct interfaces"
     end <- getOffset
-    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = False, structPos = Position (start, end)}
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = False, generics = generics, structPos = Position (start, end)}
   where
     structField = do
         fieldName <- identifier <?> "field name"
@@ -600,6 +608,7 @@ valueStruct = do
     _ <- lexeme $ try (string "value" *> notFollowedBy alphaNumChar)
     keyword "struct"
     name <- extra <?> "value struct name"
+    generics <- fromMaybe [] <$> optional generic <?> "value struct generics"
     symbol "="
     fields <- parens (structField `sepBy` symbol ",") <?> "value struct field"
     when (length fields /= 1) $ fail "value struct must have exactly one field"
@@ -613,7 +622,7 @@ valueStruct = do
         keyword "is"
         sepBy extra (symbol ",") <?> "struct interfaces"
     end <- getOffset
-    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = True, structPos = Position (start, end)}
+    return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = True, generics = generics, structPos = Position (start, end)}
   where
     structField = do
         fieldName <- identifier <?> "field name"
@@ -625,6 +634,11 @@ structLit :: Parser Expr
 structLit = do
     start <- getOffset
     name <- extra <?> "struct name"
+    typeArgs <- optional $ do
+        symbol "<"
+        args <- sepBy1 validType (symbol ",") <?> "type arguments"
+        symbol ">"
+        return args
     symbol "{"
     fields <-
         sepBy
@@ -637,7 +651,7 @@ structLit = do
             (symbol ",")
     symbol "}"
     end <- getOffset
-    return $ StructLit name fields (Position (start, end))
+    return $ StructLit name fields (fromMaybe [] typeArgs) (Position (start, end))
 
 arrayAccess :: Parser Expr
 arrayAccess = do
@@ -726,8 +740,8 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (Discard a _) = Discard (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (Import o f q a _) = Import o f q a anyPosition
     replacePositionWithAnyPosition (Ref a _) = Ref (replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (Struct n f r s i v _) = Struct n f (fmap replacePositionWithAnyPosition r) s i v anyPosition
-    replacePositionWithAnyPosition (StructLit n f _) = StructLit n (map (second replacePositionWithAnyPosition) f) anyPosition
+    replacePositionWithAnyPosition (Struct n f r s i v g _) = Struct n f (fmap replacePositionWithAnyPosition r) s i v g anyPosition
+    replacePositionWithAnyPosition (StructLit n f typeArgs _) = StructLit n (map (second replacePositionWithAnyPosition) f) typeArgs anyPosition
     replacePositionWithAnyPosition (StructAccess a b _) = StructAccess (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (ListLit a _) = ListLit (map replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (ListPattern a _) = ListPattern (map replacePositionWithAnyPosition a) anyPosition
@@ -743,8 +757,8 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (Cast a b _) = Cast (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (TypeLit type' _) = TypeLit type' anyPosition
     replacePositionWithAnyPosition (Flexible a _) = Flexible (replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (Trait name methods _) = Trait name (map replacePositionWithAnyPosition methods) anyPosition
-    replacePositionWithAnyPosition (Impl traitName f m _) = Impl traitName f (map replacePositionWithAnyPosition m) anyPosition
+    replacePositionWithAnyPosition (Trait name methods g _) = Trait name (map replacePositionWithAnyPosition methods) g anyPosition
+    replacePositionWithAnyPosition (Impl traitName traitTypeArgs f m _) = Impl traitName traitTypeArgs f (map replacePositionWithAnyPosition m) anyPosition
     replacePositionWithAnyPosition (StrictEval a _) = StrictEval (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (External n a _) = External n (map replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (ParenApply a b _) = ParenApply (replacePositionWithAnyPosition a) (map replacePositionWithAnyPosition b) anyPosition
@@ -827,6 +841,7 @@ trait = do
     start <- getOffset
     keyword "trait"
     name <- identifier <?> "trait name"
+    generics <- fromMaybe [] <$> optional generic <?> "trait generics"
     methods <-
         ( do
             symbol "="
@@ -838,13 +853,18 @@ trait = do
         )
             <|> return []
     end <- getOffset
-    return $ Trait name methods (Position (start, end))
+    return $ Trait name methods generics (Position (start, end))
 
 impl :: Parser Expr
 impl = do
     start <- getOffset
     keyword "impl"
     name <- identifier <?> "impl name"
+    traitTypeArgs <- optional $ do
+        symbol "<"
+        args <- sepBy1 validType (symbol ",") <?> "trait type arguments"
+        symbol ">"
+        return args
     symbol "for"
     for <- identifier <?> "impl for"
     methods <-
@@ -858,7 +878,7 @@ impl = do
         )
             <|> return []
     end <- getOffset
-    return $ Impl name for methods (Position (start, end))
+    return $ Impl name (fromMaybe [] traitTypeArgs) for methods (Position (start, end))
 
 external :: Parser Expr
 external = do
