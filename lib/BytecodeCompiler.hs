@@ -1150,7 +1150,8 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitPos}) 
                             r <- runRefinement rf sl
                             case r of
                                 Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
-                                _ -> return ()
+                                Just True -> return ()
+                                Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - struct fields contain variables without refinement guarantees") structLitPos
                         Nothing -> return ()
                 _ -> return ()
             Nothing -> return ()
