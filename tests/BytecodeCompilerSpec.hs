@@ -250,6 +250,21 @@ spec = do
                             then expectationFailure $ "Expected successful compilation, got refinement error: " ++ show errors
                             else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
                 Right _ -> return ()
+        it "Should compile successfully when struct literal contains function parameters" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                struct Age = (value: Int) satisfies (value >= 0)
+                let makeAge (x: Int): Age = Age{value: x}
+                let main : IO = println (makeAge 5)
+                |]
+            case result of
+                Left errors ->
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                     in if any ("Refinement failed" `isInfixOf`) errorMessages
+                            then expectationFailure $ "Expected successful compilation (refinement check should be skipped for function parameters), got refinement error: " ++ show errors
+                            else expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
     describe "Generics" $ do
         it "Should compile a simple generic function" $
             compile

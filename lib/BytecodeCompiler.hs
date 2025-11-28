@@ -1148,7 +1148,9 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitPos}) 
                     case refinement of
                         Just rf -> do
                             r <- runRefinement rf sl
-                            unless r $ cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
+                            case r of
+                                Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
+                                _ -> return ()
                         Nothing -> return ()
                 _ -> return ()
             Nothing -> return ()
@@ -1340,7 +1342,7 @@ extractFunctions = concatMap extractFunction
     extractFunction (Parser.DoBlock{doBlockExprs}) = extractFunctions doBlockExprs
     extractFunction _ = []
 
-runRefinement :: Parser.Expr -> Parser.Expr -> StateT (CompilerState a) IO Bool
+runRefinement :: Parser.Expr -> Parser.Expr -> StateT (CompilerState a) IO (Maybe Bool)
 runRefinement refinement value = do
     currentState <- get
     let structDef = case value of
@@ -1357,45 +1359,50 @@ runRefinement refinement value = do
     let referencedVars = nub $ extractVariables value
     let allLets = extractLets currentProgramExprs
     let neededLets = filter (\case Parser.Let{letName} -> letName `elem` referencedVars; _ -> False) allLets
-    let mainBody =
-            if null neededLets
-                then [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
-                else neededLets ++ [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
-    let progExprs =
-            maybeToList structDef
-                ++ functionDefs
-                ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition
-                   , Parser.FuncDef "__refinement" [Parser.Var "it" Parser.zeroPosition] transformedRefinement Parser.anyPosition
-                   , Parser.FuncDec "main" [Parser.StructT "IO"] [] Parser.anyPosition
-                   , Parser.FuncDef
-                        "main"
-                        []
-                        (Parser.DoBlock mainBody Parser.anyPosition)
-                        Parser.anyPosition
-                   ]
-    let prog = Parser.Program progExprs
-    let freshState = initCompilerState prog
-        extractedFuncDecs = filter (\case Parser.FuncDec{} -> True; _ -> False) functionDefs
-        stateWithContext =
-            freshState
-                { funcDecs = currentState.funcDecs ++ extractedFuncDecs ++ [Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition]
-                , structDecs = currentState.structDecs
-                , skipRefinementCheck = True
-                }
-    compiled <- liftIO $ evalStateT (compileProgram prog) stateWithContext
-    case compiled of
-        Right _ -> return False
-        Left bytecode -> do
-            let mainPc = locateLabel bytecode "main"
-            let vm = (initVM (V.fromList bytecode)){pc = mainPc, callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainPc, locals = []}], shouldExit = False, running = True}
-            result <- liftIO $ runVMVM vm
-            let finalStack = stack result
-            let isRunning = running result
-            if isRunning
-                then return False
-                else return $ case find (\case DBool _ -> True; _ -> False) finalStack of
-                    Just (DBool b) -> b
-                    _ -> False
+    let letNames = map (\case Parser.Let{letName} -> letName; _ -> "") neededLets
+    let unresolvedVars = filter (`notElem` letNames) referencedVars
+    if not (null unresolvedVars)
+        then return Nothing
+        else do
+            let mainBody =
+                    if null neededLets
+                        then [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
+                        else neededLets ++ [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
+            let progExprs =
+                    maybeToList structDef
+                        ++ functionDefs
+                        ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition
+                           , Parser.FuncDef "__refinement" [Parser.Var "it" Parser.zeroPosition] transformedRefinement Parser.anyPosition
+                           , Parser.FuncDec "main" [Parser.StructT "IO"] [] Parser.anyPosition
+                           , Parser.FuncDef
+                                "main"
+                                []
+                                (Parser.DoBlock mainBody Parser.anyPosition)
+                                Parser.anyPosition
+                           ]
+            let prog = Parser.Program progExprs
+            let freshState = initCompilerState prog
+                extractedFuncDecs = filter (\case Parser.FuncDec{} -> True; _ -> False) functionDefs
+                stateWithContext =
+                    freshState
+                        { funcDecs = currentState.funcDecs ++ extractedFuncDecs ++ [Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool"] [] Parser.anyPosition]
+                        , structDecs = currentState.structDecs
+                        , skipRefinementCheck = True
+                        }
+            compiled <- liftIO $ evalStateT (compileProgram prog) stateWithContext
+            case compiled of
+                Right _ -> return $ Just False
+                Left bytecode -> do
+                    let mainPc = locateLabel bytecode "main"
+                    let vm = (initVM (V.fromList bytecode)){pc = mainPc, callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainPc, locals = []}], shouldExit = False, running = True}
+                    result <- liftIO $ runVMVM vm
+                    let finalStack = stack result
+                    let isRunning = running result
+                    if isRunning
+                        then return $ Just False
+                        else return $ Just $ case find (\case DBool _ -> True; _ -> False) finalStack of
+                            Just (DBool b) -> b
+                            _ -> False
 
 createVirtualFunctions :: StateT (CompilerState a) IO ()
 createVirtualFunctions = do
