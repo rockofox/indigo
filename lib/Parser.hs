@@ -331,16 +331,40 @@ validType =
         <|> try
             ( do
                 parens $ do
-                    types <- sepBy1 validType (symbol ",")
-                    if length types >= 2
-                        then return $ Tuple types
-                        else fail "Tuple type must have at least 2 elements"
+                    firstType <- validType
+                    hasCommaAfterFirst <- optional (symbol ",")
+                    case hasCommaAfterFirst of
+                        Just _ -> do
+                            nextIsClose <- lookAhead (optional (symbol ")"))
+                            case nextIsClose of
+                                Just _ -> return $ Tuple [firstType]
+                                Nothing -> do
+                                    restTypes <- sepBy validType (symbol ",")
+                                    optional (symbol ",")
+                                    return $ Tuple (firstType : restTypes)
+                        Nothing -> fail "Tuple type must have at least 2 elements or a trailing comma for single-element tuple"
+            )
+        <|> try
+            ( do
+                parens $ do
+                    startsWithArrow <- optional (symbol "->")
+                    case startsWithArrow of
+                        Just _ -> do
+                            Fn [] <$> validType
+                        Nothing -> do
+                            firstType <- validType
+                            hasArrow <- optional (symbol "->")
+                            case hasArrow of
+                                Just _ -> do
+                                    restTypes <- sepBy validType (symbol "->")
+                                    let allTypes = firstType : restTypes
+                                        ret = last allTypes
+                                        args = init allTypes
+                                     in return $ Fn args ret
+                                Nothing -> fail "Not a function type"
             )
         <|> ( do
-                parens $ do
-                    args <- sepBy1 validType (symbol "->")
-                    let ret = last args
-                    return $ Fn args ret
+                parens validType
             )
         <|> ( do
                 squareBrackets $ List <$> validType
@@ -833,12 +857,23 @@ tupleLit :: Parser Expr
 tupleLit = do
     start <- getOffset
     symbol "("
-    exprs <- sepBy1 expr (symbol ",")
-    symbol ")"
-    end <- getOffset
-    if length exprs >= 2
-        then return $ TupleLit exprs (Position (start, end))
-        else fail "Tuple must have at least 2 elements"
+    firstExpr <- expr
+    hasCommaAfterFirst <- optional (symbol ",")
+    case hasCommaAfterFirst of
+        Just _ -> do
+            nextIsClose <- lookAhead (optional (symbol ")"))
+            case nextIsClose of
+                Just _ -> do
+                    symbol ")"
+                    end <- getOffset
+                    return $ TupleLit [firstExpr] (Position (start, end))
+                Nothing -> do
+                    restExprs <- sepBy expr (symbol ",")
+                    optional (symbol ",")
+                    symbol ")"
+                    end <- getOffset
+                    return $ TupleLit (firstExpr : restExprs) (Position (start, end))
+        Nothing -> fail "Tuple must have at least 2 elements or a trailing comma for single-element tuple"
 
 term :: Parser Expr
 term =

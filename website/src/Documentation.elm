@@ -281,16 +281,26 @@ viewTuples onLoadCode =
     println point
     println person
 end""" onLoadCode True "indigo"
-        , p [] [ text "A tuple must have at least 2 elements. Single-element parentheses are treated as parenthesized expressions, not tuples." ]
+        , p [] [ text "Multi-element tuples require at least 2 elements. Single-element tuples use a trailing comma syntax:" ]
+        , viewCodeBlock """let main: IO = do
+    let single = (42,)
+    let double = (10, 20)
+    println single.0
+    println double.0
+    println double.1
+end""" onLoadCode True "indigo"
+        , p [] [ text "Note that (1) is treated as a parenthesized expression (just the value 1), while (1,) is a single-element tuple. The trailing comma distinguishes single-element tuples from parenthesized expressions." ]
         , h3 [] [ text "Tuple Types" ]
         , p [] [ text "Tuple types are specified using parentheses with type names:" ]
         , viewCodeBlock """let point: (Int, Int) = (10, 20)
-let person: (String, Int, Bool) = ("Alice", 30, True)
-let main: IO = do
+    let person: (String, Int, Bool) = ("Alice", 30, True)
+    let single: (Int,) = (42,)
+    let main: IO = do
     println point
     println person
+    println single.0
 end""" onLoadCode True "indigo"
-        , p [] [ text "Each position in the tuple type corresponds to the type of the value at that position." ]
+        , p [] [ text "Each position in the tuple type corresponds to the type of the value at that position. Single-element tuple types also use the trailing comma syntax: (Int,) for a tuple containing a single Int." ]
         , h3 [] [ text "Accessing Tuple Elements" ]
         , p [] [ text "Tuple elements are accessed using dot notation with zero-based numeric indices:" ]
         , viewCodeBlock """let main: IO = do
