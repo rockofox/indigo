@@ -1,0 +1,17 @@
+let main : IO = do
+  let AF_INET = 2
+  let SOCK_STREAM = 1
+  let IPPROTO_TCP = 0
+  
+  let server_fd_io = socket AF_INET, SOCK_STREAM, IPPROTO_TCP
+  let server_fd = server_fd_io.inner
+  bindSocket server_fd, "0.0.0.0", 8080
+  listen server_fd, 5
+  println "HTTP server listening on port 8080"
+  
+  let client_fd = unsafeAccept server_fd
+  let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!"
+  send client_fd, response, 0
+  closeSocket client_fd
+  closeSocket server_fd
+end

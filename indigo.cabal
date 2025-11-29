@@ -47,7 +47,8 @@ library
         vector,
         monad-loops,
         filepath >=1.4,
-        random
+        random,
+        network >=3.0
 
     if flag(ffi)
         cpp-options:   -DFFI

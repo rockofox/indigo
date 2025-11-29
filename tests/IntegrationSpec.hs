@@ -57,7 +57,7 @@ compileAndRun prog = do
                                 Just sepPc -> sepPc + 1
                                 Nothing -> 0
                         else mainLabel
-            vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
+            vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
             pure $ output $ ioBuffer vm
 
 spec = do

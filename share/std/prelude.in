@@ -267,3 +267,75 @@ safeDrop n xs = do
     drop n, xs
   end
 end
+
+openFile :: String -> String -> IO
+openFile path mode = do
+  let fd = unsafeOpenFile path, mode
+  IO{inner: fd}
+end
+
+readFile :: Int -> Int -> IO
+readFile fd size = do
+  let content = unsafeReadFile fd, size
+  IO{inner: content}
+end
+
+writeFile :: Int -> String -> IO
+writeFile fd content = do
+  let bytes = unsafeWriteFile fd, content
+  IO{inner: bytes}
+end
+
+closeFile :: Int -> IO
+closeFile fd = do
+  unsafeCloseFile fd
+  IO{inner: 0}
+end
+
+socket :: Int -> Int -> Int -> IO
+socket domain socktype protocol = do
+  let fd = unsafeSocket domain, socktype, protocol
+  IO{inner: fd}
+end
+
+bindSocket :: Int -> String -> Int -> IO
+bindSocket fd host port = do
+  unsafeBind fd, host, port
+  IO{inner: 0}
+end
+
+listen :: Int -> Int -> IO
+listen fd backlog = do
+  unsafeListen fd, backlog
+  IO{inner: 0}
+end
+
+accept :: Int -> IO
+accept fd = do
+  let client_fd = unsafeAccept fd
+  IO{inner: client_fd}
+end
+
+connect :: Int -> String -> Int -> IO
+connect fd host port = do
+  unsafeConnect fd, host, port
+  IO{inner: 0}
+end
+
+send :: Int -> String -> Int -> IO
+send fd data flags = do
+  let bytes = unsafeSend fd, data, flags
+  IO{inner: bytes}
+end
+
+recv :: Int -> Int -> Int -> IO
+recv fd size flags = do
+  let data = unsafeRecv fd, size, flags
+  IO{inner: data}
+end
+
+closeSocket :: Int -> IO
+closeSocket fd = do
+  unsafeCloseSocket fd
+  IO{inner: 0}
+end

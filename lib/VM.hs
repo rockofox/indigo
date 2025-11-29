@@ -8,6 +8,7 @@
 
 module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, runVMVM, VM (..), Instruction (..), Program, Action (..), Data (..), StackFrame (..), IOBuffer (..), IOMode (..)) where
 
+import Control.Exception (IOException, try)
 import Control.Monad
 import Control.Monad.RWS hiding (local)
 import Control.Monad.State.Lazy
@@ -32,9 +33,11 @@ import Foreign.LibFFI.Internal (CType)
 #endif
 
 import Data.Binary qualified (get, put)
+import Data.ByteString.Char8 (pack, unpack)
 import Data.Char (chr, ord)
 import Data.List qualified
 import Data.Map ((!), (!?))
+import Data.Map.Strict qualified as Map
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
 import Foreign.C.Types (CChar, CFloat, CInt, CUChar)
@@ -44,7 +47,12 @@ import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
+import Network.Socket (AddrInfo (..), AddrInfoFlag (..), Family (..), ProtocolNumber (..), SockAddr, Socket, SocketType (..), addrAddress, defaultHints, getAddrInfo)
+import Network.Socket qualified as NS
+import Network.Socket.ByteString qualified as NSB
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
+import System.IO qualified as SIO
+import Unsafe.Coerce (unsafeCoerce)
 import Util (showSanitized)
 
 data Instruction
@@ -176,7 +184,7 @@ data Instruction
       Exit
     deriving (Show, Eq, Generic)
 
-data Action = Print | GetLine | GetChar | Random deriving (Show, Eq, Generic)
+data Action = Print | GetLine | GetChar | Random | OpenFile | ReadFile | WriteFile | CloseFile | Socket | Bind | Listen | Accept | Connect | Send | Recv | CloseSocket deriving (Show, Eq, Generic)
 
 data Data
     = DInt Int
@@ -255,6 +263,10 @@ data VM = VM
     , ioBuffer :: IOBuffer
     , sideStack :: [Data]
     , shouldExit :: Bool
+    , sockets :: Map.Map Int Socket
+    , nextSocketId :: Int
+    , fileHandles :: Map.Map Int SIO.Handle
+    , nextHandleId :: Int
     }
     deriving (Show)
 
@@ -263,7 +275,7 @@ data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True}
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
 
 type Program = V.Vector Instruction
 
@@ -278,6 +290,9 @@ tailOrNothing (_ : xs) = Just xs
 headOrError :: String -> [a] -> a
 headOrError err [] = error err
 headOrError _ (x : _) = x
+
+tryIO :: IO a -> IO (Either IOException a)
+tryIO = try
 
 stackPush :: Data -> StateT VM IO ()
 stackPush d = do
@@ -721,6 +736,194 @@ runInstruction (Builtin GetChar) = do
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)
     stackPush $ DFloat num
+-- File operations
+runInstruction (Builtin OpenFile) = do
+    [mode, path] <- stackPopN 2
+    case (path, mode) of
+        (DString p, DString m) -> do
+            let iomode = case m of
+                    "r" -> SIO.ReadMode
+                    "w" -> SIO.WriteMode
+                    "a" -> SIO.AppendMode
+                    "r+" -> SIO.ReadWriteMode
+                    "w+" -> SIO.ReadWriteMode
+                    "a+" -> SIO.ReadWriteMode
+                    _ -> SIO.ReadMode
+            result <- liftIO $ tryIO $ SIO.openFile p iomode
+            case result of
+                Right handle -> do
+                    vm <- get
+                    let handleId = nextHandleId vm
+                    modify $ \v -> v{fileHandles = Map.insert handleId handle (fileHandles v), nextHandleId = handleId + 1}
+                    stackPush $ DInt handleId
+                Left _ -> stackPush $ DInt (-1)
+        _ -> error "OpenFile: expected String path and String mode"
+runInstruction (Builtin ReadFile) = do
+    [fd, size] <- stackPopN 2
+    case (fd, size) of
+        (DInt f, DInt s) -> do
+            vm <- get
+            case Map.lookup f (fileHandles vm) of
+                Just handle -> do
+                    result <- liftIO $ tryIO $ do
+                        let readChars :: Int -> [Char] -> IO String
+                            readChars n acc
+                                | n <= 0 = return $ reverse acc
+                                | otherwise = do
+                                    eof <- SIO.hIsEOF handle
+                                    if eof
+                                        then return $ reverse acc
+                                        else do
+                                            char <- SIO.hGetChar handle
+                                            readChars (n - 1) (char : acc)
+                        readChars (fromIntegral s) []
+                    case result of
+                        Right contents -> stackPush $ DString contents
+                        Left _ -> stackPush $ DString ""
+                Nothing -> error "File handle not found"
+        _ -> error "ReadFile: expected Int fd and Int size"
+runInstruction (Builtin WriteFile) = do
+    [fd, content] <- stackPopN 2
+    case (fd, content) of
+        (DInt f, DString c) -> do
+            vm <- get
+            case Map.lookup f (fileHandles vm) of
+                Just handle -> do
+                    result <- liftIO $ tryIO $ SIO.hPutStr handle c
+                    case result of
+                        Right _ -> stackPush $ DInt $ length c
+                        Left _ -> stackPush $ DInt (-1)
+                Nothing -> error "File handle not found"
+        _ -> error "WriteFile: expected Int fd and String content"
+runInstruction (Builtin CloseFile) = do
+    fd <- stackPop
+    case fd of
+        DInt f -> do
+            vm <- get
+            case Map.lookup f (fileHandles vm) of
+                Just handle -> do
+                    _ <- liftIO $ tryIO $ SIO.hClose handle
+                    modify $ \v -> v{fileHandles = Map.delete f (fileHandles v)}
+                    return ()
+                Nothing -> error "File handle not found"
+        _ -> error "CloseFile: expected Int fd"
+-- Socket operations
+runInstruction (Builtin Socket) = do
+    [domain, socktype, protocol] <- stackPopN 3
+    case (domain, socktype, protocol) of
+        (DInt d, DInt t, DInt p) -> do
+            result <- liftIO $ tryIO $ NS.socket (unsafeCoerce (fromIntegral d :: CInt) :: Family) (unsafeCoerce (fromIntegral t :: CInt) :: SocketType) (unsafeCoerce (fromIntegral p :: CInt) :: ProtocolNumber)
+            case result of
+                Right sock -> do
+                    vm <- get
+                    let sockId = nextSocketId vm
+                    modify $ \v -> v{sockets = Map.insert sockId sock (sockets v), nextSocketId = sockId + 1}
+                    stackPush $ DInt sockId
+                Left _ -> stackPush $ DInt (-1)
+        _ -> error "Socket: expected Int domain, Int type, Int protocol"
+runInstruction (Builtin Bind) = do
+    [fd, host, port] <- stackPopN 3
+    case (fd, host, port) of
+        (DInt f, DString h, DInt p) -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    let host' = if h == "" || h == "0.0.0.0" then Nothing else Just h
+                    let hints = defaultHints{addrFlags = [AI_PASSIVE], addrFamily = AF_INET}
+                    addrs <- liftIO $ getAddrInfo (Just hints) host' (Just $ show p)
+                    case addrs of
+                        (addr : _) -> do
+                            result <- liftIO $ tryIO $ NS.bind sock (addrAddress addr)
+                            case result of
+                                Right _ -> return ()
+                                Left e -> error $ "Bind failed: " ++ show e
+                        [] -> error "No address found"
+                Nothing -> error "Socket not found"
+        _ -> error "Bind: expected Int fd, String host, Int port"
+runInstruction (Builtin Listen) = do
+    [fd, backlog] <- stackPopN 2
+    case (fd, backlog) of
+        (DInt f, DInt b) -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    result <- liftIO $ tryIO $ NS.listen sock (fromIntegral b)
+                    case result of
+                        Right _ -> return ()
+                        Left _ -> error "Listen failed"
+                Nothing -> error "Socket not found"
+        _ -> error "Listen: expected Int fd and Int backlog"
+runInstruction (Builtin Accept) = do
+    fd <- stackPop
+    case fd of
+        DInt f -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    result <- liftIO $ tryIO $ NS.accept sock
+                    case result of
+                        Right (clientSock, _) -> do
+                            let sockId = nextSocketId vm
+                            modify $ \v -> v{sockets = Map.insert sockId clientSock (sockets v), nextSocketId = sockId + 1}
+                            stackPush $ DInt sockId
+                        Left _ -> stackPush $ DInt (-1)
+                Nothing -> error "Socket not found"
+        _ -> error "Accept: expected Int fd"
+runInstruction (Builtin Connect) = do
+    [fd, host, port] <- stackPopN 3
+    case (fd, host, port) of
+        (DInt f, DString h, DInt p) -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    addrs <- liftIO $ getAddrInfo Nothing (Just h) (Just $ show p)
+                    case addrs of
+                        (addr : _) -> do
+                            result <- liftIO $ tryIO $ NS.connect sock (addrAddress addr)
+                            case result of
+                                Right _ -> return ()
+                                Left _ -> error "Connect failed"
+                        [] -> error "No address found"
+                Nothing -> error "Socket not found"
+        _ -> error "Connect: expected Int fd, String host, Int port"
+runInstruction (Builtin Send) = do
+    [fd, data', flags] <- stackPopN 3
+    case (fd, data', flags) of
+        (DInt f, DString d, DInt fl) -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    result <- liftIO $ tryIO $ NSB.send sock (pack d)
+                    case result of
+                        Right bytes -> stackPush $ DInt $ fromIntegral bytes
+                        Left _ -> stackPush $ DInt (-1)
+                Nothing -> error "Socket not found"
+        _ -> error "Send: expected Int fd, String data, Int flags"
+runInstruction (Builtin Recv) = do
+    [fd, size, flags] <- stackPopN 3
+    case (fd, size, flags) of
+        (DInt f, DInt s, DInt fl) -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    result <- liftIO $ tryIO $ NSB.recv sock (fromIntegral s)
+                    case result of
+                        Right bytes -> stackPush $ DString $ unpack bytes
+                        Left _ -> stackPush $ DString ""
+                Nothing -> error "Socket not found"
+        _ -> error "Recv: expected Int fd, Int size, Int flags"
+runInstruction (Builtin CloseSocket) = do
+    fd <- stackPop
+    case fd of
+        DInt f -> do
+            vm <- get
+            case Map.lookup f (sockets vm) of
+                Just sock -> do
+                    _ <- liftIO $ tryIO $ NS.close sock
+                    modify $ \v -> v{sockets = Map.delete f (sockets v)}
+                    return ()
+                Nothing -> error "Socket not found"
+        _ -> error "CloseSocket: expected Int fd"
 runInstruction Exit = do
     modify $ \vm -> vm{running = False}
     actuallyExit <- gets shouldExit
