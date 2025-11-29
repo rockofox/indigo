@@ -111,10 +111,10 @@ spec = do
                 `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [], isValueStruct = False, generics = [], structPos = anyPosition}])
         it "Can define with is" $ do
             parseProgram "struct Teacher = () is Person" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person"], isValueStruct = False, generics = [], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [StructT "Person" []], isValueStruct = False, generics = [], structPos = anyPosition}])
         it "Can define with multiple is" $ do
             parseProgram "struct Teacher = () is Person, Employee" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = ["Person", "Employee"], isValueStruct = False, generics = [], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "Teacher", fields = [], refinement = Nothing, refinementSrc = "", is = [StructT "Person" [], StructT "Employee" []], isValueStruct = False, generics = [], structPos = anyPosition}])
         it "Should parse generic struct" $ do
             parseProgram "struct Example<N: Number> = (content: N)" parserCompilerFlags
                 `shouldBe` Right
@@ -134,7 +134,7 @@ spec = do
                 _ -> expectationFailure $ "Failed to parse value struct with refinement: " ++ show result
         it "Can define value struct with is clause" $ do
             parseProgram "value struct PositiveInt = (num: Int) is Printable" parserCompilerFlags
-                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int" [])], refinement = Nothing, refinementSrc = "", is = ["Printable"], isValueStruct = True, generics = [], structPos = anyPosition}])
+                `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int" [])], refinement = Nothing, refinementSrc = "", is = [StructT "Printable" []], isValueStruct = True, generics = [], structPos = anyPosition}])
     describe "Traits" $ do
         it "Should parse generic trait" $ do
             parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend" parserCompilerFlags
@@ -155,7 +155,7 @@ spec = do
                         [ Impl
                             { trait = "Show"
                             , traitTypeArgs = []
-                            , for = "Point"
+                            , for = StructT "Point" []
                             , methods =
                                 [ FuncDef{name = "show", args = [Var{varName = "point", varPos = anyPosition}], body = parseFreeUnsafe "\"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"", funcDefPos = anyPosition}
                                 ]
@@ -186,7 +186,7 @@ spec = do
         it "Should parse impl with generic struct type argument" $ do
             parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend\nstruct Option<T> = (value: T)\nstruct Optional = (value: Any)\nimpl Monad<Option<Int>> for Optional = do\n  bind x f = f x.value\nend" parserCompilerFlags
                 `shouldSatisfy` \case
-                    Right (Program [Trait{name = "Monad"}, Struct{name = "Option", generics = [_]}, Struct{name = "Optional"}, Impl{trait = "Monad", traitTypeArgs = [StructT "Option" [StructT "Int" []]], for = "Optional"}]) -> True
+                    Right (Program [Trait{name = "Monad"}, Struct{name = "Option", generics = [_]}, Struct{name = "Optional"}, Impl{trait = "Monad", traitTypeArgs = [StructT "Option" [StructT "Int" []]], for = StructT "Optional" []}]) -> True
                     _ -> False
     describe "Gravis" $ do
         it "Should parse operators escaped using gravis in dec correctly" $ do

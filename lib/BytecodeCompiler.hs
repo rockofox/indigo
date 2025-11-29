@@ -580,7 +580,7 @@ constructFQName' funcName args = return $ funcName ++ ":" ++ intercalate "," (ma
 implsFor :: String -> StateT (CompilerState a) IO [String]
 implsFor structName = do
     impls' <- gets impls
-    let impls'' = filter (\x -> Parser.for x == structName) impls'
+    let impls'' = filter (\x -> structNameFromType (Parser.for x) == structName) impls'
     return $ map Parser.trait impls''
 
 methodsForTrait :: String -> StateT (CompilerState a) IO [String]
@@ -593,7 +593,7 @@ methodsForTrait traitName = do
 methodsForStruct :: String -> StateT (CompilerState a) IO [String]
 methodsForStruct structName = do
     impls' <- gets impls
-    let impls'' = filter (\x -> Parser.for x == structName) impls'
+    let impls'' = filter (\x -> structNameFromType (Parser.for x) == structName) impls'
     let methods = concatMap Parser.methods impls''
     return $ map Parser.name methods
 
@@ -621,6 +621,34 @@ typeToString (Parser.StructT x typeArgs)
     | null typeArgs = x
     | otherwise = x ++ "<" ++ intercalate ", " (map typeToString typeArgs) ++ ">"
 typeToString x = show x
+
+structNameFromType :: Parser.Type -> String
+structNameFromType (Parser.StructT name _) = name
+structNameFromType _ = error "structNameFromType: expected StructT"
+
+validateTypeParameters :: [String] -> Parser.Type -> Parser.Position -> String -> StateT (CompilerState a) IO ()
+validateTypeParameters validGenericNames typeArg pos context = do
+    structDecs' <- gets structDecs
+    traits' <- gets traits
+    let knownStructNames = map (\case Parser.Struct{name = n} -> n; _ -> "") structDecs'
+    let knownTraitNames = map (\case Parser.Trait{name = n} -> n; _ -> "") traits'
+    let knownTypeNames = knownStructNames ++ knownTraitNames
+    let builtInTypes = ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "IO", "None"]
+    let validateTypeArg typeArg' = case typeArg' of
+            Parser.Any -> True
+            Parser.Unknown -> True
+            Parser.None -> True
+            Parser.Self -> True
+            Parser.StructT argName [] -> argName `elem` validGenericNames || argName `elem` builtInTypes || argName `elem` knownTypeNames
+            Parser.StructT _ nestedArgs -> all validateTypeArg nestedArgs
+            Parser.List nested -> validateTypeArg nested
+            Parser.Tuple nested -> all validateTypeArg nested
+            Parser.Fn args ret -> all validateTypeArg (args ++ [ret])
+    unless (validateTypeArg typeArg) $ do
+        let typeArgStr = case typeArg of
+                Parser.StructT name' [] -> name'
+                _ -> typeToString typeArg
+        cerror ("Invalid type parameter '" ++ typeArgStr ++ "' in " ++ context ++ ". Type parameters must be either concrete types or match valid generic parameters: " ++ show validGenericNames) pos
 
 typesEqual :: Parser.Type -> Parser.Type -> Bool
 typesEqual (Parser.StructT x xArgs) (Parser.StructT y yArgs) = x == y && xArgs == yArgs
@@ -992,7 +1020,10 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                                 ++ [ LLoad funcName
                                    , CallS
                                    ]
-compileExpr fd@(Parser.FuncDec{}) _ = do
+compileExpr fd@(Parser.FuncDec{name, types, generics, funcDecPos}) _ = do
+    let funcGenericNames = map (\(Parser.GenericExpr n _) -> n) generics
+    forM_ types $ \type' -> do
+        validateTypeParameters funcGenericNames type' funcDecPos ("function declaration " ++ name)
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
 compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
@@ -1248,17 +1279,28 @@ compileExpr (Parser.Cast{castExpr, castType, castPos}) expectedType = do
     compileType (Parser.TupleLit{tupleLitExprs}) = concatMap compileType tupleLitExprs ++ [PackList $ length tupleLitExprs]
     compileType (Parser.Var{}) = [Push DNone]
     compileType x = error $ "Cannot cast to type " ++ show x
-compileExpr st@(Parser.Struct{name = structName, fields, is, generics}) expectedType = do
+compileExpr st@(Parser.Struct{name = structName, fields, is, generics, structPos}) expectedType = do
     modify (\s -> s{structDecs = st : structDecs s})
     mapM_ createFieldTrait fields
-    mapM_ ((`compileExpr` expectedType) . (\t -> Parser.Impl{trait = t, traitTypeArgs = [], for = structName, methods = [], implPos = anyPosition})) is
+    let structGenericNames = map (\(Parser.GenericExpr n _) -> n) generics
+    mapM_
+        ( \t -> do
+            let (traitName, traitTypeArgs) = case t of
+                    Parser.StructT name args -> (name, args)
+                    _ -> error "Expected StructT in is clause"
+            forM_ traitTypeArgs $ \typeArg -> do
+                validateTypeParameters structGenericNames typeArg structPos ("trait " ++ traitName ++ " for struct " ++ structName)
+            _ <- compileExpr (Parser.Impl{trait = traitName, traitTypeArgs = traitTypeArgs, for = Parser.StructT structName [], methods = [], implPos = anyPosition}) expectedType
+            return ()
+        )
+        is
     return []
   where
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
         let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}
-        let impl = Parser.Impl{trait = traitName, traitTypeArgs = [], for = Parser.name st, methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
+        let impl = Parser.Impl{trait = traitName, traitTypeArgs = [], for = Parser.StructT (Parser.name st) [], methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
         _ <- compileExpr trait Parser.Any
         _ <- compileExpr impl Parser.Any
         return ()
@@ -1275,7 +1317,10 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                         if null structGenerics || null structLitTypeArgs
                             then []
                             else zip (map (\(Parser.GenericExpr n _) -> n) structGenerics) structLitTypeArgs
+                let structGenericNames = map (\(Parser.GenericExpr n _) -> n) structGenerics
                 unless (null structLitTypeArgs) $ do
+                    forM_ structLitTypeArgs $ \typeArg -> do
+                        validateTypeParameters structGenericNames typeArg structLitPos ("struct literal " ++ structLitName)
                     forM_ (zip structGenerics structLitTypeArgs) $ \(Parser.GenericExpr genName genConstraint, typeArg) -> do
                         case genConstraint of
                             Just constraint -> do
@@ -1357,12 +1402,19 @@ compileExpr (Parser.Trait{name, methods, generics}) expectedType = do
     mapM_ (`compileExpr` expectedType) methods'
     return []
 compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expectedType = do
+    let forStructName = structNameFromType for
+    structDecs' <- gets structDecs
+    let forStructGenerics = case find (\case Parser.Struct{name = name'} -> name' == forStructName; _ -> False) structDecs' of
+            Just (Parser.Struct{generics = gs}) -> map (\(Parser.GenericExpr n _) -> n) gs
+            _ -> []
     trait' <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == trait) traits'
     let traitGenerics = Parser.generics trait'
     when (not (null traitGenerics) && length traitTypeArgs /= length traitGenerics) $ do
-        cerror ("Trait type argument count mismatch for impl " ++ trait ++ " for " ++ for ++ ": expected " ++ show (length traitGenerics) ++ ", got " ++ show (length traitTypeArgs)) implPos
+        cerror ("Trait type argument count mismatch for impl " ++ trait ++ " for " ++ typeToString for ++ ": expected " ++ show (length traitGenerics) ++ ", got " ++ show (length traitTypeArgs)) implPos
     when (null traitGenerics && not (null traitTypeArgs)) $ do
         cerror ("Trait '" ++ trait ++ "' has no type parameters, but impl provides type arguments") implPos
+    forM_ traitTypeArgs $ \typeArg -> do
+        validateTypeParameters forStructGenerics typeArg implPos ("impl " ++ trait ++ " for " ++ typeToString for)
     let genericSubstitutions =
             if null traitGenerics || null traitTypeArgs
                 then []
@@ -1373,7 +1425,8 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
                 ( \case
                     Parser.FuncDef{name = name', args, body, funcDefPos} -> do
                         let traitTypeArgsStr = if null traitTypeArgs then "" else "<" ++ intercalate "," (map typeToString traitTypeArgs) ++ ">"
-                        let fullyQualifiedName = trait ++ traitTypeArgsStr ++ "." ++ for ++ "::" ++ name'
+                        let forTypeStr = typeToString for
+                        let fullyQualifiedName = trait ++ traitTypeArgsStr ++ "." ++ forTypeStr ++ "::" ++ name'
                         let dec = find (\x -> Parser.name x == name') (Parser.methods trait')
                         case dec of
                             Nothing -> do
@@ -1386,7 +1439,7 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
                                             else map (`substituteGenerics` genericSubstitutions) (Parser.types dec')
                                 let newDec = Parser.FuncDec{name = fullyQualifiedName, types = unself substitutedTypes for, generics = Parser.generics dec', funcDecPos = anyPosition}
                                 _ <- compileExpr newDec Parser.Any
-                                modify (\s -> s{functionsByTrait = (for, name', fullyQualifiedName, newDec) : functionsByTrait s})
+                                modify (\s -> s{functionsByTrait = (forStructName, name', fullyQualifiedName, newDec) : functionsByTrait s})
                                 return $ Just $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body, funcDefPos = anyPosition}
                     _ -> error "Expected FuncDef in Impl methods"
                 )
@@ -1395,8 +1448,8 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
     mapM_ (`compileExpr` expectedType) methods'
     return []
   where
-    unself :: [Parser.Type] -> String -> [Parser.Type]
-    unself types self = map (\case Parser.Self -> Parser.StructT self []; x -> x) types
+    unself :: [Parser.Type] -> Parser.Type -> [Parser.Type]
+    unself types selfType = map (\case Parser.Self -> selfType; x -> x) types
 compileExpr (Parser.Lambda{lambdaArgs, lambdaBody}) expectedType = do
     fId <- allocId
     curCon <- gets currentContext
@@ -1603,7 +1656,7 @@ createVirtualFunctions = do
         let methods = Parser.methods trait
         let fors = map Parser.for impl
         mapM_ (\method -> createBaseDef method trait fors) methods
-    createBaseDef :: Parser.Expr -> Parser.Expr -> [String] -> StateT (CompilerState a) IO ()
+    createBaseDef :: Parser.Expr -> Parser.Expr -> [Parser.Type] -> StateT (CompilerState a) IO ()
     createBaseDef (Parser.FuncDec{name, types = typess}) trait fors = do
         let traitName = Parser.name trait
         impls' <- gets impls
@@ -1611,13 +1664,15 @@ createVirtualFunctions = do
         let body =
                 Label funame
                     : concatMap
-                        ( \for ->
-                            let implForFor = find (\impl -> Parser.for impl == for && Parser.trait impl == traitName) impls'
+                        ( \forType ->
+                            let forStructName = structNameFromType forType
+                                implForFor = find (\impl -> structNameFromType (Parser.for impl) == forStructName && Parser.trait impl == traitName) impls'
                              in case implForFor of
                                     Just impl ->
                                         let traitTypeArgs = Parser.traitTypeArgs impl
                                             traitTypeArgsStr = if null traitTypeArgs then "" else "<" ++ intercalate "," (map typeToString traitTypeArgs) ++ ">"
-                                         in [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery for, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ traitTypeArgsStr ++ "." ++ for ++ "::" ++ name)]
+                                            implForTypeStr = typeToString (Parser.for impl)
+                                         in [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery forStructName, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ traitTypeArgsStr ++ "." ++ implForTypeStr ++ "::" ++ name)]
                                     Nothing -> []
                         )
                         fors

@@ -97,17 +97,17 @@ spec = do
             do
                 compileAndRun
                     [r|
-                bind :: Optional -> Any -> Any
-                bind Some{value: x} f = f x
+                bind :: Any -> Any -> Any
+                bind Some<Int>{value: x} f = f x
                 bind None{} f = None{}
                 bind _ = "Error: Invalid argument to bind."
                 
                 let main : IO = do
-                    println (bind Some{value: 5}, \x -> x + 1)
+                    println (bind Some<Int>{value: 5}, \x -> x + 1)
                     println (bind None{}, \x -> x + 1)
                 end
             |]
-                `shouldReturn` "6\nNone{__traits: [Optional]}\n"
+                `shouldReturn` "6\nNone{__traits: [Monad,Optional]}\n"
         it "Handles multiple variables correctly" $ do
             compileAndRun
                 [r|

@@ -40,7 +40,7 @@ data Expr
     | Discard {discardExpr :: Expr, discardPos :: Position}
     | Import {objects :: [String], from :: String, qualified :: Bool, as :: Maybe String, importPos :: Position}
     | Ref {refExpr :: Expr, refPos :: Position}
-    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [String], isValueStruct :: Bool, generics :: [GenericExpr], structPos :: Position}
+    | Struct {name :: String, fields :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, is :: [Type], isValueStruct :: Bool, generics :: [GenericExpr], structPos :: Position}
     | StructLit {structLitName :: String, structLitFields :: [(String, Expr)], structLitTypeArgs :: [Type], structLitPos :: Position}
     | StructAccess {structAccessStruct :: Expr, structAccessField :: Expr, structAccessPos :: Position}
     | ListLit {listLitExprs :: [Expr], listLitPos :: Position}
@@ -58,7 +58,7 @@ data Expr
     | TypeLit {typeLitType :: Type, typeLitPos :: Position}
     | Flexible {flexibleExpr :: Expr, flexiblePos :: Position}
     | Trait {name :: String, methods :: [Expr], generics :: [GenericExpr], traitPos :: Position}
-    | Impl {trait :: String, traitTypeArgs :: [Type], for :: String, methods :: [Expr], implPos :: Position}
+    | Impl {trait :: String, traitTypeArgs :: [Type], for :: Type, methods :: [Expr], implPos :: Position}
     | StrictEval {strictEvalExpr :: Expr, strictEvalPos :: Position}
     | External {externalName :: String, externalArgs :: [Expr], externalPos :: Position}
     | CharLit {charValue :: Char, charPos :: Position}

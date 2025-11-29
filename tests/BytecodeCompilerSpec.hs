@@ -411,6 +411,141 @@ spec = do
                     any ("Method 'return' is not declared in trait 'Monad'" `isInfixOf`) errorMessages
                         `shouldBe` True
                 Right _ -> expectationFailure "Expected compilation error for method not in trait"
+        describe "Type parameter validation" $ do
+            it "Should error on invalid type parameter in struct is clause" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Optional<T>
+                    struct None = () is Optional<T>
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> do
+                        let errorMessages = map BytecodeCompiler.errorMessage errors
+                        any ("Invalid type parameter" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                        any ("struct None" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                    Right _ -> expectationFailure "Expected compilation error for invalid type parameter in is clause"
+            it "Should allow valid type parameter in struct is clause" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Optional<T>
+                    struct Some<T> = (value: T) is Optional<T>
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                    Right _ -> return ()
+            it "Should error on invalid type parameter in struct literal" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    struct Some<T> = (value: T)
+                    let main : IO = do
+                        let x = Some<U>{value: 42}
+                        unsafePrint x
+                    end
+                    |]
+                case result of
+                    Left errors -> do
+                        let errorMessages = map BytecodeCompiler.errorMessage errors
+                        any ("Invalid type parameter" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                        any ("struct literal Some" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                    Right _ -> expectationFailure "Expected compilation error for invalid type parameter in struct literal"
+            it "Should allow valid type parameter in struct literal" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    struct Some<T> = (value: T)
+                    let main : IO = do
+                        let x = Some<Int>{value: 42}
+                        unsafePrint x
+                    end
+                    |]
+                case result of
+                    Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                    Right _ -> return ()
+            it "Should error on invalid type parameter in impl statement" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Monad<T> = do
+                        bind :: Self -> (Any -> Self) -> Self
+                    end
+                    struct Optional = (value: Any)
+                    impl Monad<T> for Optional = do
+                        bind x f = f x
+                    end
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> do
+                        let errorMessages = map BytecodeCompiler.errorMessage errors
+                        any ("Invalid type parameter" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                        any ("impl Monad" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                    Right _ -> expectationFailure "Expected compilation error for invalid type parameter in impl"
+            it "Should allow valid type parameter in impl statement" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Monad<T> = do
+                        bind :: Self -> (Any -> Self) -> Self
+                    end
+                    struct Optional = (value: Any)
+                    impl Monad<Optional> for Optional = do
+                        bind x f = f x
+                    end
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                    Right _ -> return ()
+            it "Should allow valid type parameter in function declaration" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    struct Some<T> = (value: T)
+                    let test<U> (x: Some<U>): Some<U> = x
+                    let main : IO = do
+                        let x = Some<Int>{value: 42}
+                        unsafePrint x
+                    end
+                    |]
+                case result of
+                    Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                    Right _ -> return ()
+            it "Should error on nested invalid type parameter" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Optional<T>
+                    struct None = () is Optional<List<T>>
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> do
+                        let errorMessages = map BytecodeCompiler.errorMessage errors
+                        any ("Invalid type parameter" `isInfixOf`) errorMessages
+                            `shouldBe` True
+                    Right _ -> expectationFailure "Expected compilation error for nested invalid type parameter"
+            it "Should allow nested valid type parameter" $ do
+                result <-
+                    compileWithErrors
+                        [r|
+                    trait Optional<T>
+                    struct None = () is Optional<List<Int>>
+                    let main : IO = unsafePrint 42
+                    |]
+                case result of
+                    Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                    Right _ -> return ()
         it "Should compile generic function with struct types" $ do
             result <-
                 compile

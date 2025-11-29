@@ -592,7 +592,7 @@ struct = do
         parens expr <?> "refinement"
     is <- optional $ do
         keyword "is"
-        sepBy extra (symbol ",") <?> "struct interfaces"
+        sepBy validType (symbol ",") <?> "struct interfaces"
     end <- getOffset
     return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = False, generics = generics, structPos = Position (start, end)}
   where
@@ -620,7 +620,7 @@ valueStruct = do
         parens expr <?> "refinement"
     is <- optional $ do
         keyword "is"
-        sepBy extra (symbol ",") <?> "struct interfaces"
+        sepBy validType (symbol ",") <?> "struct interfaces"
     end <- getOffset
     return $ Struct{name = name, fields = fields, refinement = refinement, refinementSrc = fromMaybe "" refinementSrc, is = fromMaybe [] is, isValueStruct = True, generics = generics, structPos = Position (start, end)}
   where
@@ -866,7 +866,7 @@ impl = do
         symbol ">"
         return args
     symbol "for"
-    for <- identifier <?> "impl for"
+    for <- validType <?> "impl for"
     methods <-
         ( do
             symbol "="

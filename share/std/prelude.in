@@ -3,9 +3,9 @@ struct IO = (inner: Any)
 nop :: IO
 nop _ = IO{inner: (-1)}
 
-trait Optional
-struct Some = (value: Any) is Optional
-struct None = () is Optional
+trait Optional<T>
+struct Some<T> = (value: T) is Optional<T>
+struct None = () is Optional<Any>
 
 maybe :: Any -> Optional -> Any
 maybe x Some{value: y} = y
@@ -17,11 +17,16 @@ trait Monad = do
   sequence :: Self -> Self -> Self
 end
 
-impl Monad for Optional = do
-  bind Some{value: x} f = Some{value: f x}
+impl Monad for Some<T> = do
+  bind Some<T>{value: x} f = f x
+  return x = Some<T>{value: x}
+  sequence Some<T>{value: x} Some<T>{value: y}= Some<T>{value: y}
+end
+
+impl Monad for None = do
   bind None{} f = None{}
-  return x = Some{value: x}
-  sequence Some{value: x} Some{value: y}= Some{value: y}
+  return x = None{}
+  sequence None{} None{} = None{}
 end
 
 impl Monad for IO = do
