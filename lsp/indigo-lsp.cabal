@@ -1,0 +1,77 @@
+cabal-version: 3.0
+name:          indigo-lsp
+version:       0.1.0.0
+license:       MPL-2.0
+license-file:  LICENSE
+maintainer:    ofelix@pm.me
+author:        rockofox
+synopsis:      Language Server Protocol implementation for Indigo
+description:
+    LSP server providing diagnostics, hover information, and code completion
+    for the Indigo programming language.
+
+category:      Development
+build-type:    Simple
+
+executable indigo-lsp
+    main-is:            Main.hs
+    hs-source-dirs:     src
+    other-modules:      Completion, Diagnostics, Hover, IndigoPrelude, Position, Server
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
+        DuplicateRecordFields BlockArguments LambdaCase
+        OverloadedRecordDot RecordWildCards NamedFieldPuns
+
+    ghc-options:        -Wall
+    build-depends:
+        base >=4.17,
+        indigo,
+        lsp >=2.7.0.0,
+        lsp-types >=2.3.0.0,
+        text >=2.0,
+        aeson >=2.0,
+        mtl >=2.2,
+        containers >=0.6,
+        filepath >=1.4,
+        directory >=1.3,
+        bytestring >=0.11,
+        megaparsec,
+        lens >=5.1
+
+test-suite lsp-test-suite
+    type:               exitcode-stdio-1.0
+    main-is:            Spec.hs
+    build-tool-depends: hspec-discover:hspec-discover >=2 && <3
+    hs-source-dirs:     tests
+    other-modules:
+        DiagnosticsSpec
+        HoverSpec
+        CompletionSpec
+        PositionSpec
+        ServerSpec
+        TestUtils
+
+    default-language:   Haskell2010
+    default-extensions:
+        OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
+        DuplicateRecordFields BlockArguments LambdaCase
+        OverloadedRecordDot RecordWildCards NamedFieldPuns
+
+    ghc-options:        -Wall
+    build-depends:
+        base >=4.17,
+        indigo,
+        lsp >=2.7.0.0,
+        lsp-test >=0.17 && <0.18,
+        lsp-types >=2.3.0.0,
+        text >=2.0,
+        aeson >=2.0,
+        mtl >=2.2,
+        containers >=0.6,
+        filepath >=1.4,
+        directory >=1.3,
+        bytestring >=0.11,
+        hspec >=2.10,
+        lens >=5.1,
+        temporary >=1.3

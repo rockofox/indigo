@@ -1,0 +1,6 @@
+let add (x: Int y: Int) : Int = x + y
+let result = add 1, 2
+
+
+
+

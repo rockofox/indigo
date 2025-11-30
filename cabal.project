@@ -1,4 +1,4 @@
-packages: .
+packages: . lsp
 -- wasm_reactor excluded - built separately with Nix
 
 tests: True

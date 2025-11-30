@@ -1,0 +1,7 @@
+let main: IO = do
+    let opt = Some<Int>{value: 42}
+    let v = opt.
+end
+
+
+
