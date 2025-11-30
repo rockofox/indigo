@@ -40,7 +40,7 @@ jobs:
 
       - name: Run tests
         run: |
-          nix develop --command bash -c "cabal test all"
+          nix develop --command bash -c "cabal test"
         continue-on-error: false
 
       - name: Upload executable artifact
