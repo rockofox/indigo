@@ -38,9 +38,15 @@ jobs:
       - name: Build with Nix
         run: nix build .#indigo
 
+      - name: Cache Cabal index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cabal/packages
+          key: cabal-index-${{ runner.os }}
+
       - name: Run tests
         run: |
-          nix develop --command bash -c "cabal test"
+          nix develop --command bash -c "cabal update && cabal test"
         continue-on-error: false
 
       - name: Upload executable artifact
