@@ -1,0 +1,8 @@
+module Module2
+
+let add (a: Int b: Int) : Int = a + b
+
+let multiply (a: Int b: Int) : Int = a * b
+
+let greet (name: String) : String = "Hello, " ++ name ++ "!"
+

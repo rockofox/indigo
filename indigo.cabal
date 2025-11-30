@@ -120,4 +120,8 @@ test-suite spec
         vector,
         megaparsec,
         mtl >=2.2,
-        raw-strings-qq
+        raw-strings-qq,
+        containers >=0.6,
+        directory >=1.3,
+        filepath >=1.4,
+        temporary >=1.3

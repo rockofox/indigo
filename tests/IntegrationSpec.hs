@@ -1,14 +1,17 @@
 module IntegrationSpec (spec) where
 
 import BytecodeCompiler
-    ( compileProgram
+    ( buildModuleMap
+    , compileProgram
     , initCompilerState
+    , initCompilerStateWithModules
     , locateLabel
     , renderCompilerErrors
     )
 import Control.Monad.State (evalStateT)
 import Data.Functor
 import Data.List (elemIndex)
+import Data.Map qualified as Map
 import Data.Text qualified
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -19,6 +22,9 @@ import Parser
     , parseProgram
     )
 import Parser qualified
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 import Test.Hspec (describe, it, pendingWith, shouldReturn, xit)
 import Test.QuickCheck (Testable (property))
 import Text.Megaparsec.Error
@@ -42,7 +48,7 @@ compileAndRun prog = do
     case p of
         Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
         Right program -> do
-            let (Parser.Program exprs) = program
+            let (Parser.Program exprs _) = program
             compilerOutput <- evalStateT (compileProgram program) (initCompilerState program)
             optimizedProgram <- case compilerOutput of
                 Left bytecode -> pure (optimize bytecode)
@@ -59,6 +65,48 @@ compileAndRun prog = do
                         else mainLabel
             vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
             pure $ output $ ioBuffer vm
+
+compileAndRunModules :: [(String, String)] -> IO String
+compileAndRunModules modules = do
+    withSystemTempDirectory "indigo-test" $ \tmpDir -> do
+        filePaths <-
+            mapM
+                ( \(name, content) -> do
+                    let fileName = name ++ ".in"
+                    let filePath = tmpDir </> fileName
+                    writeFile filePath content
+                    return filePath
+                )
+                modules
+
+        moduleMapResult <- buildModuleMap filePaths
+        case moduleMapResult of
+            Left err -> error $ "Failed to build module map: " ++ err
+            Right moduleMap -> do
+                let (mainName, mainContent) = head modules
+                let mainFilePath = tmpDir </> mainName ++ ".in"
+                let mainProg = parseProgram (T.pack mainContent) Parser.initCompilerFlags{Parser.needsMain = False}
+                case mainProg of
+                    Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (T.pack mainContent)) mainContent
+                    Right program -> do
+                        let (Parser.Program exprs _) = program
+                        let state = initCompilerStateWithModules moduleMap program mainFilePath
+                        compilerOutput <- evalStateT (compileProgram program) state
+                        optimizedProgram <- case compilerOutput of
+                            Left bytecode -> pure (optimize bytecode)
+                            Right err -> error $ renderCompilerErrors err mainContent
+                        let mainLabel = locateLabel optimizedProgram "main"
+                        let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) exprs
+                        let startPc =
+                                if hasTopLevelLets
+                                    then do
+                                        let sepIndex = elemIndex (VM.Label "__sep") optimizedProgram
+                                        case sepIndex of
+                                            Just sepPc -> sepPc + 1
+                                            Nothing -> 0
+                                    else mainLabel
+                        vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
+                        pure $ output $ ioBuffer vm
 
 spec = do
     describe "Hello World" $ do
@@ -965,3 +1013,100 @@ spec = do
                 end
             |]
                 `shouldReturn` "matched five\n"
+    describe "Imports" $ do
+        it "Should import and use qualified functions with single argument" $ do
+            compileAndRunModules
+                [
+                    ( "Module1"
+                    , [r|
+module Module1
+
+import qualified Module2
+
+let main : IO = do
+    let result = Module2.square 5
+    println result
+end
+|]
+                    )
+                ,
+                    ( "Module2"
+                    , [r|
+module Module2
+
+let square (x: Int) : Int = x * x
+|]
+                    )
+                ]
+                `shouldReturn` "25\n"
+        it "Should import multiple functions from a module" $ do
+            compileAndRunModules
+                [
+                    ( "Module1"
+                    , [r|
+module Module1
+
+import qualified Module2
+
+let main : IO = do
+    let squared = Module2.square 4
+    let doubled = Module2.double 5
+    println squared
+    println doubled
+end
+|]
+                    )
+                ,
+                    ( "Module2"
+                    , [r|
+module Module2
+
+let square (x: Int) : Int = x * x
+let double (x: Int) : Int = x * 2
+|]
+                    )
+                ]
+                `shouldReturn` "16\n10\n"
+        it "Should import and use string functions" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+module Main
+
+import qualified Utils
+
+let main : IO = do
+    let greeting = Utils.greet "Alice"
+    println greeting
+end
+|]
+                    )
+                ,
+                    ( "Utils"
+                    , [r|
+module Utils
+
+let greet (name: String) : String = "Hello, " ++ name ++ "!"
+|]
+                    )
+                ]
+                `shouldReturn` "Hello, Alice!\n"
+        it "Should handle module without explicit declaration" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+import qualified Math
+
+let main : IO = println Math.square 5
+|]
+                    )
+                ,
+                    ( "Math"
+                    , [r|
+let square (x: Int) : Int = x * x
+|]
+                    )
+                ]
+                `shouldReturn` "25\n"

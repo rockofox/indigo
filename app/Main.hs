@@ -15,6 +15,7 @@ import Control.Monad.State.Lazy
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as B
 import Data.List (intercalate, isPrefixOf)
+import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isNothing)
 import Data.Monoid
 import Data.Set qualified as Set
@@ -31,12 +32,13 @@ import Options.Applicative
 import Parser
 import System.Console.Repline
 import System.Exit (exitFailure, exitSuccess)
+import System.FilePath
 import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle)
 import VM qualified
 
 data CmdOptions = Options
-    { input :: Maybe FilePath
+    { inputs :: [FilePath]
     , output :: Maybe FilePath
     , debugAST :: Bool
     , debugBytecode :: Bool
@@ -53,7 +55,7 @@ data CmdOptions = Options
 optionsParser :: Options.Applicative.Parser CmdOptions
 optionsParser =
     Options
-        <$> optional (argument str (metavar "FILE"))
+        <$> many (argument str (metavar "FILE"))
         <*> optional
             ( strOption
                 ( long "output"
@@ -92,7 +94,7 @@ indent :: Int -> String
 indent i = replicate (i * 2) ' '
 
 prettyPrintProgram :: Program -> String
-prettyPrintProgram (Program exprs) = intercalate "\n" (map (`prettyPrintExpr` 0) exprs)
+prettyPrintProgram (Program exprs _) = intercalate "\n" (map (`prettyPrintExpr` 0) exprs)
 
 inputFile :: Maybe String -> IO String
 inputFile input = case input of
@@ -116,7 +118,7 @@ parseAndVerify name input compilerFlags path =
             case result of
                 Left err -> return $ Left (err, Nothing)
                 Right program' -> do
-                    let (Program exprs) = program'
+                    let (Program exprs _) = program'
                     return $ Right program'
         )
 
@@ -128,7 +130,7 @@ parseNoVerify name input compilerFlags = return $ do
 
 main :: IO ()
 main = do
-    Options input output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
+    Options inputs output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -139,37 +141,58 @@ main = do
     when showVersion $ do
         putStrLn $ "Indigo, version " ++ version
         exitSuccess
-    when (isNothing input) $ do
+    when (null inputs) $ do
         newRepl
         exitSuccess
     program <-
         if not runBytecode
             then do
-                i <- inputFile input
-                prog <-
-                    if noVerify
-                        then parseNoVerify (fromJust input) i initCompilerFlags
-                        else parseAndVerify (fromJust input) i initCompilerFlags (fromJust input)
-                rprog <- prog
-                expr <- case rprog of
-                    Left (err, expr) -> do
-                        case expr of
-                            Just expr -> when debugAST $ putStrLn $ prettyPrintProgram expr
-                            Nothing -> return ()
-                        errorWithoutStackTrace $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
-                    Right expr -> return expr
+                if length inputs == 1
+                    then do
+                        let input = head inputs
+                        i <- readFile input
+                        prog <-
+                            if noVerify
+                                then parseNoVerify input i initCompilerFlags
+                                else parseAndVerify input i initCompilerFlags input
+                        rprog <- prog
+                        expr <- case rprog of
+                            Left (err, expr) -> do
+                                case expr of
+                                    Just expr -> when debugAST $ putStrLn $ prettyPrintProgram expr
+                                    Nothing -> return ()
+                                errorWithoutStackTrace $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
+                            Right expr -> return expr
 
-                when debugAST $ putStrLn $ prettyPrintProgram expr
-                potentiallyTimedOperation "Compilation" showTime $ do
-                    result <- evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr (fromJust input))
-                    case result of
-                        Left instructions -> return instructions
-                        Right errors -> do
-                            let fileNameOrPlaceholder = fromMaybe "<input>" input
-                            compileFail fileNameOrPlaceholder errors i
-                            errorWithoutStackTrace ""
+                        when debugAST $ putStrLn $ prettyPrintProgram expr
+                        potentiallyTimedOperation "Compilation" showTime $ do
+                            result <- evalStateT (BytecodeCompiler.compileProgram expr) (BytecodeCompiler.initCompilerStateWithFile expr input)
+                            case result of
+                                Left instructions -> return instructions
+                                Right errors -> do
+                                    compileFail input errors i
+                                    errorWithoutStackTrace ""
+                    else do
+                        moduleMapResult <- BytecodeCompiler.buildModuleMap inputs
+                        moduleMap <- case moduleMapResult of
+                            Left err -> errorWithoutStackTrace $ "Failed to build module map:\n" ++ err
+                            Right mm -> return mm
+                        let mainFile = head inputs
+                        mainContent <- readFile mainFile
+                        mainProg <- case parseProgram (T.pack mainContent) initCompilerFlags of
+                            Left err -> errorWithoutStackTrace $ "Parse error in " ++ mainFile ++ ":\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack mainContent)) mainFile
+                            Right p -> return p
+                        when debugAST $ putStrLn $ prettyPrintProgram mainProg
+                        potentiallyTimedOperation "Compilation" showTime $ do
+                            result <- evalStateT (BytecodeCompiler.compileProgram mainProg) (BytecodeCompiler.initCompilerStateWithModules moduleMap mainProg mainFile)
+                            case result of
+                                Left instructions -> return instructions
+                                Right errors -> do
+                                    compileFail mainFile errors mainContent
+                                    errorWithoutStackTrace ""
             else do
-                bytecode <- inputFileBinary input
+                let input = head inputs
+                bytecode <- inputFileBinary (Just input)
                 return $ VM.fromBytecode bytecode
     when emitBytecode $ do
         case output of
@@ -193,8 +216,8 @@ data REPLState = REPLState
 
 initREPLState =
     REPLState
-        { program = Program []
-        , previousProgram = Program []
+        { program = Program [] Nothing
+        , previousProgram = Program [] Nothing
         , previousStack = []
         }
 
@@ -206,11 +229,11 @@ cmd input = do
     case result of
         Left err -> liftIO $ putStrLn $ renderErrors (parseErrorBundleToSourceErrors err (T.pack input)) input
         Right program' -> do
-            let (Program pexrs) = program'
-            (Program sexprs) <- gets program
-            modify (\s -> s{previousProgram = Program sexprs})
-            modify (\s -> s{program = Program (sexprs ++ pexrs)})
-            mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [] AST.anyPosition) AST.anyPosition])
+            let (Program pexrs _) = program'
+            (Program sexprs _) <- gets program
+            modify (\s -> s{previousProgram = Program sexprs Nothing})
+            modify (\s -> s{program = Program (sexprs ++ pexrs) Nothing})
+            mergedProgram <- gets program >>= \x -> return $ Program (exprs x ++ [FuncDef "main" [] (DoBlock [] AST.anyPosition) AST.anyPosition]) Nothing
             compilationResult <- liftIO $ evalStateT (BytecodeCompiler.compileProgram mergedProgram) (BytecodeCompiler.initCompilerState mergedProgram)
             case compilationResult of
                 Right errors -> liftIO $ putStrLn $ "Compilation errors: " ++ show errors
@@ -232,7 +255,7 @@ cmd input = do
 
 replCompleter :: (Monad m, MonadState REPLState m) => WordCompleter m
 replCompleter n = do
-    (Program exprs) <- gets program
+    (Program exprs _) <- gets program
     let names = map nameOf exprs
     return $ filter (isPrefixOf n) names
   where
@@ -257,14 +280,14 @@ opts =
     ,
         ( "ast"
         , const $ do
-            (Program sexprs) <- gets program
-            liftIO $ putStrLn $ prettyPrintProgram (Program sexprs)
+            (Program sexprs _) <- gets program
+            liftIO $ putStrLn $ prettyPrintProgram (Program sexprs Nothing)
         )
     ,
         ( "vm"
         , const $ do
-            (Program sexprs) <- gets program
-            compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram (Program sexprs)) (BytecodeCompiler.initCompilerState (Program sexprs))
+            (Program sexprs _) <- gets program
+            compiled <- liftIO $ evalStateT (BytecodeCompiler.compileProgram (Program sexprs Nothing)) (BytecodeCompiler.initCompilerState (Program sexprs Nothing))
             case compiled of
                 Right errors -> liftIO $ putStrLn $ "Compilation errors: " ++ show errors
                 Left instructions -> liftIO $ putStrLn $ VM.printAssembly (V.fromList instructions) True

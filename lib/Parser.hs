@@ -268,7 +268,7 @@ keyword :: Text -> Parser ()
 keyword w = (lexeme . try) (string w *> notFollowedBy alphaNumChar)
 
 rws :: [String]
-rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of", "it", "satisfies", "is"]
+rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of", "it", "satisfies", "is", "module", "import", "qualified"]
 
 identifier :: Parser String
 identifier = do
@@ -315,6 +315,19 @@ extra = do
         else return name
   where
     p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '@')
+    check x =
+        if x `elem` rws
+            then fail $ "keyword " ++ show x ++ " cannot be an identifier"
+            else return x
+
+qualifiedIdentifier :: Parser String
+qualifiedIdentifier = do
+    name <- (lexeme . try) (p >>= check)
+    if name `elem` rws
+        then fail $ "keyword " ++ show name ++ " cannot be an identifier"
+        else return name
+  where
+    p = (:) <$> letterChar <*> many (alphaNumChar <|> char '_' <|> char '@' <|> char '.')
     check x =
         if x `elem` rws
             then fail $ "keyword " ++ show x ++ " cannot be an identifier"
@@ -448,7 +461,7 @@ gravis = lexeme $ char '`' *> someTill L.charLiteral (char '`')
 funcCall :: Parser Expr
 funcCall = do
     start <- getOffset
-    name <- (extra <|> gravis) <?> "function name"
+    name <- (qualifiedIdentifier <|> gravis) <?> "function name"
     args <- sepBy1 expr (symbol ",") <?> "function arguments"
     end <- getOffset
     return $ FuncCall name args (Position (start, end))
@@ -687,7 +700,7 @@ parseProgram t cf = do
             -- If theres no main function, add one
             let foundMain = any (\case FuncDef{name = "main"} -> True; _ -> False) program'.exprs || any (\case Function{def} -> any (\case FuncDef{name = "main"} -> True; _ -> False) def; _ -> False) program'.exprs
             let (outside, inside) = partition shouldBeOutside program'.exprs
-            let artificialMainProgram = Program $ outside ++ [FuncDec "main" [Any] [] anyPosition, FuncDef "main" [] (DoBlock inside anyPosition) anyPosition]
+            let artificialMainProgram = Program (outside ++ [FuncDec "main" [Any] [] anyPosition, FuncDef "main" [] (DoBlock inside anyPosition) anyPosition]) Nothing
             if foundMain || not cf.needsMain
                 then Right program'
                 else Right artificialMainProgram
@@ -703,7 +716,7 @@ parseFreeUnsafe :: Text -> Expr
 parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     Left err -> error $ show err
     Right program' -> case program' of
-        Program [expr'] -> replacePositionWithAnyPosition expr'
+        Program [expr'] _ -> replacePositionWithAnyPosition expr'
         _ -> error "Expected a single expression"
   where
     replacePositionWithAnyPosition :: Expr -> Expr
@@ -780,8 +793,20 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
 lines' :: Parser [Expr]
 lines' = expr `sepEndBy` newline'
 
+moduleDecl :: Parser String
+moduleDecl = do
+    keyword "module"
+    name <- identifier <?> "module name"
+    scn
+    return name
+
 program :: Parser Program
-program = Program <$> between scn eof lines'
+program = do
+    scn
+    moduleName' <- optional moduleDecl
+    exprs' <- lines'
+    eof
+    return $ Program exprs' moduleName'
 
 var :: Parser Expr
 var = do

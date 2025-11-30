@@ -5,14 +5,17 @@ module BytecodeCompiler where
 import AST (Position (..), anyPosition, zeroPosition)
 import AST qualified as Parser
 import AST qualified as Parser.Type (Type (Unknown))
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, unless, when, zipWithM, (>=>))
 import Control.Monad.Loops (allM, firstM)
 import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, modify)
 import Data.Bifunctor (second)
+import Data.Either (lefts, rights)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, groupBy, inits, intercalate, nub)
+import Data.List (elemIndex, find, groupBy, inits, intercalate, isInfixOf, isSuffixOf, nub)
 import Data.List.Split qualified
 import Data.Map qualified
+import Data.Map qualified as Map
 import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing, mapMaybe, maybeToList)
 import Data.String
 import Data.Text (isPrefixOf, splitOn)
@@ -73,6 +76,8 @@ data CompilerState a = CompilerState
     , errors :: [CompilerError]
     , sourcePath :: String
     , skipRefinementCheck :: Bool
+    , modules :: Map.Map String (Parser.Program, FilePath)
+    , currentModule :: Maybe String
     }
 
 data Let = Let
@@ -101,6 +106,8 @@ initCompilerState prog =
         []
         "no file"
         False
+        Map.empty
+        Nothing
 
 initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
 initCompilerStateWithFile prog sourcePath' =
@@ -121,6 +128,30 @@ initCompilerStateWithFile prog sourcePath' =
         []
         sourcePath'
         False
+        Map.empty
+        Nothing
+
+initCompilerStateWithModules :: Map.Map String (Parser.Program, FilePath) -> Parser.Program -> String -> CompilerState a
+initCompilerStateWithModules modules' prog sourcePath' =
+    CompilerState
+        prog
+        []
+        []
+        []
+        []
+        0
+        []
+        []
+        []
+        "__outside"
+        ["__outside"]
+        []
+        []
+        []
+        sourcePath'
+        False
+        modules'
+        (Parser.moduleName prog)
 
 cerror :: String -> AST.Position -> StateT (CompilerState a) IO ()
 cerror msg pos = do
@@ -247,7 +278,7 @@ preludeExpr = do
     i <- liftIO preludeFile
     case parseProgram (T.pack i) CompilerFlags{verboseMode = False, needsMain = False} of -- FIXME: pass on flags
         Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
-        Right prog@(Parser.Program progExpr) -> do
+        Right prog@(Parser.Program progExpr _) -> do
             _ <-
                 liftIO $
                     compileDry prog "<prelude>" >>= \case
@@ -256,7 +287,7 @@ preludeExpr = do
             return $ progExpr ++ [Parser.FuncDef "__sep" [] (Parser.Placeholder anyPosition) anyPosition]
 
 compileProgram :: Parser.Program -> StateT (CompilerState a) IO (Either [Instruction] [CompilerError])
-compileProgram (Parser.Program expr) = do
+compileProgram (Parser.Program expr _) = do
     prelude <- liftIO preludeExpr
     prelude' <- concatMapM (`compileExpr` Parser.Any) prelude
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
@@ -271,7 +302,7 @@ compileProgram (Parser.Program expr) = do
             return $ Right errors'
 
 compileProgramBare :: Parser.Program -> StateT (CompilerState a) IO (Either [Instruction] [CompilerError])
-compileProgramBare (Parser.Program expr) = do
+compileProgramBare (Parser.Program expr _) = do
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
     errors' <- gets errors
@@ -409,6 +440,40 @@ findSourceFile' fileName = findSourceFile fileName []
 
 preludeFile :: IO String
 preludeFile = findSourceFile' "std/prelude.in" >>= readFile
+
+extractModuleName :: FilePath -> Parser.Program -> String
+extractModuleName filePath (Parser.Program _ (Just name)) = name
+extractModuleName filePath _ =
+    let baseName = takeBaseName filePath
+        withoutExt = if ".in" `isSuffixOf` baseName then take (length baseName - 3) baseName else baseName
+        dirPath = takeDirectory filePath
+        pathParts = splitDirectories dirPath
+        modulePath = filter (not . null) pathParts
+     in if null modulePath then withoutExt else intercalate "." (modulePath ++ [withoutExt])
+
+buildModuleMap :: [FilePath] -> IO (Either String (Map.Map String (Parser.Program, FilePath)))
+buildModuleMap filePaths = do
+    results <- mapM parseFile filePaths
+    let errors = lefts results
+    if not (null errors)
+        then return $ Left (unlines errors)
+        else do
+            let programs = rights results
+            let moduleNames = map (\(prog, path) -> extractModuleName path prog) programs
+            let duplicates = findDuplicates moduleNames
+            if not (null duplicates)
+                then return $ Left $ "Duplicate module names: " ++ intercalate ", " duplicates
+                else return $ Right $ Map.fromList $ zip moduleNames programs
+  where
+    parseFile :: FilePath -> IO (Either String (Parser.Program, FilePath))
+    parseFile path = do
+        content <- readFile path
+        case parseProgram (T.pack content) Parser.initCompilerFlags{Parser.needsMain = False} of
+            Left err -> return $ Left $ "Parse error in " ++ path ++ ":\n" ++ show err
+            Right prog -> return $ Right (prog, path)
+
+    findDuplicates :: [String] -> [String]
+    findDuplicates xs = [x | (x, count) <- map (\x -> (x, length (filter (== x) xs))) (nub xs), count > 1]
 
 doBinOp :: String -> Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> StateT (CompilerState a) IO [Instruction]
 doBinOp opName x y expectedType op = do
@@ -1052,8 +1117,11 @@ compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
     funs <- gets functions
     let previousContext = curCon
     let previousContextPath = if curCon == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" curCon
-    let name = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
-    let origName' = if curCon /= "__outside" then curCon ++ "@" ++ origName else origName
+    let name =
+            if "." `isInfixOf` origName || curCon == "__outside"
+                then origName
+                else curCon ++ "@" ++ origName
+    let origName' = name
     let isFirst = isNothing $ find (\x -> x.baseName == origName') funs
     -- when (not isFirst) $ traceM $ "Function " ++ name ++ " already exists"
     -- let argTypes = map Parser.typeOf args
@@ -1123,9 +1191,14 @@ compileExpr fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
         let nextFunName = funcName ++ "#" ++ show nextFunId
         compilePatternMatch pat nextFunName expectedType
 compileExpr (Parser.ParenApply{parenApplyExpr, parenApplyArgs}) expectedType = do
-    fun <- compileExpr parenApplyExpr expectedType
-    args <- concatMapM (`compileExpr` expectedType) parenApplyArgs
-    return $ args ++ fun ++ [CallS]
+    case parenApplyExpr of
+        Parser.StructAccess{structAccessStruct = Parser.Var{varName = moduleName}, structAccessField = Parser.Var{varName = funcName}} -> do
+            let qualifiedName = moduleName ++ "." ++ funcName
+            compileExpr (Parser.FuncCall{funcName = qualifiedName, funcArgs = parenApplyArgs, funcPos = extractPosition parenApplyExpr}) expectedType
+        _ -> do
+            fun <- compileExpr parenApplyExpr expectedType
+            args <- concatMapM (`compileExpr` expectedType) parenApplyArgs
+            return $ args ++ fun ++ [CallS]
 compileExpr (Parser.Var{varName, varPos}) expectedType = do
     functions' <- gets functions
     curCon <- gets currentContext
@@ -1163,7 +1236,10 @@ compileExpr (Parser.Function{def = [Parser.FuncDef{body = Parser.StrictEval{stri
     return $ evaledExpr ++ [LStore name]
 compileExpr (Parser.Function{def = a, dec = b@Parser.FuncDec{name = _name, types = _types}}) _ = do
     curCon <- gets currentContext
-    let mangledName = if curCon /= "__outside" then curCon ++ "@" ++ b.name else b.name
+    let mangledName =
+            if "." `isInfixOf` b.name || curCon == "__outside"
+                then b.name
+                else curCon ++ "@" ++ b.name
     let mangledDec = b{Parser.name = mangledName}
     compileExpr mangledDec (last b.types) >> mapM_ (`compileExpr` last b.types) a >> return []
 compileExpr (Parser.StrictEval{strictEvalExpr = e}) expectedType = compileExpr e expectedType
@@ -1393,30 +1469,83 @@ compileExpr (Parser.StructAccess{structAccessStruct, structAccessField}) expecte
         _ -> do
             fieldExpr' <- compileExpr structAccessField expectedType
             return $ struct' ++ fieldExpr' ++ [AAccess]
-compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified}) expectedType = do
-    when (o /= ["*"]) $ error "Only * imports are supported right now"
-    sourcePath' <- gets sourcePath
-    let sourcePath = takeDirectory sourcePath'
-    i <- liftIO (findSourceFile (from ++ ".in") [sourcePath] >>= readFile)
-    let (expr, prog) = case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of -- FIXME: pass on flags
-            Left err -> error $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
-            Right p@(Parser.Program exprs) -> (exprs, p)
-    _ <-
-        liftIO $
-            compileDry prog sourcePath' >>= \case
-                Right err -> error $ "Compile error: " ++ show err
-                Left p' -> return p'
-    if qualified || isJust as
+compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualified, importPos}) expectedType = do
+    if o /= ["*"]
         then do
-            let alias = if qualified then from else fromJust as
-            concatMapM (`compileExpr` expectedType) (map (`mangleAST` alias) expr)
-        else concatMapM (`compileExpr` expectedType) expr
+            cerror "Only * imports are supported right now" importPos
+            return []
+        else do
+            modules' <- gets modules
+            currentModule' <- gets currentModule
+            if from `elem` maybeToList currentModule'
+                then do
+                    cerror ("Circular import detected: module '" ++ from ++ "' imports itself") importPos
+                    return []
+                else do
+                    (importedProg, _importedPath) <- case Map.lookup from modules' of
+                        Just (prog, path) -> return (prog, path)
+                        Nothing -> do
+                            sourcePath' <- gets sourcePath
+                            let sourcePath = takeDirectory sourcePath'
+                            fileResult <- liftIO $ try (findSourceFile (from ++ ".in") [sourcePath] >>= readFile) :: StateT (CompilerState a) IO (Either SomeException String)
+                            case fileResult of
+                                Left _ -> do
+                                    cerror ("Module '" ++ from ++ "' not found in module map and file not found") importPos
+                                    return (Parser.Program [] Nothing, "")
+                                Right i -> do
+                                    case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of
+                                        Left err -> do
+                                            cerror ("Parse error in imported module '" ++ from ++ "':\n" ++ show err) importPos
+                                            return (Parser.Program [] Nothing, "")
+                                        Right p -> return (p, from ++ ".in")
+                    let (Parser.Program exprs _) = importedProg
+                    let moduleNameToUse = fromMaybe from (Parser.moduleName importedProg)
+                    let prefix =
+                            if qualified || isJust as
+                                then if qualified then moduleNameToUse else fromJust as
+                                else ""
+                    if null prefix
+                        then concatMapM (`compileExpr` expectedType) exprs
+                        else concatMapM (`compileExpr` expectedType) (map (`mangleExprForImport` prefix) exprs)
   where
-    mangleAST :: Parser.Expr -> String -> Parser.Expr
-    mangleAST (Parser.FuncDec{name, types, generics}) alias = Parser.FuncDec{name = alias ++ "@" ++ name, types = types, generics = generics, funcDecPos = anyPosition}
-    mangleAST (Parser.Function{def = fdef, dec}) alias = Parser.Function{def = map (`mangleAST` alias) fdef, dec = mangleAST dec alias, functionPos = anyPosition}
-    mangleAST (Parser.FuncDef{name, args, body}) alias = Parser.FuncDef{name = alias ++ "@" ++ name, args = args, body = mangleAST body alias, funcDefPos = anyPosition}
-    mangleAST x _ = x
+    mangleExprForImport :: Parser.Expr -> String -> Parser.Expr
+    mangleExprForImport (Parser.FuncDec{name, types, generics, funcDecPos}) prefix =
+        Parser.FuncDec{name = prefix ++ "." ++ name, types = types, generics = generics, funcDecPos = funcDecPos}
+    mangleExprForImport (Parser.Function{def = fdef, dec, functionPos}) prefix =
+        Parser.Function{def = map (`mangleExprForImport` prefix) fdef, dec = mangleExprForImport dec prefix, functionPos = functionPos}
+    mangleExprForImport (Parser.FuncDef{name, args, body, funcDefPos}) prefix =
+        Parser.FuncDef{name = prefix ++ "." ++ name, args = args, body = mangleExprForImport body prefix, funcDefPos = funcDefPos}
+    mangleExprForImport (Parser.Struct{name, fields, refinement, refinementSrc, is, isValueStruct, generics, structPos}) prefix =
+        Parser.Struct{name = prefix ++ "." ++ name, fields = fields, refinement = fmap (`mangleExprForImport` prefix) refinement, refinementSrc = refinementSrc, is = is, isValueStruct = isValueStruct, generics = generics, structPos = structPos}
+    mangleExprForImport (Parser.StructLit{structLitName, structLitFields, structLitTypeArgs, structLitPos}) prefix =
+        Parser.StructLit{structLitName = prefix ++ "." ++ structLitName, structLitFields = map (second (`mangleExprForImport` prefix)) structLitFields, structLitTypeArgs = structLitTypeArgs, structLitPos = structLitPos}
+    mangleExprForImport (Parser.Trait{name, methods, generics, traitPos}) prefix =
+        Parser.Trait{name = prefix ++ "." ++ name, methods = map (`mangleExprForImport` prefix) methods, generics = generics, traitPos = traitPos}
+    mangleExprForImport (Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) prefix =
+        Parser.Impl{trait = prefix ++ "." ++ trait, traitTypeArgs = traitTypeArgs, for = for, methods = map (`mangleExprForImport` prefix) methods, implPos = implPos}
+    mangleExprForImport (Parser.FuncCall{funcName, funcArgs, funcPos}) prefix =
+        Parser.FuncCall{funcName = prefix ++ "." ++ funcName, funcArgs = map (`mangleExprForImport` prefix) funcArgs, funcPos = funcPos}
+    mangleExprForImport (Parser.Var{varName, varPos}) prefix =
+        Parser.Var{varName = varName, varPos = varPos}
+    mangleExprForImport (Parser.StructAccess{structAccessStruct, structAccessField, structAccessPos}) prefix =
+        Parser.StructAccess{structAccessStruct = mangleExprForImport structAccessStruct prefix, structAccessField = mangleExprForImport structAccessField prefix, structAccessPos = structAccessPos}
+    mangleExprForImport (Parser.Let{letName, letValue, letPos}) prefix =
+        Parser.Let{letName = letName, letValue = mangleExprForImport letValue prefix, letPos = letPos}
+    mangleExprForImport (Parser.If{ifCond, ifThen, ifElse, ifPos}) prefix =
+        Parser.If{ifCond = mangleExprForImport ifCond prefix, ifThen = mangleExprForImport ifThen prefix, ifElse = mangleExprForImport ifElse prefix, ifPos = ifPos}
+    mangleExprForImport (Parser.DoBlock{doBlockExprs, doBlockPos}) prefix =
+        Parser.DoBlock{doBlockExprs = map (`mangleExprForImport` prefix) doBlockExprs, doBlockPos = doBlockPos}
+    mangleExprForImport (Parser.When{whenExpr, whenBranches, whenElse, whenPos}) prefix =
+        Parser.When{whenExpr = mangleExprForImport whenExpr prefix, whenBranches = map (\(p, b) -> (mangleExprForImport p prefix, mangleExprForImport b prefix)) whenBranches, whenElse = fmap (`mangleExprForImport` prefix) whenElse, whenPos = whenPos}
+    mangleExprForImport (Parser.ListLit{listLitExprs, listLitPos}) prefix =
+        Parser.ListLit{listLitExprs = map (`mangleExprForImport` prefix) listLitExprs, listLitPos = listLitPos}
+    mangleExprForImport (Parser.TupleLit{tupleLitExprs, tupleLitPos}) prefix =
+        Parser.TupleLit{tupleLitExprs = map (`mangleExprForImport` prefix) tupleLitExprs, tupleLitPos = tupleLitPos}
+    mangleExprForImport (Parser.Lambda{lambdaArgs, lambdaBody, lambdaPos}) prefix =
+        Parser.Lambda{lambdaArgs = lambdaArgs, lambdaBody = mangleExprForImport lambdaBody prefix, lambdaPos = lambdaPos}
+    mangleExprForImport (Parser.External{externalName, externalArgs, externalPos}) prefix =
+        Parser.External{externalName = prefix ++ "." ++ externalName, externalArgs = map (`mangleExprForImport` prefix) externalArgs, externalPos = externalPos}
+    mangleExprForImport x _ = x
 compileExpr (Parser.Trait{name, methods, generics}) expectedType = do
     let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> error "Expected FuncDec in Trait methods") methods
     modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, traitPos = anyPosition} : traits s})
@@ -1641,7 +1770,7 @@ runRefinement refinement value = do
                                 (Parser.DoBlock mainBody Parser.anyPosition)
                                 Parser.anyPosition
                            ]
-            let prog = Parser.Program progExprs
+            let prog = Parser.Program progExprs Nothing
             let freshState = initCompilerState prog
                 extractedFuncDecs = filter (\case Parser.FuncDec{} -> True; _ -> False) functionDefs
                 stateWithContext =

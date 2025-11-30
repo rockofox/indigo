@@ -179,7 +179,7 @@ instance Show Type where
         | otherwise = structName ++ "<" ++ intercalate ", " (map show typeArgs) ++ ">"
     show Self = "Self"
 
-newtype Program = Program {exprs :: [Expr]} deriving (Show, Eq, Generic)
+data Program = Program {exprs :: [Expr], moduleName :: Maybe String} deriving (Show, Eq, Generic)
 
 instance Data.Binary.Binary Type
 

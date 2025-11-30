@@ -1,0 +1,13 @@
+module Module1
+
+import qualified Module2
+
+let main : IO = do
+    let result1 = Module2.add 5, 3
+    let result2 = Module2.multiply 4, 7
+    let message = Module2.greet "World"
+    println result1
+    println result2
+    println message
+end
+
