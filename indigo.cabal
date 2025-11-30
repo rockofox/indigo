@@ -12,6 +12,10 @@ data-dir:      share
 flag ffi
     description: FFI
 
+flag posix-io
+    description: POSIX IO (network and file operations)
+    default: True
+
 library
     exposed-modules:
         Parser
@@ -47,8 +51,11 @@ library
         vector,
         monad-loops,
         filepath >=1.4,
-        random,
-        network >=3.0
+        random
+
+    if flag(posix-io)
+        cpp-options: -DPOSIX_IO
+        build-depends: network >=3.0
 
     if flag(ffi)
         cpp-options:   -DFFI
@@ -80,7 +87,8 @@ executable indigo
         vector,
         timeit,
         repline,
-        containers >=0.6
+        containers >=0.6,
+        filepath >=1.4
 
 test-suite spec
     type:               exitcode-stdio-1.0

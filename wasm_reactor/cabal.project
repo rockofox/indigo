@@ -1,4 +1,4 @@
 packages: . ..
 
 package indigo
-    flags: -ffi
+    flags: -ffi -posix-io

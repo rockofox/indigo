@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module BytecodeCompiler where
 
 import AST (Position (..), anyPosition, zeroPosition)
@@ -305,7 +307,10 @@ findFunction funcName xs typess = do
         Nothing -> findAnyFunction funcName xs
 
 internalFunctions :: [String]
-internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt", "unsafeOpenFile", "unsafeReadFile", "unsafeWriteFile", "unsafeCloseFile", "unsafeSocket", "unsafeBind", "unsafeListen", "unsafeAccept", "unsafeConnect", "unsafeSend", "unsafeRecv", "unsafeCloseSocket"]
+internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
+#ifdef POSIX_IO
+    ++ ["unsafeOpenFile", "unsafeReadFile", "unsafeWriteFile", "unsafeCloseFile", "unsafeSocket", "unsafeBind", "unsafeListen", "unsafeAccept", "unsafeConnect", "unsafeSend", "unsafeRecv", "unsafeCloseSocket"]
+#endif
 
 typesMatch :: Function -> [Parser.Type] -> Bool
 typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess) && length typess <= length fun.types
@@ -839,6 +844,7 @@ compileExpr (Parser.FuncCall{funcName = "unsafePrint", funcArgs = [x]}) expected
 compileExpr (Parser.FuncCall{funcName = "unsafeGetLine"}) _ = return [Builtin GetLine]
 compileExpr (Parser.FuncCall{funcName = "unsafeGetChar"}) _ = return [Builtin GetChar]
 compileExpr (Parser.FuncCall{funcName = "unsafeRandom"}) _ = return [Builtin Random]
+#ifdef POSIX_IO
 compileExpr (Parser.FuncCall{funcName = "unsafeOpenFile", funcArgs = [path, mode]}) expectedType = compileExpr path expectedType >>= \path' -> compileExpr mode expectedType >>= \mode' -> return (path' ++ mode' ++ [Builtin OpenFile])
 compileExpr (Parser.FuncCall{funcName = "unsafeReadFile", funcArgs = [fd, size]}) expectedType = compileExpr size expectedType >>= \size' -> compileExpr fd expectedType >>= \fd' -> return (size' ++ fd' ++ [Builtin ReadFile])
 compileExpr (Parser.FuncCall{funcName = "unsafeWriteFile", funcArgs = [fd, content]}) expectedType = compileExpr content expectedType >>= \content' -> compileExpr fd expectedType >>= \fd' -> return (content' ++ fd' ++ [Builtin WriteFile])
@@ -851,6 +857,7 @@ compileExpr (Parser.FuncCall{funcName = "unsafeConnect", funcArgs = [fd, host, p
 compileExpr (Parser.FuncCall{funcName = "unsafeSend", funcArgs = [fd, data', flags]}) expectedType = compileExpr flags expectedType >>= \flags' -> compileExpr data' expectedType >>= \data'' -> compileExpr fd expectedType >>= \fd' -> return (flags' ++ data'' ++ fd' ++ [Builtin Send])
 compileExpr (Parser.FuncCall{funcName = "unsafeRecv", funcArgs = [fd, size, flags]}) expectedType = compileExpr flags expectedType >>= \flags' -> compileExpr size expectedType >>= \size' -> compileExpr fd expectedType >>= \fd' -> return (flags' ++ size' ++ fd' ++ [Builtin Recv])
 compileExpr (Parser.FuncCall{funcName = "unsafeCloseSocket", funcArgs = [fd]}) expectedType = compileExpr fd expectedType >>= \fd' -> return (fd' ++ [Builtin CloseSocket])
+#endif
 compileExpr (Parser.FuncCall{funcName = "unsafeListAdd", funcArgs = [y, x]}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [ListAdd 2])
 compileExpr (Parser.FuncCall{funcName = "unsafeListIndex", funcArgs = [x, y]}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Index])
 compileExpr (Parser.FuncCall{funcName = "unsafeListLength", funcArgs = [x]}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Length])

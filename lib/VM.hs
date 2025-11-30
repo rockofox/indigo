@@ -47,12 +47,14 @@ import Foreign.Storable
 import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
+#ifdef POSIX_IO
 import Network.Socket (AddrInfo (..), AddrInfoFlag (..), Family (..), ProtocolNumber (..), SockAddr, Socket, SocketType (..), addrAddress, defaultHints, getAddrInfo)
 import Network.Socket qualified as NS
 import Network.Socket.ByteString qualified as NSB
-import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.IO qualified as SIO
 import Unsafe.Coerce (unsafeCoerce)
+#endif
+import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import Util (showSanitized)
 
 data Instruction
@@ -184,7 +186,11 @@ data Instruction
       Exit
     deriving (Show, Eq, Generic)
 
+#ifdef POSIX_IO
 data Action = Print | GetLine | GetChar | Random | OpenFile | ReadFile | WriteFile | CloseFile | Socket | Bind | Listen | Accept | Connect | Send | Recv | CloseSocket deriving (Show, Eq, Generic)
+#else
+data Action = Print | GetLine | GetChar | Random deriving (Show, Eq, Generic)
+#endif
 
 data Data
     = DInt Int
@@ -250,6 +256,7 @@ data StackFrame = StackFrame
     }
     deriving (Show)
 
+#ifdef POSIX_IO
 data VM = VM
     { program :: Program
     , stack :: [Data]
@@ -269,13 +276,34 @@ data VM = VM
     , nextHandleId :: Int
     }
     deriving (Show)
+#else
+data VM = VM
+    { program :: Program
+    , stack :: [Data]
+    , pc :: Int
+    , running :: Bool
+    , labels :: [(String, Int)]
+    , memory :: [Data]
+    , callStack :: [StackFrame]
+    , breakpoints :: [Int]
+    , ioMode :: IOMode
+    , ioBuffer :: IOBuffer
+    , sideStack :: [Data]
+    , shouldExit :: Bool
+    }
+    deriving (Show)
+#endif
 
 data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
+#ifdef POSIX_IO
 initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
+#else
+initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True}
+#endif
 
 type Program = V.Vector Instruction
 
@@ -736,6 +764,7 @@ runInstruction (Builtin GetChar) = do
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)
     stackPush $ DFloat num
+#ifdef POSIX_IO
 -- File operations
 runInstruction (Builtin OpenFile) = do
     [mode, path] <- stackPopN 2
@@ -924,6 +953,7 @@ runInstruction (Builtin CloseSocket) = do
                     return ()
                 Nothing -> error "Socket not found"
         _ -> error "CloseSocket: expected Int fd"
+#endif
 runInstruction Exit = do
     modify $ \vm -> vm{running = False}
     actuallyExit <- gets shouldExit
