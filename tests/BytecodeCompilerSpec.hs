@@ -7,6 +7,7 @@ import Control.Monad (join)
 import Control.Monad.State (evalStateT, liftIO)
 import Data.Functor ((<&>))
 import Data.List (isInfixOf)
+import Data.Map qualified as Map
 import Data.Text qualified
 import Debug.Trace
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
@@ -53,7 +54,7 @@ compile prog = do
             evalStateT
                 ( compileProgramBare program >>= \case
                     Right err -> do
-                        liftIO $ compileFail "<input>" err prog
+                        liftIO $ compileFail "<input>" err (Map.singleton "<input>" prog)
                         error ""
                     Left p -> return p
                 )
@@ -387,7 +388,7 @@ spec = do
                 |]
             case result of
                 Left errors -> do
-                    let errorMessages = map (\(BytecodeCompiler.CompilerError msg _) -> msg) errors
+                    let errorMessages = map (\(BytecodeCompiler.CompilerError msg _ _) -> msg) errors
                     any ("type argument count mismatch" `isInfixOf`) errorMessages
                         `shouldBe` True
                 Right _ -> expectationFailure $ "Expected compilation error for type argument count mismatch, but got: " ++ show result

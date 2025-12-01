@@ -13,6 +13,7 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.ByteString.Unsafe qualified as BU
 import Data.Char (ord)
 import Data.IORef (readIORef)
+import Data.Map qualified as Map
 import Data.Text qualified
 import Data.Vector qualified as V
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
@@ -53,7 +54,7 @@ runProgramRaw progPtr progLen = do
                 evalStateT (compileProgram program) (initCompilerState program) >>= \case
                     Left instructions -> return instructions
                     Right errors -> do
-                        compileFail "<input>" errors input
+                        compileFail "<input>" errors (Map.singleton "<input>" input)
                         errorWithoutStackTrace ""
             putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
@@ -71,7 +72,7 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
                 evalStateT (compileProgram program) (initCompilerState program) >>= \case
                     Left instructions -> return instructions
                     Right errors -> do
-                        compileFail "<input>" errors programStr
+                        compileFail "<input>" errors (Map.singleton "<input>" programStr)
                         errorWithoutStackTrace ""
             let xxxPoint = locateLabel xxx "main"
             vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}

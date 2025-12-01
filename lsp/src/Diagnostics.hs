@@ -35,7 +35,7 @@ sourceErrorToDiagnostic (SourceError{errorMessage = msg, errorPosition = pos}) s
             }
 
 compilerErrorToDiagnostic :: CompilerError -> Text -> Maybe Diagnostic
-compilerErrorToDiagnostic (CompilerError{errorMessage = msg, errorPosition = pos}) sourceText = do
+compilerErrorToDiagnostic (CompilerError{errorMessage = msg, errorPosition = pos, errorFile = _}) sourceText = do
     range <- indigoToLspRange pos sourceText
     Just $
         Diagnostic

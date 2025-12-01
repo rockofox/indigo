@@ -52,7 +52,7 @@ compileAndRun prog = do
             compilerOutput <- evalStateT (compileProgram program) (initCompilerState program)
             optimizedProgram <- case compilerOutput of
                 Left bytecode -> pure (optimize bytecode)
-                Right err -> error $ renderCompilerErrors err prog
+                Right err -> error $ renderCompilerErrors err (Map.singleton "<input>" prog)
             let mainLabel = locateLabel optimizedProgram "main"
             let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) exprs
             let startPc =
@@ -92,9 +92,10 @@ compileAndRunModules modules = do
                         let (Parser.Program exprs _) = program
                         let state = initCompilerStateWithModules moduleMap program mainFilePath
                         compilerOutput <- evalStateT (compileProgram program) state
+                        let fileContents = Map.fromList $ map (\(name, content) -> (tmpDir </> name ++ ".in", content)) modules
                         optimizedProgram <- case compilerOutput of
                             Left bytecode -> pure (optimize bytecode)
-                            Right err -> error $ renderCompilerErrors err mainContent
+                            Right err -> error $ renderCompilerErrors err fileContents
                         let mainLabel = locateLabel optimizedProgram "main"
                         let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) exprs
                         let startPc =

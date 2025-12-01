@@ -56,6 +56,7 @@ data External = External
 data CompilerError = CompilerError
     { errorMessage :: String
     , errorPosition :: AST.Position
+    , errorFile :: String
     }
     deriving (Show, Eq)
 
@@ -78,6 +79,7 @@ data CompilerState a = CompilerState
     , skipRefinementCheck :: Bool
     , modules :: Map.Map String (Parser.Program, FilePath)
     , currentModule :: Maybe String
+    , currentSourceFile :: String
     }
 
 data Let = Let
@@ -108,6 +110,7 @@ initCompilerState prog =
         False
         Map.empty
         Nothing
+        "no file"
 
 initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
 initCompilerStateWithFile prog sourcePath' =
@@ -130,6 +133,7 @@ initCompilerStateWithFile prog sourcePath' =
         False
         Map.empty
         Nothing
+        sourcePath'
 
 initCompilerStateWithModules :: Map.Map String (Parser.Program, FilePath) -> Parser.Program -> String -> CompilerState a
 initCompilerStateWithModules modules' prog sourcePath' =
@@ -152,10 +156,12 @@ initCompilerStateWithModules modules' prog sourcePath' =
         False
         modules'
         (Parser.moduleName prog)
+        sourcePath'
 
 cerror :: String -> AST.Position -> StateT (CompilerState a) IO ()
 cerror msg pos = do
-    unless (pos == AST.zeroPosition) $ modify (\s -> s{errors = errors s ++ [CompilerError msg pos]})
+    currentFile <- gets currentSourceFile
+    unless (pos == AST.zeroPosition) $ modify (\s -> s{errors = errors s ++ [CompilerError msg pos currentFile]})
 
 extractPosition :: Parser.Expr -> AST.Position
 extractPosition (Parser.Var{varPos}) = varPos
@@ -282,7 +288,7 @@ preludeExpr = do
             _ <-
                 liftIO $
                     compileDry prog "<prelude>" >>= \case
-                        Right err -> compileFail "<prelude>" err i >> error ""
+                        Right err -> compileFail "<prelude>" err (Map.singleton "<prelude>" i) >> error ""
                         Left p' -> return p'
             return $ progExpr ++ [Parser.FuncDef "__sep" [] (Parser.Placeholder anyPosition) anyPosition]
 
@@ -450,7 +456,7 @@ preludeFile :: IO String
 preludeFile = findSourceFile' "std/prelude.in" >>= readFile
 
 extractModuleName :: FilePath -> Parser.Program -> String
-extractModuleName filePath (Parser.Program _ (Just name)) = name
+extractModuleName _ (Parser.Program _ (Just name)) = name
 extractModuleName filePath _ =
     let baseName = takeBaseName filePath
         withoutExt = if ".in" `isSuffixOf` baseName then take (length baseName - 3) baseName else baseName
@@ -1490,7 +1496,7 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
                     cerror ("Circular import detected: module '" ++ from ++ "' imports itself") importPos
                     return []
                 else do
-                    (importedProg, _importedPath) <- case Map.lookup from modules' of
+                    (importedProg, importedPath) <- case Map.lookup from modules' of
                         Just (prog, path) -> return (prog, path)
                         Nothing -> do
                             sourcePath' <- gets sourcePath
@@ -1518,8 +1524,12 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
                     let (traitsAndStructs, otherExprs) = partition (\case Parser.Trait{} -> True; Parser.Struct{} -> True; _ -> False) exprs
                     let exprsToCompile = if null prefix then exprs else map (\e -> mangleExprForImport e prefix definedFuncs definedStructs) exprs
                     let (traitsAndStructsToCompile, otherExprsToCompile) = partition (\case Parser.Trait{} -> True; Parser.Struct{} -> True; _ -> False) exprsToCompile
+                    previousSourceFile <- gets currentSourceFile
+                    modify (\s -> s{currentSourceFile = importedPath})
                     _ <- concatMapM (`compileExpr` expectedType) traitsAndStructsToCompile
-                    concatMapM (`compileExpr` expectedType) otherExprsToCompile
+                    result <- concatMapM (`compileExpr` expectedType) otherExprsToCompile
+                    modify (\s -> s{currentSourceFile = previousSourceFile})
+                    return result
   where
     extractDefinedFuncNames :: Parser.Expr -> [String]
     extractDefinedFuncNames (Parser.FuncDec{name}) = [name]
@@ -1905,10 +1915,39 @@ locateLabel program label = do
         Just x' -> x'
         Nothing -> error $ "Label " ++ label ++ " not found"
 
-renderCompilerErrors :: [CompilerError] -> String -> String
-renderCompilerErrors errors input =
-    let sourceErrors = map (\(CompilerError msg pos) -> SourceError{errorMessage = msg, errorPosition = pos}) errors
-     in renderErrors sourceErrors input
+groupErrorsByFile :: [CompilerError] -> Map.Map String [CompilerError]
+groupErrorsByFile errors = Map.fromListWith (++) $ map (\e@(CompilerError _ _ file) -> (file, [e])) errors
+
+compilerErrorToSourceError :: CompilerError -> SourceError
+compilerErrorToSourceError (CompilerError msg pos _) = SourceError{errorMessage = msg, errorPosition = pos}
+
+renderErrorsForFile :: String -> [CompilerError] -> String -> Bool -> String
+renderErrorsForFile filePath fileErrors content hasMultipleFiles
+    | null content || content == "" = renderPlainErrors filePath fileErrors hasMultipleFiles
+    | otherwise = renderFormattedErrors filePath fileErrors content hasMultipleFiles
+  where
+    renderPlainErrors :: String -> [CompilerError] -> Bool -> String
+    renderPlainErrors path errs multiple
+        | multiple = path ++ ":\n" ++ unlines (map (\(CompilerError msg _ _) -> "  " ++ msg) errs)
+        | otherwise = unlines (map (\(CompilerError msg _ _) -> msg) errs)
+
+    renderFormattedErrors :: String -> [CompilerError] -> String -> Bool -> String
+    renderFormattedErrors path errs content' multiple =
+        let sourceErrors = map compilerErrorToSourceError errs
+            rendered = renderErrors sourceErrors content'
+         in if multiple then path ++ ":\n" ++ rendered else rendered
+
+renderCompilerErrors :: [CompilerError] -> Map.Map String String -> String
+renderCompilerErrors errors fileContents =
+    let errorsByFile = groupErrorsByFile errors
+        hasMultipleFiles = Map.size errorsByFile > 1
+     in unlines $
+            Map.elems $
+                Map.mapWithKey
+                    ( \filePath fileErrors ->
+                        renderErrorsForFile filePath fileErrors (Map.findWithDefault "" filePath fileContents) hasMultipleFiles
+                    )
+                    errorsByFile
 
 compileDry :: Parser.Program -> String -> IO (Either [Instruction] [CompilerError])
 compileDry prog sourcePath' =
@@ -1918,5 +1957,26 @@ compileDry prog sourcePath' =
             (initCompilerStateWithFile prog sourcePath')
         )
 
-compileFail :: String -> [CompilerError] -> String -> IO ()
-compileFail fileName errors file = putStrLn (fileName ++ "\x1b[31m\x1b[0m \n" ++ renderCompilerErrors errors file)
+readMissingFileContents :: [CompilerError] -> Map.Map String String -> IO (Map.Map String String)
+readMissingFileContents errors existingContents = do
+    let errorFiles = nub $ map (\(CompilerError _ _ file) -> file) errors
+    let missingFiles = filter (\file -> not (Map.member file existingContents) && file /= "" && file /= "no file") errorFiles
+    additionalContents <-
+        Map.fromList
+            <$> mapM
+                ( \file -> do
+                    content <- try (readFile file) :: IO (Either SomeException String)
+                    case content of
+                        Right c -> return (file, c)
+                        Left _ -> return (file, "")
+                )
+                missingFiles
+    return $ Map.union existingContents additionalContents
+
+compileFail :: String -> [CompilerError] -> Map.Map String String -> IO ()
+compileFail fileName errors fileContents = do
+    allFileContents <- readMissingFileContents errors fileContents
+    let rendered = renderCompilerErrors errors allFileContents
+    let hasMultipleFiles = Map.size (groupErrorsByFile errors) > 1
+    let output = if hasMultipleFiles then rendered else fileName ++ "\x1b[31m\x1b[0m \n" ++ rendered
+    putStrLn output
