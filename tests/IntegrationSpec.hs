@@ -1110,3 +1110,105 @@ let square (x: Int) : Int = x * x
                     )
                 ]
                 `shouldReturn` "25\n"
+        it "Should import module with basic function" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+module Main
+
+import qualified Math
+
+let main : IO = do
+    println (Math.double 21)
+end
+|]
+                    )
+                ,
+                    ( "Math"
+                    , [r|
+module Math
+
+let double (x: Int) : Int = x * 2
+|]
+                    )
+                ]
+                `shouldReturn` "42\n"
+        it "Should import module and use prelude functions in imported module" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+module Main
+
+import qualified Lib
+
+let main : IO = do
+    println (Lib.sumList [1, 2, 3])
+end
+|]
+                    )
+                ,
+                    ( "Lib"
+                    , [r|
+module Lib
+
+let sumList (xs: [Int]) : Int = foldl (`+`), 0, xs
+|]
+                    )
+                ]
+                `shouldReturn` "6\n"
+        it "Should import module with helper function calling other module functions" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+module Main
+
+import qualified Math
+
+let main : IO = do
+    println (Math.square 5)
+    println (Math.cube 3)
+end
+|]
+                    )
+                ,
+                    ( "Math"
+                    , [r|
+module Math
+
+let square (x: Int) : Int = x * x
+let cube (x: Int) : Int = x * (square x)
+|]
+                    )
+                ]
+                `shouldReturn` "25\n27\n"
+        it "Should correctly not mangle prelude function calls in imported code" $ do
+            compileAndRunModules
+                [
+                    ( "Main"
+                    , [r|
+module Main
+
+import qualified Utils
+
+let main : IO = do
+    println (Utils.formatList [1, 2, 3])
+end
+|]
+                    )
+                ,
+                    ( "Utils"
+                    , [r|
+module Utils
+
+let formatList (xs: [Int]) : String = do
+    let doubled = map (\x -> x * 2), xs
+    let total = foldl (`+`), 0, doubled
+    (total as String) ++ " is the total"
+end
+|]
+                    )
+                ]
+                `shouldReturn` "12 is the total\n"

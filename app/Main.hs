@@ -157,12 +157,12 @@ main = do
                                 else parseAndVerify input i initCompilerFlags input
                         rprog <- prog
                         expr <- case rprog of
-                            Left (err, expr) -> do
-                                case expr of
-                                    Just expr -> when debugAST $ putStrLn $ prettyPrintProgram expr
+                            Left (err, expr') -> do
+                                case expr' of
+                                    Just expr'' -> when debugAST $ putStrLn $ prettyPrintProgram expr''
                                     Nothing -> return ()
                                 errorWithoutStackTrace $ "Parse error:\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack i)) i
-                            Right expr -> return expr
+                            Right expr' -> return expr'
 
                         when debugAST $ putStrLn $ prettyPrintProgram expr
                         potentiallyTimedOperation "Compilation" showTime $ do

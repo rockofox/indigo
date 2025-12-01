@@ -12,7 +12,7 @@ import Control.Monad.State (MonadIO (liftIO), StateT, evalStateT, get, gets, mod
 import Data.Bifunctor (second)
 import Data.Either (lefts, rights)
 import Data.Functor ((<&>))
-import Data.List (elemIndex, find, groupBy, inits, intercalate, isInfixOf, isSuffixOf, nub)
+import Data.List (elemIndex, find, groupBy, inits, intercalate, isInfixOf, isSuffixOf, nub, partition)
 import Data.List.Split qualified
 import Data.Map qualified
 import Data.Map qualified as Map
@@ -437,6 +437,14 @@ findSourceFile fileName paths = do
 
 findSourceFile' :: String -> IO String
 findSourceFile' fileName = findSourceFile fileName []
+
+findFirstModuleFile :: [String] -> String -> IO (Maybe (String, String))
+findFirstModuleFile [] _ = return Nothing
+findFirstModuleFile (fileName : rest) sourcePath = do
+    result <- try (findSourceFile fileName [sourcePath] >>= readFile) :: IO (Either SomeException String)
+    case result of
+        Right content -> return $ Just (fileName, content)
+        Left _ -> findFirstModuleFile rest sourcePath
 
 preludeFile :: IO String
 preludeFile = findSourceFile' "std/prelude.in" >>= readFile
@@ -1487,65 +1495,119 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
                         Nothing -> do
                             sourcePath' <- gets sourcePath
                             let sourcePath = takeDirectory sourcePath'
-                            fileResult <- liftIO $ try (findSourceFile (from ++ ".in") [sourcePath] >>= readFile) :: StateT (CompilerState a) IO (Either SomeException String)
+                            let fileNamesToTry = [from ++ ".in", "std/" ++ from ++ ".in"]
+                            fileResult <- liftIO $ findFirstModuleFile fileNamesToTry sourcePath
                             case fileResult of
-                                Left _ -> do
-                                    cerror ("Module '" ++ from ++ "' not found in module map and file not found") importPos
+                                Nothing -> do
+                                    cerror ("Module '" ++ from ++ "' not found. Tried: " ++ intercalate ", " fileNamesToTry) importPos
                                     return (Parser.Program [] Nothing, "")
-                                Right i -> do
+                                Just (fileName, i) -> do
                                     case parseProgram (T.pack i) Parser.initCompilerFlags{Parser.needsMain = False} of
                                         Left err -> do
                                             cerror ("Parse error in imported module '" ++ from ++ "':\n" ++ show err) importPos
                                             return (Parser.Program [] Nothing, "")
-                                        Right p -> return (p, from ++ ".in")
+                                        Right p -> return (p, fileName)
                     let (Parser.Program exprs _) = importedProg
                     let moduleNameToUse = fromMaybe from (Parser.moduleName importedProg)
                     let prefix =
                             if qualified || isJust as
                                 then if qualified then moduleNameToUse else fromJust as
                                 else ""
-                    if null prefix
-                        then concatMapM (`compileExpr` expectedType) exprs
-                        else concatMapM (`compileExpr` expectedType) (map (`mangleExprForImport` prefix) exprs)
+                    let definedFuncs = concatMap extractDefinedFuncNames exprs
+                    let definedStructs = concatMap extractDefinedStructNames exprs
+                    let (traitsAndStructs, otherExprs) = partition (\case Parser.Trait{} -> True; Parser.Struct{} -> True; _ -> False) exprs
+                    let exprsToCompile = if null prefix then exprs else map (\e -> mangleExprForImport e prefix definedFuncs definedStructs) exprs
+                    let (traitsAndStructsToCompile, otherExprsToCompile) = partition (\case Parser.Trait{} -> True; Parser.Struct{} -> True; _ -> False) exprsToCompile
+                    _ <- concatMapM (`compileExpr` expectedType) traitsAndStructsToCompile
+                    concatMapM (`compileExpr` expectedType) otherExprsToCompile
   where
-    mangleExprForImport :: Parser.Expr -> String -> Parser.Expr
-    mangleExprForImport (Parser.FuncDec{name, types, generics, funcDecPos}) prefix =
-        Parser.FuncDec{name = prefix ++ "." ++ name, types = types, generics = generics, funcDecPos = funcDecPos}
-    mangleExprForImport (Parser.Function{def = fdef, dec, functionPos}) prefix =
-        Parser.Function{def = map (`mangleExprForImport` prefix) fdef, dec = mangleExprForImport dec prefix, functionPos = functionPos}
-    mangleExprForImport (Parser.FuncDef{name, args, body, funcDefPos}) prefix =
-        Parser.FuncDef{name = prefix ++ "." ++ name, args = args, body = mangleExprForImport body prefix, funcDefPos = funcDefPos}
-    mangleExprForImport (Parser.Struct{name, fields, refinement, refinementSrc, is, isValueStruct, generics, structPos}) prefix =
-        Parser.Struct{name = prefix ++ "." ++ name, fields = fields, refinement = fmap (`mangleExprForImport` prefix) refinement, refinementSrc = refinementSrc, is = is, isValueStruct = isValueStruct, generics = generics, structPos = structPos}
-    mangleExprForImport (Parser.StructLit{structLitName, structLitFields, structLitTypeArgs, structLitPos}) prefix =
-        Parser.StructLit{structLitName = prefix ++ "." ++ structLitName, structLitFields = map (second (`mangleExprForImport` prefix)) structLitFields, structLitTypeArgs = structLitTypeArgs, structLitPos = structLitPos}
-    mangleExprForImport (Parser.Trait{name, methods, generics, traitPos}) prefix =
-        Parser.Trait{name = prefix ++ "." ++ name, methods = map (`mangleExprForImport` prefix) methods, generics = generics, traitPos = traitPos}
-    mangleExprForImport (Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) prefix =
-        Parser.Impl{trait = prefix ++ "." ++ trait, traitTypeArgs = traitTypeArgs, for = for, methods = map (`mangleExprForImport` prefix) methods, implPos = implPos}
-    mangleExprForImport (Parser.FuncCall{funcName, funcArgs, funcPos}) prefix =
-        Parser.FuncCall{funcName = prefix ++ "." ++ funcName, funcArgs = map (`mangleExprForImport` prefix) funcArgs, funcPos = funcPos}
-    mangleExprForImport (Parser.Var{varName, varPos}) prefix =
+    extractDefinedFuncNames :: Parser.Expr -> [String]
+    extractDefinedFuncNames (Parser.FuncDec{name}) = [name]
+    extractDefinedFuncNames (Parser.FuncDef{name}) = [name]
+    extractDefinedFuncNames (Parser.Function{dec = Parser.FuncDec{name}}) = [name]
+    extractDefinedFuncNames (Parser.Let{letName}) = [letName]
+    extractDefinedFuncNames _ = []
+
+    extractDefinedStructNames :: Parser.Expr -> [String]
+    extractDefinedStructNames (Parser.Struct{name}) = [name]
+    extractDefinedStructNames _ = []
+
+    mangleExprForImport :: Parser.Expr -> String -> [String] -> [String] -> Parser.Expr
+    mangleExprForImport (Parser.FuncDec{name, types, generics, funcDecPos}) prefix _ structs =
+        Parser.FuncDec{name = prefix ++ "." ++ name, types = map (\t -> mangleTypeForImportImpl t prefix structs) types, generics = generics, funcDecPos = funcDecPos}
+    mangleExprForImport (Parser.Function{def = fdef, dec, functionPos}) prefix funcs structs =
+        Parser.Function{def = map (\e -> mangleExprForImport e prefix funcs structs) fdef, dec = mangleExprForImport dec prefix funcs structs, functionPos = functionPos}
+    mangleExprForImport (Parser.FuncDef{name, args, body, funcDefPos}) prefix funcs structs =
+        Parser.FuncDef{name = prefix ++ "." ++ name, args = args, body = mangleExprForImport body prefix funcs structs, funcDefPos = funcDefPos}
+    mangleExprForImport (Parser.Struct{name, fields, refinement, refinementSrc, is, isValueStruct, generics, structPos}) prefix funcs structs =
+        Parser.Struct{name = prefix ++ "." ++ name, fields = map (\(n, t) -> (n, mangleTypeForImportImpl t prefix structs)) fields, refinement = fmap (\e -> mangleExprForImport e prefix funcs structs) refinement, refinementSrc = refinementSrc, is = is, isValueStruct = isValueStruct, generics = generics, structPos = structPos}
+    mangleExprForImport (Parser.StructLit{structLitName, structLitFields, structLitTypeArgs, structLitPos}) prefix funcs structs =
+        let mangledName = if structLitName `elem` structs then prefix ++ "." ++ structLitName else structLitName
+         in Parser.StructLit{structLitName = mangledName, structLitFields = map (second (\e -> mangleExprForImport e prefix funcs structs)) structLitFields, structLitTypeArgs = structLitTypeArgs, structLitPos = structLitPos}
+    mangleExprForImport (Parser.Trait{name, methods, generics, traitPos}) prefix funcs structs =
+        Parser.Trait{name = prefix ++ "." ++ name, methods = map (\e -> mangleExprForImport e prefix funcs structs) methods, generics = generics, traitPos = traitPos}
+    mangleExprForImport (Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) prefix funcs structs =
+        Parser.Impl{trait = trait, traitTypeArgs = traitTypeArgs, for = mangleTypeForImportImpl for prefix structs, methods = map (mangleImplMethodImpl prefix funcs structs) methods, implPos = implPos}
+    mangleExprForImport (Parser.FuncCall{funcName, funcArgs, funcPos}) prefix funcs structs =
+        let mangledName = if funcName `elem` funcs then prefix ++ "." ++ funcName else funcName
+         in Parser.FuncCall{funcName = mangledName, funcArgs = map (\e -> mangleExprForImport e prefix funcs structs) funcArgs, funcPos = funcPos}
+    mangleExprForImport (Parser.Var{varName, varPos}) prefix _ _ =
         Parser.Var{varName = varName, varPos = varPos}
-    mangleExprForImport (Parser.StructAccess{structAccessStruct, structAccessField, structAccessPos}) prefix =
-        Parser.StructAccess{structAccessStruct = mangleExprForImport structAccessStruct prefix, structAccessField = mangleExprForImport structAccessField prefix, structAccessPos = structAccessPos}
-    mangleExprForImport (Parser.Let{letName, letValue, letPos}) prefix =
-        Parser.Let{letName = letName, letValue = mangleExprForImport letValue prefix, letPos = letPos}
-    mangleExprForImport (Parser.If{ifCond, ifThen, ifElse, ifPos}) prefix =
-        Parser.If{ifCond = mangleExprForImport ifCond prefix, ifThen = mangleExprForImport ifThen prefix, ifElse = mangleExprForImport ifElse prefix, ifPos = ifPos}
-    mangleExprForImport (Parser.DoBlock{doBlockExprs, doBlockPos}) prefix =
-        Parser.DoBlock{doBlockExprs = map (`mangleExprForImport` prefix) doBlockExprs, doBlockPos = doBlockPos}
-    mangleExprForImport (Parser.When{whenExpr, whenBranches, whenElse, whenPos}) prefix =
-        Parser.When{whenExpr = mangleExprForImport whenExpr prefix, whenBranches = map (\(p, b) -> (mangleExprForImport p prefix, mangleExprForImport b prefix)) whenBranches, whenElse = fmap (`mangleExprForImport` prefix) whenElse, whenPos = whenPos}
-    mangleExprForImport (Parser.ListLit{listLitExprs, listLitPos}) prefix =
-        Parser.ListLit{listLitExprs = map (`mangleExprForImport` prefix) listLitExprs, listLitPos = listLitPos}
-    mangleExprForImport (Parser.TupleLit{tupleLitExprs, tupleLitPos}) prefix =
-        Parser.TupleLit{tupleLitExprs = map (`mangleExprForImport` prefix) tupleLitExprs, tupleLitPos = tupleLitPos}
-    mangleExprForImport (Parser.Lambda{lambdaArgs, lambdaBody, lambdaPos}) prefix =
-        Parser.Lambda{lambdaArgs = lambdaArgs, lambdaBody = mangleExprForImport lambdaBody prefix, lambdaPos = lambdaPos}
-    mangleExprForImport (Parser.External{externalName, externalArgs, externalPos}) prefix =
-        Parser.External{externalName = prefix ++ "." ++ externalName, externalArgs = map (`mangleExprForImport` prefix) externalArgs, externalPos = externalPos}
-    mangleExprForImport x _ = x
+    mangleExprForImport (Parser.StructAccess{structAccessStruct, structAccessField, structAccessPos}) prefix funcs structs =
+        Parser.StructAccess{structAccessStruct = mangleExprForImport structAccessStruct prefix funcs structs, structAccessField = mangleExprForImport structAccessField prefix funcs structs, structAccessPos = structAccessPos}
+    mangleExprForImport (Parser.Let{letName, letValue, letPos}) prefix funcs structs =
+        Parser.Let{letName = letName, letValue = mangleExprForImport letValue prefix funcs structs, letPos = letPos}
+    mangleExprForImport (Parser.If{ifCond, ifThen, ifElse, ifPos}) prefix funcs structs =
+        Parser.If{ifCond = mangleExprForImport ifCond prefix funcs structs, ifThen = mangleExprForImport ifThen prefix funcs structs, ifElse = mangleExprForImport ifElse prefix funcs structs, ifPos = ifPos}
+    mangleExprForImport (Parser.DoBlock{doBlockExprs, doBlockPos}) prefix funcs structs =
+        Parser.DoBlock{doBlockExprs = map (\e -> mangleExprForImport e prefix funcs structs) doBlockExprs, doBlockPos = doBlockPos}
+    mangleExprForImport (Parser.When{whenExpr, whenBranches, whenElse, whenPos}) prefix funcs structs =
+        Parser.When{whenExpr = mangleExprForImport whenExpr prefix funcs structs, whenBranches = map (\(p, b) -> (mangleExprForImport p prefix funcs structs, mangleExprForImport b prefix funcs structs)) whenBranches, whenElse = fmap (\e -> mangleExprForImport e prefix funcs structs) whenElse, whenPos = whenPos}
+    mangleExprForImport (Parser.ListLit{listLitExprs, listLitPos}) prefix funcs structs =
+        Parser.ListLit{listLitExprs = map (\e -> mangleExprForImport e prefix funcs structs) listLitExprs, listLitPos = listLitPos}
+    mangleExprForImport (Parser.TupleLit{tupleLitExprs, tupleLitPos}) prefix funcs structs =
+        Parser.TupleLit{tupleLitExprs = map (\e -> mangleExprForImport e prefix funcs structs) tupleLitExprs, tupleLitPos = tupleLitPos}
+    mangleExprForImport (Parser.Lambda{lambdaArgs, lambdaBody, lambdaPos}) prefix funcs structs =
+        Parser.Lambda{lambdaArgs = lambdaArgs, lambdaBody = mangleExprForImport lambdaBody prefix funcs structs, lambdaPos = lambdaPos}
+    mangleExprForImport (Parser.External{externalName, externalArgs, externalPos}) prefix funcs structs =
+        Parser.External{externalName = prefix ++ "." ++ externalName, externalArgs = map (\e -> mangleExprForImport e prefix funcs structs) externalArgs, externalPos = externalPos}
+    mangleExprForImport (Parser.ParenApply{parenApplyExpr, parenApplyArgs, parenApplyPos}) prefix funcs structs =
+        case parenApplyExpr of
+            Parser.Var{varName}
+                | varName `elem` funcs ->
+                    Parser.ParenApply{parenApplyExpr = Parser.Var{varName = prefix ++ "." ++ varName, varPos = Parser.anyPosition}, parenApplyArgs = map (\e -> mangleExprForImport e prefix funcs structs) parenApplyArgs, parenApplyPos = parenApplyPos}
+            _ -> Parser.ParenApply{parenApplyExpr = mangleExprForImport parenApplyExpr prefix funcs structs, parenApplyArgs = map (\e -> mangleExprForImport e prefix funcs structs) parenApplyArgs, parenApplyPos = parenApplyPos}
+    mangleExprForImport (Parser.Add{addLhs, addRhs, addPos}) prefix funcs structs =
+        Parser.Add{addLhs = mangleExprForImport addLhs prefix funcs structs, addRhs = mangleExprForImport addRhs prefix funcs structs, addPos = addPos}
+    mangleExprForImport (Parser.Sub{subLhs, subRhs, subPos}) prefix funcs structs =
+        Parser.Sub{subLhs = mangleExprForImport subLhs prefix funcs structs, subRhs = mangleExprForImport subRhs prefix funcs structs, subPos = subPos}
+    mangleExprForImport (Parser.Mul{mulLhs, mulRhs, mulPos}) prefix funcs structs =
+        Parser.Mul{mulLhs = mangleExprForImport mulLhs prefix funcs structs, mulRhs = mangleExprForImport mulRhs prefix funcs structs, mulPos = mulPos}
+    mangleExprForImport (Parser.Div{divLhs, divRhs, divPos}) prefix funcs structs =
+        Parser.Div{divLhs = mangleExprForImport divLhs prefix funcs structs, divRhs = mangleExprForImport divRhs prefix funcs structs, divPos = divPos}
+    mangleExprForImport (Parser.ListAdd{listAddLhs, listAddRhs, listAddPos}) prefix funcs structs =
+        Parser.ListAdd{listAddLhs = mangleExprForImport listAddLhs prefix funcs structs, listAddRhs = mangleExprForImport listAddRhs prefix funcs structs, listAddPos = listAddPos}
+    mangleExprForImport (Parser.UnaryMinus{unaryMinusExpr, unaryMinusPos}) prefix funcs structs =
+        Parser.UnaryMinus{unaryMinusExpr = mangleExprForImport unaryMinusExpr prefix funcs structs, unaryMinusPos = unaryMinusPos}
+    mangleExprForImport (Parser.Cast{castExpr, castType, castPos}) prefix funcs structs =
+        Parser.Cast{castExpr = mangleExprForImport castExpr prefix funcs structs, castType = castType, castPos = castPos}
+    mangleExprForImport (Parser.TupleAccess{tupleAccessTuple, tupleAccessIndex, tupleAccessPos}) prefix funcs structs =
+        Parser.TupleAccess{tupleAccessTuple = mangleExprForImport tupleAccessTuple prefix funcs structs, tupleAccessIndex = tupleAccessIndex, tupleAccessPos = tupleAccessPos}
+    mangleExprForImport x _ _ _ = x
+
+    mangleImplMethodImpl :: String -> [String] -> [String] -> Parser.Expr -> Parser.Expr
+    mangleImplMethodImpl prefix funcs structs (Parser.FuncDef{name, args, body, funcDefPos}) =
+        Parser.FuncDef{name = name, args = args, body = mangleExprForImport body prefix funcs structs, funcDefPos = funcDefPos}
+    mangleImplMethodImpl prefix funcs structs expr = mangleExprForImport expr prefix funcs structs
+
+    mangleTypeForImportImpl :: Parser.Type -> String -> [String] -> Parser.Type
+    mangleTypeForImportImpl (Parser.StructT name typeArgs) prefix structs =
+        let mangledName = if name `elem` structs then prefix ++ "." ++ name else name
+         in Parser.StructT mangledName (map (\t -> mangleTypeForImportImpl t prefix structs) typeArgs)
+    mangleTypeForImportImpl (Parser.List t) prefix structs = Parser.List (mangleTypeForImportImpl t prefix structs)
+    mangleTypeForImportImpl (Parser.Tuple ts) prefix structs = Parser.Tuple (map (\t -> mangleTypeForImportImpl t prefix structs) ts)
+    mangleTypeForImportImpl (Parser.Fn args ret) prefix structs = Parser.Fn (map (\t -> mangleTypeForImportImpl t prefix structs) args) (mangleTypeForImportImpl ret prefix structs)
+    mangleTypeForImportImpl t _ _ = t
 compileExpr (Parser.Trait{name, methods, generics}) expectedType = do
     let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> error "Expected FuncDec in Trait methods") methods
     modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, traitPos = anyPosition} : traits s})
@@ -1557,7 +1619,12 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
     let forStructGenerics = case find (\case Parser.Struct{name = name'} -> name' == forStructName; _ -> False) structDecs' of
             Just (Parser.Struct{generics = gs}) -> map (\(Parser.GenericExpr n _) -> n) gs
             _ -> []
-    trait' <- gets traits >>= \traits' -> return $ fromJust $ find (\x -> Parser.name x == trait) traits'
+    traits' <- gets traits
+    trait' <- case find (\x -> Parser.name x == trait) traits' of
+        Just t -> return t
+        Nothing -> do
+            cerror ("Trait '" ++ trait ++ "' not found. Available traits: " ++ intercalate ", " (map Parser.name traits')) implPos
+            return $ Parser.Trait{name = trait, methods = [], generics = [], traitPos = implPos}
     let traitGenerics = Parser.generics trait'
     when (not (null traitGenerics) && length traitTypeArgs /= length traitGenerics) $ do
         cerror ("Trait type argument count mismatch for impl " ++ trait ++ " for " ++ typeToString for ++ ": expected " ++ show (length traitGenerics) ++ ", got " ++ show (length traitTypeArgs)) implPos
