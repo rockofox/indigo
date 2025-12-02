@@ -1978,5 +1978,5 @@ compileFail fileName errors fileContents = do
     allFileContents <- readMissingFileContents errors fileContents
     let rendered = renderCompilerErrors errors allFileContents
     let hasMultipleFiles = Map.size (groupErrorsByFile errors) > 1
-    let output = if hasMultipleFiles then rendered else fileName ++ "\x1b[31m\x1b[0m \n" ++ rendered
+    let output = if hasMultipleFiles then rendered else "\x1b[1m\x1b[36m" ++ fileName ++ "\x1b[0m \n" ++ rendered
     putStrLn output

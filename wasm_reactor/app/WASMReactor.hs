@@ -30,6 +30,7 @@ import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar)
 import Parser (CompilerFlags (CompilerFlags), exprs, initCompilerFlags, parseProgram)
 import Parser qualified
+import System.Exit (exitFailure)
 import VM
     ( IOBuffer (..)
     , IOMode (VMBuffer)
@@ -55,7 +56,7 @@ runProgramRaw progPtr progLen = do
                     Left instructions -> return instructions
                     Right errors -> do
                         compileFail "<input>" errors (Map.singleton "<input>" input)
-                        errorWithoutStackTrace ""
+                        exitFailure
             putStrLn $ printAssembly (V.fromList xxx) True
             let xxxPoint = locateLabel xxx "main"
             runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
@@ -66,14 +67,16 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
     input <- peekCStringLen (inputPtr, inputLen)
     let p = parseProgram (Data.Text.pack programStr) Parser.initCompilerFlags
     case p of
-        Left err -> errorWithoutStackTrace $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack programStr)) programStr
+        Left err -> do
+            putStrLn $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack programStr)) programStr
+            exitFailure
         Right program -> do
             xxx <-
                 evalStateT (compileProgram program) (initCompilerState program) >>= \case
                     Left instructions -> return instructions
                     Right errors -> do
                         compileFail "<input>" errors (Map.singleton "<input>" programStr)
-                        errorWithoutStackTrace ""
+                        exitFailure
             let xxxPoint = locateLabel xxx "main"
             vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
             let output' = BS.pack $ output $ ioBuffer vm

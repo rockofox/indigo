@@ -171,7 +171,7 @@ main = do
                                 Left instructions -> return instructions
                                 Right errors -> do
                                     compileFail input errors (Map.singleton input i)
-                                    errorWithoutStackTrace ""
+                                    exitFailure
                     else do
                         moduleMapResult <- BytecodeCompiler.buildModuleMap inputs
                         moduleMap <- case moduleMapResult of
@@ -191,7 +191,7 @@ main = do
                                     fileContents <- Map.fromList <$> mapM (\(_, (_, path)) -> readFile path >>= \content -> return (path, content)) (Map.toList moduleMap)
                                     let allFileContents = Map.insert mainFile mainContent fileContents
                                     compileFail mainFile errors allFileContents
-                                    errorWithoutStackTrace ""
+                                    exitFailure
             else do
                 let input = head inputs
                 bytecode <- inputFileBinary (Just input)
