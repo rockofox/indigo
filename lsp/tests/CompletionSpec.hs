@@ -82,3 +82,14 @@ spec = do
                 case completions of
                     (i : _) -> T.length (i ^. label) `shouldSatisfy` (> 0)
                     [] -> expectationFailure "Expected at least one completion"
+
+        it "provides completions for qualified imports" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
+            doc <- openDoc "completion_imports.in" "indigo"
+            completions <- getCompletions doc (Position 1 15)
+            liftIO $ do
+                let functions = filter (\i -> i ^. kind == Just CompletionItemKind_Function) completions
+                Prelude.length functions `shouldSatisfy` (> 0)
+                let functionLabels = map (T.unpack . (^. label)) functions
+                functionLabels `shouldContain` ["Module2.add"]
+                functionLabels `shouldContain` ["Module2.multiply"]
+                functionLabels `shouldContain` ["Module2.greet"]

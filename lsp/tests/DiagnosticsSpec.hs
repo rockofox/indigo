@@ -11,7 +11,7 @@ import Language.LSP.Protocol.Types
     )
 import Language.LSP.Protocol.Types qualified as LSPTypes
 import Language.LSP.Test
-import Test.Hspec
+import Test.Hspec (Spec, describe, expectationFailure, it, shouldBe, shouldSatisfy)
 import TestUtils (lspExe)
 
 spec :: Spec
@@ -54,3 +54,16 @@ spec = do
             liftIO $ do
                 Prelude.length diags1 `shouldSatisfy` (> 0)
                 Prelude.length diags2 `shouldSatisfy` (<= Prelude.length diags1)
+
+        it "reports error for missing module" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
+            _doc <- openDoc "diagnostics_missing_module.in" "indigo"
+            diags <- waitForDiagnostics
+            liftIO $ do
+                Prelude.length diags `shouldSatisfy` (> 0)
+                case diags of
+                    diag : _ -> do
+                        diag ^. severity `shouldBe` Just DiagnosticSeverity_Error
+                        diag ^. source `shouldBe` Just "indigo"
+                        let msg = diag ^. Language.LSP.Protocol.Lens.message
+                        T.pack "not found" `T.isInfixOf` msg `shouldBe` True
+                    [] -> expectationFailure "Expected diagnostic for missing module"

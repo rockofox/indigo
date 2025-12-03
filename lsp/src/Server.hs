@@ -8,15 +8,38 @@ import Completion (getCompletionsForPosition, resolveCompletionItem)
 import Control.Exception (SomeException, catch)
 import Control.Lens
 import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Diagnostics (getDiagnostics)
+import GHC.IO (unsafePerformIO)
 import Hover (getHover)
 import Language.LSP.Protocol.Lens
 import Language.LSP.Protocol.Message
 import Language.LSP.Protocol.Types
 import Language.LSP.Server
 import Language.LSP.VFS (virtualFileText)
+import ModuleResolver (ModuleResolver, initModuleResolver)
+import System.Directory (getCurrentDirectory)
+
+moduleResolverRef :: IORef (Maybe ModuleResolver)
+moduleResolverRef = unsafePerformIO $ newIORef Nothing
+{-# NOINLINE moduleResolverRef #-}
+
+getModuleResolver :: IO ModuleResolver
+getModuleResolver = do
+    resolver <- readIORef moduleResolverRef
+    case resolver of
+        Just r -> return r
+        Nothing -> do
+            workspaceRoot <- getCurrentDirectory
+            newResolver <- initModuleResolver workspaceRoot
+            writeIORef moduleResolverRef $ Just newResolver
+            return newResolver
+
+updateModuleResolver :: ModuleResolver -> IO ()
+updateModuleResolver resolver = writeIORef moduleResolverRef $ Just resolver
 
 handlers :: Handlers (LspM ())
 handlers =
@@ -28,7 +51,9 @@ handlers =
         , notificationHandler SMethod_SetTrace $ \_ -> do
             return ()
         , notificationHandler SMethod_WorkspaceDidChangeWatchedFiles $ \_ -> do
-            return ()
+            workspaceRoot <- liftIO getCurrentDirectory
+            newResolver <- liftIO $ initModuleResolver workspaceRoot
+            liftIO $ updateModuleResolver newResolver
         , notificationHandler SMethod_TextDocumentDidOpen $ \TNotificationMessage{_params = DidOpenTextDocumentParams doc} -> do
             let TextDocumentItem{_uri, _text} = doc
             updateDiagnostics _uri _text
@@ -47,14 +72,18 @@ handlers =
             let normUri = toNormalizedUri _uri
             vf <- getVirtualFile normUri
             let sourceText = maybe T.empty virtualFileText vf
-            hoverResult <- getHover sourceText pos
+            resolver <- liftIO getModuleResolver
+            let filePath = fromMaybe "" $ uriToFilePath _uri
+            hoverResult <- liftIO $ getHover sourceText pos resolver filePath
             responder $ Right $ maybe (InR Null) InL hoverResult
         , requestHandler SMethod_TextDocumentCompletion $ \TRequestMessage{_params = CompletionParams doc pos _context _workDone _partialResult} responder -> do
             let TextDocumentIdentifier{_uri} = doc
             let normUri = toNormalizedUri _uri
             vf <- getVirtualFile normUri
             let sourceText = maybe T.empty virtualFileText vf
-            completionResult <- getCompletionsForPosition sourceText pos
+            resolver <- liftIO getModuleResolver
+            let filePath = fromMaybe "" $ uriToFilePath _uri
+            completionResult <- liftIO $ getCompletionsForPosition sourceText pos resolver filePath
             let completions = case completionResult of
                     Right cl -> cl
                     Left _ -> CompletionList False Nothing []
@@ -63,7 +92,9 @@ handlers =
             let normUri = toNormalizedUri _uri
             vf <- getVirtualFile normUri
             let text = maybe T.empty virtualFileText vf
-            diagnostics <- liftIO $ catch (getDiagnostics text) $ \(_ :: SomeException) -> do
+            resolver <- liftIO getModuleResolver
+            let filePath = fromMaybe "" $ uriToFilePath _uri
+            diagnostics <- liftIO $ catch (getDiagnostics text resolver filePath) $ \(_ :: SomeException) -> do
                 return []
             let fullDiagReport =
                     RelatedFullDocumentDiagnosticReport
@@ -78,9 +109,16 @@ handlers =
             responder $ Right resolvedItem
         ]
 
+uriToFilePathText :: Uri -> Text
+uriToFilePathText uri = case uriToFilePath uri of
+    Just path -> T.pack path
+    Nothing -> T.pack ""
+
 updateDiagnostics :: Uri -> Text -> LspM () ()
 updateDiagnostics uri text = do
-    diagnostics <- liftIO $ catch (getDiagnostics text) $ \(_ :: SomeException) -> do
+    resolver <- liftIO getModuleResolver
+    let filePath = fromMaybe "" $ uriToFilePath uri
+    diagnostics <- liftIO $ catch (getDiagnostics text resolver filePath) $ \(_ :: SomeException) -> do
         return []
     let params = PublishDiagnosticsParams uri Nothing diagnostics
     sendNotification SMethod_TextDocumentPublishDiagnostics params

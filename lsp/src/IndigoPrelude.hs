@@ -18,7 +18,7 @@ loadPrelude = do
             let parseResult = parseProgram (T.pack preludeContent) initCompilerFlags{needsMain = False}
             case parseResult of
                 Left _ -> return $ Left "Failed to parse prelude"
-                Right (Program exprs) -> return $ Right exprs
+                Right (Program exprs _) -> return $ Right exprs
 
 getPreludeExprs :: (MonadIO m) => m [Expr]
 getPreludeExprs = do

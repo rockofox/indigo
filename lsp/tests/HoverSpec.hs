@@ -47,6 +47,13 @@ spec = do
                 Just (MarkupContent _ content) -> "Person" `isInfixOf` content `shouldBe` True
                 Nothing -> expectationFailure "Expected hover content"
 
+        it "shows hover for qualified symbols" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
+            doc <- openDoc "hover_qualified.in" "indigo"
+            hover <- getHover doc (Position 2 15)
+            liftIO $ case extractHoverContent hover of
+                Just (MarkupContent _ content) -> "add" `isInfixOf` content `shouldBe` True
+                Nothing -> expectationFailure "Expected hover content for qualified symbol"
+
         it "returns Nothing for positions without expressions" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
             doc <- openDoc "hover_empty.in" "indigo"
             hover <- getHover doc (Position 0 0)

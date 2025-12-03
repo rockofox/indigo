@@ -1,9 +1,11 @@
 module Completion where
 
 import AST (Expr (..), Position (..), Program (..), Type (..), children)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad (Monad)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.List (nub)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import IndigoPrelude (getPreludeExprs)
@@ -15,6 +17,7 @@ import Language.LSP.Protocol.Types
     , MarkupKind (..)
     )
 import Language.LSP.Protocol.Types qualified as LSP
+import ModuleResolver (ModuleResolver, extractImports, resolveModuleFromPath)
 import Parser (initCompilerFlags, needsMain, parseProgram)
 import Position (lspToIndigoOffset)
 
@@ -147,7 +150,7 @@ getStructTypeBeforeDot sourceText offset exprs =
                                 Nothing ->
                                     let parseResult = parseProgram exprText initCompilerFlags{needsMain = False}
                                      in case parseResult of
-                                            Right (Program parsedExprs) ->
+                                            Right (Program parsedExprs _) ->
                                                 case parsedExprs of
                                                     [expr] -> getStructTypeFromExpr expr exprs
                                                     _ -> Nothing
@@ -210,31 +213,60 @@ tryParseWithFallback :: Text -> Either String (Program, [Expr])
 tryParseWithFallback sourceText =
     let flags = initCompilerFlags{needsMain = False}
      in case parseProgram sourceText flags of
-            Right (Program exprs) -> Right (Program exprs, exprs)
+            Right (Program exprs _) -> Right (Program exprs Nothing, exprs)
             Left _ ->
                 let sourceLines = T.lines sourceText
                     completeLines = filter (not . isIncompleteLine) sourceLines
                     truncatedSource = T.unlines completeLines
                  in case parseProgram truncatedSource flags of
-                        Right (Program exprs) -> Right (Program exprs, exprs)
-                        Left _ -> Right (Program [], [])
+                        Right (Program exprs _) -> Right (Program exprs Nothing, exprs)
+                        Left _ -> Right (Program [] Nothing, [])
   where
     isIncompleteLine line =
         let trimmed = T.stripEnd line
          in not (T.null trimmed) && T.last trimmed `elem` ['=', '.']
 
-getCompletionsForPosition :: (MonadIO m) => Text -> LSP.Position -> m (Either () CompletionList)
-getCompletionsForPosition sourceText pos = do
+concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
+concatMapM f xs = concat <$> mapM f xs
+
+extractImportedSymbols :: ModuleResolver -> [Expr] -> FilePath -> IO ([String], [String], [String])
+extractImportedSymbols resolver exprs currentFile = do
+    let imports = extractImports exprs
+    importedFunctions <- concatMapM (extractFromImport resolver currentFile extractFunctionsFromProgram) imports
+    importedStructs <- concatMapM (extractFromImport resolver currentFile extractStructsFromProgram) imports
+    importedVars <- concatMapM (extractFromImport resolver currentFile extractVariablesFromProgram) imports
+    return (nub importedFunctions, nub importedStructs, nub importedVars)
+  where
+    extractFromImport :: ModuleResolver -> FilePath -> (Program -> [String]) -> Expr -> IO [String]
+    extractFromImport resolver' currentFile' extractor (Import{from, qualified, as}) = do
+        maybeModule <- resolveModuleFromPath resolver' from currentFile'
+        case maybeModule of
+            Just (prog, _) -> do
+                let symbols = extractor prog
+                let prefix = if qualified then fromMaybe from as else ""
+                return $ if null prefix then symbols else map ((prefix ++ ".") ++) symbols
+            Nothing -> return []
+    extractFromImport _ _ _ _ = return []
+    extractFunctionsFromProgram :: Program -> [String]
+    extractFunctionsFromProgram (Program exprs' _) = extractFunctions exprs'
+    extractStructsFromProgram :: Program -> [String]
+    extractStructsFromProgram (Program exprs' _) = extractStructs exprs'
+    extractVariablesFromProgram :: Program -> [String]
+    extractVariablesFromProgram (Program exprs' _) = map fst $ concatMap extractVariablesRecursive exprs'
+
+getCompletionsForPosition :: (MonadIO m) => Text -> LSP.Position -> ModuleResolver -> FilePath -> m (Either () CompletionList)
+getCompletionsForPosition sourceText pos resolver filePath = do
     preludeExprs <- getPreludeExprs
     let offset = lspToIndigoOffset pos sourceText
         parseResult = tryParseWithFallback sourceText
     case parseResult of
         Left _ -> return $ Right $ CompletionList False Nothing []
         Right (_, exprs) -> do
+            (importedFuncs, importedStructs, importedVars) <- liftIO $ extractImportedSymbols resolver exprs filePath
             let allExprs = preludeExprs ++ exprs
-                functions = extractFunctions allExprs
-                structs = extractStructs allExprs
-                variables = extractVariables exprs offset
+                functions = extractFunctions allExprs ++ importedFuncs
+                structs = extractStructs allExprs ++ importedStructs
+                variables = extractVariables exprs offset ++ importedVars
                 structDefs = extractStructDefinitions allExprs
                 isFieldAccess = isStructFieldAccessContext sourceText offset
                 structType = if isFieldAccess then getStructTypeBeforeDot sourceText offset allExprs else Nothing
@@ -354,7 +386,7 @@ getCompletionsForPosition sourceText pos = do
 resolveCompletionItem :: CompletionItem -> CompletionItem
 resolveCompletionItem item@CompletionItem{_label = labelText, _kind = kind, _documentation = existingDoc} =
     let label = T.unpack labelText
-        mkDoc content = Just $ InR (MarkupContent MarkupKind_Markdown content)
+        mkDoc content = Just $ LSP.InR (MarkupContent MarkupKind_Markdown content)
         updateDoc doc = item{_documentation = doc} :: CompletionItem
      in case kind of
             Just CompletionItemKind_Keyword ->

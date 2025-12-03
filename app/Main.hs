@@ -7,7 +7,7 @@ import AST qualified
 import BytecodeCompiler (CompilerError (..), compileFail, renderCompilerErrors)
 import BytecodeCompiler qualified
 import Control.Exception
-import Control.Monad
+import Control.Monad (filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.State (StateT (runStateT), evalStateT)
@@ -27,14 +27,17 @@ import Debug.Trace
 import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
+import IndigoConfig (IndigoConfig (..), findConfigFile, loadConfig, mainFile, sourceDirs)
 import Optimizer
 import Options.Applicative
 import Parser
 import System.Console.Repline
+import System.Directory (doesDirectoryExist, doesFileExist, getCurrentDirectory, listDirectory)
 import System.Exit (exitFailure, exitSuccess)
 import System.FilePath
 import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle)
+import Util
 import VM qualified
 
 data CmdOptions = Options
@@ -96,6 +99,19 @@ indent i = replicate (i * 2) ' '
 prettyPrintProgram :: Program -> String
 prettyPrintProgram (Program exprs _) = intercalate "\n" (map (`prettyPrintExpr` 0) exprs)
 
+findIndigoFilesInDir :: FilePath -> IO [FilePath]
+findIndigoFilesInDir dir = do
+    exists <- doesDirectoryExist dir
+    if not exists
+        then return []
+        else do
+            entries <- listDirectory dir
+            let paths = map (dir </>) entries
+            files <- filterM doesFileExist $ filter ((== ".in") . takeExtension) paths
+            dirs <- filterM doesDirectoryExist paths
+            subFiles <- Util.concatMapM findIndigoFilesInDir dirs
+            return $ files ++ subFiles
+
 inputFile :: Maybe String -> IO String
 inputFile input = case input of
     Just "-" -> getContents
@@ -144,12 +160,27 @@ main = do
     when (null inputs) $ do
         newRepl
         exitSuccess
+
+    currentDir <- getCurrentDirectory
+    configFile <- findConfigFile currentDir
+    maybeConfig <- case configFile of
+        Just path -> loadConfig path
+        Nothing -> return Nothing
+
+    let finalInputs = case maybeConfig of
+            Just cfg -> case mainFile cfg of
+                Just mainPath ->
+                    let configDir = maybe currentDir takeDirectory configFile
+                     in [configDir </> mainPath]
+                Nothing -> inputs
+            Nothing -> inputs
+
     program <-
         if not runBytecode
             then do
-                if length inputs == 1
+                if length finalInputs == 1
                     then do
-                        let input = head inputs
+                        let input = head finalInputs
                         i <- readFile input
                         prog <-
                             if noVerify
@@ -173,11 +204,17 @@ main = do
                                     compileFail input errors (Map.singleton input i)
                                     exitFailure
                     else do
-                        moduleMapResult <- BytecodeCompiler.buildModuleMap inputs
+                        let configDir = maybe currentDir takeDirectory configFile
+                        let searchDirs = case maybeConfig of
+                                Just cfg -> if null (sourceDirs cfg) then [currentDir] else map (configDir </>) (sourceDirs cfg)
+                                Nothing -> [currentDir]
+                        allFiles <- Util.concatMapM findIndigoFilesInDir searchDirs
+                        let filesToUse = if null allFiles then finalInputs else allFiles
+                        moduleMapResult <- BytecodeCompiler.buildModuleMap filesToUse
                         moduleMap <- case moduleMapResult of
                             Left err -> errorWithoutStackTrace $ "Failed to build module map:\n" ++ err
                             Right mm -> return mm
-                        let mainFile = head inputs
+                        let mainFile = head finalInputs
                         mainContent <- readFile mainFile
                         mainProg <- case parseProgram (T.pack mainContent) initCompilerFlags of
                             Left err -> errorWithoutStackTrace $ "Parse error in " ++ mainFile ++ ":\n" ++ renderErrors (parseErrorBundleToSourceErrors err (T.pack mainContent)) mainFile
@@ -193,7 +230,7 @@ main = do
                                     compileFail mainFile errors allFileContents
                                     exitFailure
             else do
-                let input = head inputs
+                let input = head finalInputs
                 bytecode <- inputFileBinary (Just input)
                 return $ VM.fromBytecode bytecode
     when emitBytecode $ do

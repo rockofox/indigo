@@ -2,12 +2,13 @@ module Hover where
 
 import AST qualified
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Maybe (listToMaybe, maybeToList)
+import Data.Maybe (listToMaybe, mapMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as T
 import IndigoPrelude (getPreludeExprs)
 import Language.LSP.Protocol.Types (Hover (..), MarkupContent (..), MarkupKind (..), Position)
-import Language.LSP.Server (LspM, getVirtualFile)
+import Language.LSP.Protocol.Types qualified as LSPTypes
+import ModuleResolver
 import Parser (initCompilerFlags, needsMain, parseProgram)
 import Position (lspToIndigoOffset)
 
@@ -105,7 +106,7 @@ getExprChildren _ = []
 
 getHoverForExpr :: AST.Expr -> Text -> Maybe Hover
 getHoverForExpr expr _sourceText =
-    let mkHover content = Just $ Hover (InL (MarkupContent MarkupKind_Markdown content)) Nothing
+    let mkHover content = Just $ Hover (LSPTypes.InL (MarkupContent MarkupKind_Markdown content)) Nothing
      in case expr of
             AST.Var{varName} -> mkHover $ T.pack $ "**Variable:** `" ++ varName ++ "`"
             AST.FuncCall{funcName} -> mkHover $ T.pack $ "**Function call:** `" ++ funcName ++ "`"
@@ -150,8 +151,26 @@ findPreludeDefinition preludeExprs name =
             )
             preludeExprs
 
-getHover :: (MonadIO m) => Text -> Position -> m (Maybe Hover)
-getHover sourceText pos = do
+resolveQualifiedSymbol :: String -> (String, String)
+resolveQualifiedSymbol name =
+    let parts = T.splitOn (T.pack ".") (T.pack name)
+     in if length parts > 1
+            then (T.unpack $ head parts, T.unpack $ T.intercalate (T.pack ".") $ tail parts)
+            else ("", name)
+
+findQualifiedAccessAtOffset :: Int -> AST.Expr -> Maybe (String, String)
+findQualifiedAccessAtOffset offset expr =
+    case expr of
+        AST.StructAccess{structAccessStruct = AST.Var{varName = moduleName}, structAccessField = AST.Var{varName = symbolName, varPos = fieldPos}} ->
+            let (AST.Position (fieldStart, fieldEnd)) = fieldPos
+             in if offset >= fieldStart && offset <= fieldEnd
+                    then Just (moduleName, symbolName)
+                    else Nothing
+        _ ->
+            listToMaybe $ mapMaybe (findQualifiedAccessAtOffset offset) (getExprChildren expr)
+
+getHover :: (MonadIO m) => Text -> Position -> ModuleResolver -> FilePath -> m (Maybe Hover)
+getHover sourceText pos resolver filePath = do
     preludeExprs <- getPreludeExprs
     let offset = lspToIndigoOffset pos sourceText
     parseResult <- case parseProgram sourceText initCompilerFlags{needsMain = False} of
@@ -161,19 +180,66 @@ getHover sourceText pos = do
         Nothing -> return Nothing
         Just userExprs -> do
             let exprMatch = listToMaybe $ concatMap (\e -> maybeToList (findExprAtPosition e offset)) userExprs
+            let qualifiedMatch = listToMaybe $ mapMaybe (findQualifiedAccessAtOffset offset) userExprs
             case exprMatch of
                 Nothing -> return Nothing
-                Just (expr, _) -> do
-                    let userHover = getHoverForExpr expr sourceText
-                    case userHover of
-                        Just h -> return $ Just h
-                        Nothing -> case expr of
-                            AST.Var{varName} -> do
-                                case findPreludeDefinition preludeExprs varName of
-                                    Nothing -> return Nothing
-                                    Just preludeExpr -> return $ getHoverForExpr preludeExpr sourceText
-                            AST.FuncCall{funcName} -> do
-                                case findPreludeDefinition preludeExprs funcName of
-                                    Nothing -> return Nothing
-                                    Just preludeExpr -> return $ getHoverForExpr preludeExpr sourceText
-                            _ -> return Nothing
+                Just (expr, exprPos) -> do
+                    case qualifiedMatch of
+                        Just (moduleName, symbolName) -> do
+                            maybeModule <- liftIO $ resolveModuleFromPath resolver moduleName filePath
+                            case maybeModule of
+                                Just (prog, _) -> do
+                                    let (AST.Program exprs' _) = prog
+                                    case findDefinitionInModule exprs' symbolName of
+                                        Just def -> return $ getHoverForExpr def sourceText
+                                        Nothing -> return Nothing
+                                Nothing -> return Nothing
+                        Nothing -> do
+                            let userHover = getHoverForExpr expr sourceText
+                            case userHover of
+                                Just h -> return $ Just h
+                                Nothing -> case expr of
+                                    AST.Var{varName} -> do
+                                        let (moduleName, symbolName) = resolveQualifiedSymbol varName
+                                        if null moduleName
+                                            then do
+                                                case findPreludeDefinition preludeExprs varName of
+                                                    Nothing -> return Nothing
+                                                    Just preludeExpr -> return $ getHoverForExpr preludeExpr sourceText
+                                            else do
+                                                maybeModule <- liftIO $ resolveModuleFromPath resolver moduleName filePath
+                                                case maybeModule of
+                                                    Just (prog, _) -> do
+                                                        let (AST.Program exprs' _) = prog
+                                                        case findDefinitionInModule exprs' symbolName of
+                                                            Just def -> return $ getHoverForExpr def sourceText
+                                                            Nothing -> return Nothing
+                                                    Nothing -> return Nothing
+                                    AST.FuncCall{funcName} -> do
+                                        let (moduleName, symbolName) = resolveQualifiedSymbol funcName
+                                        if null moduleName
+                                            then do
+                                                case findPreludeDefinition preludeExprs funcName of
+                                                    Nothing -> return Nothing
+                                                    Just preludeExpr -> return $ getHoverForExpr preludeExpr sourceText
+                                            else do
+                                                maybeModule <- liftIO $ resolveModuleFromPath resolver moduleName filePath
+                                                case maybeModule of
+                                                    Just (prog, _) -> do
+                                                        let (AST.Program exprs' _) = prog
+                                                        case findDefinitionInModule exprs' symbolName of
+                                                            Just def -> return $ getHoverForExpr def sourceText
+                                                            Nothing -> return Nothing
+                                                    Nothing -> return Nothing
+                                    _ -> return Nothing
+
+findDefinitionInModule :: [AST.Expr] -> String -> Maybe AST.Expr
+findDefinitionInModule exprs name = listToMaybe $ concatMap findInExpr exprs
+  where
+    findInExpr expr = case expr of
+        AST.FuncDef{name = fnName} | fnName == name -> [expr]
+        AST.FuncDec{name = fnName} | fnName == name -> [expr]
+        AST.Function{dec = AST.FuncDec{name = fnName}} | fnName == name -> [expr]
+        AST.Struct{name = structName} | structName == name -> [expr]
+        AST.Let{letName} | letName == name -> [expr]
+        _ -> []

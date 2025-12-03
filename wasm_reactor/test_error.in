@@ -1,0 +1,3 @@
+let main: IO = do
+    prinln "Hello, Indigo!"
+end
