@@ -20,4 +20,7 @@ const copy404Plugin = () => ({
 export default defineConfig({
   plugins: [elmPlugin(), copy404Plugin()],
   // base: '/indigo/', // GitHub Pages base path (repo name)
+  define: {
+    'import.meta.env.VITE_BUILD_TIME': JSON.stringify(Date.now()),
+  },
 });

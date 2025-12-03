@@ -1,7 +1,8 @@
 import { WASI, File, PreopenDirectory, Fd } from "@bjorn3/browser_wasi_shim";
 import * as fflate from 'fflate';
 
-const ZIP_URL = "https://storage.googleapis.com/indigolang/indigo-wasm-latest.zip";
+const BUILD_TIME = import.meta.env.VITE_BUILD_TIME || Date.now();
+const ZIP_URL = `https://storage.googleapis.com/indigolang/indigo-wasm-latest.zip?v=${BUILD_TIME}`;
 
 class XTermStdio extends Fd {
     constructor(term) {
