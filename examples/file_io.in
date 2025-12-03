@@ -1,17 +1,19 @@
+import qualified File
+
 let main : IO = do
   let test_file = "test_output.txt"
   let content = "Hello, World!\nThis is a test file.\n"
   
-  let fd_io = openFile test_file, "w"
+  let fd_io = File.openFile test_file, "w"
   let fd = fd_io.inner
-  writeFile fd, content
-  closeFile fd
+  File.writeFile fd, content
+  File.closeFile fd
   
-  let fd2_io = openFile test_file, "r"
+  let fd2_io = File.openFile test_file, "r"
   let fd2 = fd2_io.inner
-  let read_content_io = readFile fd2, 1000
+  let read_content_io = File.readFile fd2, 1000
   let read_content = read_content_io.inner
-  closeFile fd2
+  File.closeFile fd2
   
   println read_content
   IO{inner: 0}
