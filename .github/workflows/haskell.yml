@@ -155,7 +155,8 @@ jobs:
   release:
     name: Create Releases
     runs-on: ubuntu-latest
-    needs: [build_native_release, build_wasm]
+    # needs: [build_native_release, build_wasm]
+    needs: [build_wasm]
     steps:
       # - name: Download native release artifact
       #   uses: actions/download-artifact@v4
