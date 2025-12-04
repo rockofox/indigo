@@ -139,15 +139,15 @@ spec = do
         it "Should parse generic trait" $ do
             parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Monad", methods = [FuncDec{name = "bind", types = [Self, AST.Fn [Any] Self, Self], generics = [], funcDecPos = anyPosition}], generics = [GenericExpr "T" Nothing], traitPos = anyPosition}] Nothing)
+                    (Program [Trait{name = "Monad", methods = [FuncDec{name = "bind", types = [Self, AST.Fn [Any] Self, Self], generics = [], funcDecPos = anyPosition}], generics = [GenericExpr "T" Nothing], requiredProperties = [], refinement = Nothing, refinementSrc = "", traitPos = anyPosition}] Nothing)
         it "Should parse a trait decleration" $
             parseProgram "trait Show = do\nshow :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}] Nothing)
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], requiredProperties = [], refinement = Nothing, refinementSrc = "", traitPos = anyPosition}] Nothing)
         it "Should parse a trait declaration with multiple methods" $
             parseProgram "trait Show = do\nshow :: Self -> String\nshow2 :: Self -> String\nend" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}, FuncDec{name = "show2", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}] Nothing)
+                    (Program [Trait{name = "Show", methods = [FuncDec{name = "show", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}, FuncDec{name = "show2", types = [Self, StructT "String" []], generics = [], funcDecPos = anyPosition}], generics = [], requiredProperties = [], refinement = Nothing, refinementSrc = "", traitPos = anyPosition}] Nothing)
         it "Should parse a trait implementation" $
             parseProgram "impl Show for Point = do\nshow point = \"Point {x: \" : show point.x : \", y: \" : show point.y : \"}\"\nend" parserCompilerFlags
                 `shouldBe` Right
@@ -188,6 +188,26 @@ spec = do
             parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend\nstruct Option<T> = (value: T)\nstruct Optional = (value: Any)\nimpl Monad<Option<Int>> for Optional = do\n  bind x f = f x.value\nend" parserCompilerFlags
                 `shouldSatisfy` \case
                     Right (Program [Trait{name = "Monad"}, Struct{name = "Option", generics = [_]}, Struct{name = "Optional"}, Impl{trait = "Monad", traitTypeArgs = [StructT "Option" [StructT "Int" []]], for = StructT "Optional" []}] _) -> True
+                    _ -> False
+        it "Should parse trait with required properties" $ do
+            parseProgram "trait Printable = (name: String, age: Int) do\n  print :: Self -> String\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Printable", requiredProperties = [("name", StructT "String" []), ("age", StructT "Int" [])]}] _) -> True
+                    _ -> False
+        it "Should parse trait with refinement" $ do
+            parseProgram "trait PositiveNumber satisfies (x > 0) = do\n  add :: Self -> Self -> Self\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "PositiveNumber", refinement = Just _}] _) -> True
+                    _ -> False
+        it "Should parse trait with both required properties and refinement" $ do
+            parseProgram "trait ValidPerson = (name: String, age: Int) satisfies (age > 0) do\n  getName :: Self -> String\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "ValidPerson", requiredProperties = [("name", StructT "String" []), ("age", StructT "Int" [])], refinement = Just _}] _) -> True
+                    _ -> False
+        it "Should parse trait with generics and required properties" $ do
+            parseProgram "trait Container<T> = (value: T) do\n  get :: Self -> T\nend" parserCompilerFlags
+                `shouldSatisfy` \case
+                    Right (Program [Trait{name = "Container", generics = [GenericExpr "T" Nothing], requiredProperties = [("value", StructT "T" [])]}] _) -> True
                     _ -> False
     describe "Gravis" $ do
         it "Should parse operators escaped using gravis in dec correctly" $ do

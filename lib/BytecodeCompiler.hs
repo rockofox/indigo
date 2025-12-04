@@ -345,9 +345,6 @@ findFunction funcName xs typess = do
 
 internalFunctions :: [String]
 internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
-#ifdef POSIX_IO
-    ++ ["unsafeOpenFile", "unsafeReadFile", "unsafeWriteFile", "unsafeCloseFile", "unsafeSocket", "unsafeBind", "unsafeListen", "unsafeAccept", "unsafeConnect", "unsafeSend", "unsafeRecv", "unsafeCloseSocket"]
-#endif
 
 typesMatch :: Function -> [Parser.Type] -> Bool
 typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess) && length typess <= length fun.types
@@ -923,20 +920,6 @@ compileExpr (Parser.FuncCall{funcName = "unsafePrint", funcArgs = [x]}) expected
 compileExpr (Parser.FuncCall{funcName = "unsafeGetLine"}) _ = return [Builtin GetLine]
 compileExpr (Parser.FuncCall{funcName = "unsafeGetChar"}) _ = return [Builtin GetChar]
 compileExpr (Parser.FuncCall{funcName = "unsafeRandom"}) _ = return [Builtin Random]
-#ifdef POSIX_IO
-compileExpr (Parser.FuncCall{funcName = "unsafeOpenFile", funcArgs = [path, mode]}) expectedType = compileExpr path expectedType >>= \path' -> compileExpr mode expectedType >>= \mode' -> return (path' ++ mode' ++ [Builtin OpenFile])
-compileExpr (Parser.FuncCall{funcName = "unsafeReadFile", funcArgs = [fd, size]}) expectedType = compileExpr size expectedType >>= \size' -> compileExpr fd expectedType >>= \fd' -> return (size' ++ fd' ++ [Builtin ReadFile])
-compileExpr (Parser.FuncCall{funcName = "unsafeWriteFile", funcArgs = [fd, content]}) expectedType = compileExpr content expectedType >>= \content' -> compileExpr fd expectedType >>= \fd' -> return (content' ++ fd' ++ [Builtin WriteFile])
-compileExpr (Parser.FuncCall{funcName = "unsafeCloseFile", funcArgs = [fd]}) expectedType = compileExpr fd expectedType >>= \fd' -> return (fd' ++ [Builtin CloseFile])
-compileExpr (Parser.FuncCall{funcName = "unsafeSocket", funcArgs = [domain, socktype, protocol]}) expectedType = compileExpr protocol expectedType >>= \protocol' -> compileExpr socktype expectedType >>= \socktype' -> compileExpr domain expectedType >>= \domain' -> return (protocol' ++ socktype' ++ domain' ++ [Builtin Socket])
-compileExpr (Parser.FuncCall{funcName = "unsafeBind", funcArgs = [fd, host, port]}) expectedType = compileExpr port expectedType >>= \port' -> compileExpr host expectedType >>= \host' -> compileExpr fd expectedType >>= \fd' -> return (port' ++ host' ++ fd' ++ [Builtin Bind])
-compileExpr (Parser.FuncCall{funcName = "unsafeListen", funcArgs = [fd, backlog]}) expectedType = compileExpr backlog expectedType >>= \backlog' -> compileExpr fd expectedType >>= \fd' -> return (backlog' ++ fd' ++ [Builtin Listen])
-compileExpr (Parser.FuncCall{funcName = "unsafeAccept", funcArgs = [fd]}) expectedType = compileExpr fd expectedType >>= \fd' -> return (fd' ++ [Builtin Accept])
-compileExpr (Parser.FuncCall{funcName = "unsafeConnect", funcArgs = [fd, host, port]}) expectedType = compileExpr port expectedType >>= \port' -> compileExpr host expectedType >>= \host' -> compileExpr fd expectedType >>= \fd' -> return (port' ++ host' ++ fd' ++ [Builtin Connect])
-compileExpr (Parser.FuncCall{funcName = "unsafeSend", funcArgs = [fd, data', flags]}) expectedType = compileExpr flags expectedType >>= \flags' -> compileExpr data' expectedType >>= \data'' -> compileExpr fd expectedType >>= \fd' -> return (flags' ++ data'' ++ fd' ++ [Builtin Send])
-compileExpr (Parser.FuncCall{funcName = "unsafeRecv", funcArgs = [fd, size, flags]}) expectedType = compileExpr flags expectedType >>= \flags' -> compileExpr size expectedType >>= \size' -> compileExpr fd expectedType >>= \fd' -> return (flags' ++ size' ++ fd' ++ [Builtin Recv])
-compileExpr (Parser.FuncCall{funcName = "unsafeCloseSocket", funcArgs = [fd]}) expectedType = compileExpr fd expectedType >>= \fd' -> return (fd' ++ [Builtin CloseSocket])
-#endif
 compileExpr (Parser.FuncCall{funcName = "unsafeListAdd", funcArgs = [y, x]}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [ListAdd 2])
 compileExpr (Parser.FuncCall{funcName = "unsafeListIndex", funcArgs = [x, y]}) expectedType = compileExpr x expectedType >>= \x' -> compileExpr y expectedType >>= \y' -> return (x' ++ y' ++ [Index])
 compileExpr (Parser.FuncCall{funcName = "unsafeListLength", funcArgs = [x]}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Length])
@@ -1401,7 +1384,7 @@ compileExpr st@(Parser.Struct{name = structName, fields, is, generics, structPos
                     _ -> error "Expected StructT in is clause"
             forM_ traitTypeArgs $ \typeArg -> do
                 validateTypeParameters structGenericNames typeArg structPos ("trait " ++ traitName ++ " for struct " ++ structName)
-            _ <- compileExpr (Parser.Impl{trait = traitName, traitTypeArgs = traitTypeArgs, for = Parser.StructT structName [], methods = [], implPos = anyPosition}) expectedType
+            _ <- compileExpr (Parser.Impl{trait = traitName, traitTypeArgs = traitTypeArgs, for = Parser.StructT structName [], methods = [], implPos = structPos}) expectedType
             return ()
         )
         is
@@ -1410,7 +1393,7 @@ compileExpr st@(Parser.Struct{name = structName, fields, is, generics, structPos
     createFieldTrait :: (String, Parser.Type) -> StateT (CompilerState a) IO ()
     createFieldTrait (name, _) = do
         let traitName = "__field_" ++ name
-        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], generics = [], traitPos = anyPosition}
+        let trait = Parser.Trait{name = traitName, methods = [Parser.FuncDec{Parser.name = name, Parser.types = [Parser.Self, Parser.Any], Parser.generics = [], funcDecPos = anyPosition}], generics = [], requiredProperties = [], refinement = Nothing, refinementSrc = "", traitPos = anyPosition}
         let impl = Parser.Impl{trait = traitName, traitTypeArgs = [], for = Parser.StructT (Parser.name st) [], methods = [Parser.FuncDef{name = name, args = [Parser.Var{varName = "self", varPos = zeroPosition}], body = Parser.StructAccess{structAccessStruct = Parser.Var{varName = "self", varPos = zeroPosition}, structAccessField = Parser.Var{varName = name, varPos = zeroPosition}, structAccessPos = anyPosition}, funcDefPos = anyPosition}], implPos = anyPosition}
         _ <- compileExpr trait Parser.Any
         _ <- compileExpr impl Parser.Any
@@ -1468,7 +1451,25 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                                         Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
                                         Just True -> return ()
                                         Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - struct fields contain variables without refinement guarantees") structLitPos
-                                Nothing -> return ()
+                                Nothing -> do
+                                    implsForStruct <- implsFor structLitName
+                                    traits' <- gets traits
+                                    forM_ implsForStruct $ \traitName -> do
+                                        case find (\t -> Parser.name t == traitName) traits' of
+                                            Just (Parser.Trait{refinement = traitRefinement, refinementSrc = traitRefinementSrc}) -> do
+                                                case traitRefinement of
+                                                    Just rf -> do
+                                                        let structFields = case expr of
+                                                                Parser.Struct{fields} -> fields
+                                                                _ -> []
+                                                        let transformedRefinement = transformRefinementExpr rf structFields
+                                                        r <- runRefinement transformedRefinement sl
+                                                        case r of
+                                                            Just False -> cerror ("Trait '" ++ traitName ++ "' refinement failed (" ++ traitRefinementSrc ++ ") for struct literal " ++ structLitName) structLitPos
+                                                            Just True -> return ()
+                                                            Nothing -> return ()
+                                                    Nothing -> return ()
+                                            _ -> return ()
             _ -> return ()
         Nothing -> return ()
     fields' <- mapM ((`compileExpr` Parser.Any) . snd) structLitFields
@@ -1554,8 +1555,8 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     mangleExprForImport (Parser.StructLit{structLitName, structLitFields, structLitTypeArgs, structLitPos}) prefix funcs structs =
         let mangledName = if structLitName `elem` structs then prefix ++ "." ++ structLitName else structLitName
          in Parser.StructLit{structLitName = mangledName, structLitFields = map (second (\e -> mangleExprForImport e prefix funcs structs)) structLitFields, structLitTypeArgs = structLitTypeArgs, structLitPos = structLitPos}
-    mangleExprForImport (Parser.Trait{name, methods, generics, traitPos}) prefix funcs structs =
-        Parser.Trait{name = prefix ++ "." ++ name, methods = map (\e -> mangleExprForImport e prefix funcs structs) methods, generics = generics, traitPos = traitPos}
+    mangleExprForImport (Parser.Trait{name, methods, generics, requiredProperties, refinement, refinementSrc, traitPos}) prefix funcs structs =
+        Parser.Trait{name = prefix ++ "." ++ name, methods = map (\e -> mangleExprForImport e prefix funcs structs) methods, generics = generics, requiredProperties = map (\(n, t) -> (n, mangleTypeForImportImpl t prefix structs)) requiredProperties, refinement = fmap (\e -> mangleExprForImport e prefix funcs structs) refinement, refinementSrc = refinementSrc, traitPos = traitPos}
     mangleExprForImport (Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) prefix funcs structs =
         Parser.Impl{trait = trait, traitTypeArgs = traitTypeArgs, for = mangleTypeForImportImpl for prefix structs, methods = map (mangleImplMethodImpl prefix funcs structs) methods, implPos = implPos}
     mangleExprForImport (Parser.FuncCall{funcName, funcArgs, funcPos}) prefix funcs structs =
@@ -1618,9 +1619,9 @@ compileExpr (Parser.Import{objects = o, from = from, as = as, qualified = qualif
     mangleTypeForImportImpl (Parser.Tuple ts) prefix structs = Parser.Tuple (map (\t -> mangleTypeForImportImpl t prefix structs) ts)
     mangleTypeForImportImpl (Parser.Fn args ret) prefix structs = Parser.Fn (map (\t -> mangleTypeForImportImpl t prefix structs) args) (mangleTypeForImportImpl ret prefix structs)
     mangleTypeForImportImpl t _ _ = t
-compileExpr (Parser.Trait{name, methods, generics}) expectedType = do
+compileExpr (Parser.Trait{name, methods, generics, requiredProperties, refinement, refinementSrc}) expectedType = do
     let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> error "Expected FuncDec in Trait methods") methods
-    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, traitPos = anyPosition} : traits s})
+    modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, requiredProperties = requiredProperties, refinement = refinement, refinementSrc = refinementSrc, traitPos = anyPosition} : traits s})
     mapM_ (`compileExpr` expectedType) methods'
     return []
 compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expectedType = do
@@ -1634,8 +1635,11 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
         Just t -> return t
         Nothing -> do
             cerror ("Trait '" ++ trait ++ "' not found. Available traits: " ++ intercalate ", " (map Parser.name traits')) implPos
-            return $ Parser.Trait{name = trait, methods = [], generics = [], traitPos = implPos}
+            return $ Parser.Trait{name = trait, methods = [], generics = [], requiredProperties = [], refinement = Nothing, refinementSrc = "", traitPos = implPos}
     let traitGenerics = Parser.generics trait'
+    let traitRequiredProps = Parser.requiredProperties trait'
+    let traitRefinement = Parser.refinement trait'
+    let traitRefinementSrc = Parser.refinementSrc trait'
     when (not (null traitGenerics) && length traitTypeArgs /= length traitGenerics) $ do
         cerror ("Trait type argument count mismatch for impl " ++ trait ++ " for " ++ typeToString for ++ ": expected " ++ show (length traitGenerics) ++ ", got " ++ show (length traitTypeArgs)) implPos
     when (null traitGenerics && not (null traitTypeArgs)) $ do
@@ -1646,6 +1650,35 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
             if null traitGenerics || null traitTypeArgs
                 then []
                 else zip (map (\(Parser.GenericExpr n _) -> n) traitGenerics) traitTypeArgs
+    structDecs'' <- gets structDecs
+    forStruct <- case find (\case Parser.Struct{name = name'} -> name' == forStructName; _ -> False) structDecs'' of
+        Just s -> return $ Just s
+        Nothing -> return Nothing
+    unless (null traitRequiredProps) $ do
+        case forStruct of
+            Just (Parser.Struct{fields = structFields, generics = structGenerics}) -> do
+                let structGenericNames = map (\(Parser.GenericExpr n _) -> n) structGenerics
+                let substitutedRequiredProps =
+                        if null genericSubstitutions
+                            then traitRequiredProps
+                            else map (second (`substituteGenerics` genericSubstitutions)) traitRequiredProps
+                let structFieldMap = Data.Map.fromList structFields
+                forM_ substitutedRequiredProps $ \(reqName, reqType) -> do
+                    case Data.Map.lookup reqName structFieldMap of
+                        Just structType -> do
+                            unless (Parser.compareTypes reqType structType) $ do
+                                cerror ("Required property '" ++ reqName ++ "' type mismatch in impl " ++ trait ++ " for " ++ typeToString for ++ ": trait requires " ++ show reqType ++ ", struct has " ++ show structType) implPos
+                        Nothing -> do
+                            cerror ("Missing required property '" ++ reqName ++ "' in struct " ++ forStructName ++ " for trait " ++ trait) implPos
+            Nothing -> do
+                cerror ("Cannot validate required properties: struct " ++ forStructName ++ " not found") implPos
+    when (isJust traitRefinement) $ do
+        case forStruct of
+            Just (Parser.Struct{refinement = structRefinement}) -> do
+                case structRefinement of
+                    Just _ -> return ()
+                    Nothing -> return ()
+            Nothing -> return ()
     methods' <-
         catMaybes
             <$> mapM
@@ -1835,8 +1868,12 @@ runRefinement refinement value = do
                     if null neededLets
                         then [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
                         else neededLets ++ [Parser.FuncCall "__refinement" [value] Parser.anyPosition]
+            let structDefWithoutIs = case structDef of
+                    Just (Parser.Struct{name, fields, refinement, refinementSrc, isValueStruct, generics, structPos}) ->
+                        Just (Parser.Struct{name = name, fields = fields, refinement = refinement, refinementSrc = refinementSrc, is = [], isValueStruct = isValueStruct, generics = generics, structPos = structPos})
+                    _ -> structDef
             let progExprs =
-                    maybeToList structDef
+                    maybeToList structDefWithoutIs
                         ++ functionDefs
                         ++ [ Parser.FuncDec "__refinement" [Parser.Any, Parser.StructT "Bool" []] [] Parser.anyPosition
                            , Parser.FuncDef "__refinement" [Parser.Var "it" Parser.zeroPosition] transformedRefinement Parser.anyPosition

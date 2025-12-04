@@ -156,6 +156,71 @@ end""" onLoadCode True "indigo"
     return :: Any -> Self
 end""" onLoadCode True "indigo"
         , p [] [ text "Generic traits allow you to define reusable abstractions that work with different types. The type parameter T can be used in the trait's method signatures." ]
+        , h3 [] [ text "Required Properties" ]
+        , p [] [ text "Traits can specify required properties that implementing structs must have. This ensures that any type implementing the trait has the necessary fields:" ]
+        , viewCodeBlock """trait Printable = (name: String, age: Int)
+
+struct Person = (name: String, age: Int) is Printable""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the Printable trait requires that implementing structs have both a name field of type String and an age field of type Int. When you use the is clause, the compiler verifies that Person has these required fields with matching types." ]
+        , p [] [ text "If a struct tries to implement a trait but is missing required properties or has type mismatches, the compiler will produce an error:" ]
+        , viewCodeBlock """trait Printable = (name: String, age: Int)
+
+# Error: Missing required property 'age' in struct Person for trait Printable
+struct Person = (name: String) is Printable
+
+# Error: Type mismatch - trait requires Int, struct has String
+struct Person2 = (name: String, age: String) is Printable""" onLoadCode False "indigo"
+        , h3 [] [ text "Trait Refinements" ]
+        , p [] [ text "Traits can also have refinement types, similar to structs. These refinements are checked when creating struct literals that implement the trait:" ]
+        , viewCodeBlock """trait PositiveNumber satisfies (x > 0)
+
+struct PosInt = (x: Int) is PositiveNumber
+
+let main: IO = do
+    # Valid - 5 > 0
+    let p = PosInt{x: 5}
+    
+    # Error - trait refinement failed (x > 0)
+    # let p2 = PosInt{x: 0}
+end""" onLoadCode True "indigo"
+        , p [] [ text "When a struct implements a trait with a refinement, the compiler checks the trait's refinement constraint when creating struct literals. If the constraint is violated, compilation fails with an error indicating which trait's refinement was violated." ]
+        , h3 [] [ text "Combining Required Properties and Refinements" ]
+        , p [] [ text "Traits can have both required properties and refinements:" ]
+        , viewCodeBlock """trait ValidPerson = (name: String, age: Int) satisfies (age > 0)
+
+struct Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
+
+let main: IO = do
+    let p = Person{name: "Bob", age: 25}
+    println p.name
+end""" onLoadCode True "indigo"
+        , p [] [ text "In this example, ValidPerson requires both name and age fields, and also has a refinement that age must be greater than 0. The Person struct must satisfy both the required properties and the refinement constraint." ]
+        , h3 [] [ text "Using 'is' Clause" ]
+        , p [] [ text "Structs can declare that they implement a trait directly in their definition using the is clause:" ]
+        , viewCodeBlock """trait Printable = (name: String, age: Int)
+
+struct Person = (name: String, age: Int) is Printable
+
+let main: IO = do
+    let p = Person{name: "Alice", age: 30}
+    println p.name
+end""" onLoadCode True "indigo"
+        , p [] [ text "The is clause creates an implicit implementation of the trait. The compiler validates that the struct has all required properties specified by the trait. If the struct is missing required properties or has type mismatches, compilation fails:" ]
+        , viewCodeBlock """trait Printable = (name: String, age: Int)
+
+# Error: Missing required property 'age' in struct Person for trait Printable
+struct Person = (name: String) is Printable""" onLoadCode False "indigo"
+        , p [] [ text "Structs can implement multiple traits using the is clause by separating them with commas:" ]
+        , viewCodeBlock """trait Printable = (name: String)
+trait Cloneable
+
+struct Person = (name: String) is Printable, Cloneable
+
+let main: IO = do
+    let p = Person{name: "Alice"}
+    println p.name
+end""" onLoadCode True "indigo"
+        , p [] [ text "When using the is clause with traits that have refinements, the compiler checks trait refinements when creating struct literals, unless the struct has its own refinement that would cover the constraint." ]
         ]
 
 viewFFI : (String -> msg) -> Html msg

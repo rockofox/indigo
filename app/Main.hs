@@ -7,7 +7,7 @@ import AST qualified
 import BytecodeCompiler (CompilerError (..), compileFail, renderCompilerErrors)
 import BytecodeCompiler qualified
 import Control.Exception
-import Control.Monad (filterM)
+import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Identity (Identity (..))
 import Control.Monad.State (StateT (runStateT), evalStateT)

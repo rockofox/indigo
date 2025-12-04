@@ -770,7 +770,7 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (Cast a b _) = Cast (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) anyPosition
     replacePositionWithAnyPosition (TypeLit type' _) = TypeLit type' anyPosition
     replacePositionWithAnyPosition (Flexible a _) = Flexible (replacePositionWithAnyPosition a) anyPosition
-    replacePositionWithAnyPosition (Trait name methods g _) = Trait name (map replacePositionWithAnyPosition methods) g anyPosition
+    replacePositionWithAnyPosition (Trait name methods g reqProps ref refSrc _) = Trait name (map replacePositionWithAnyPosition methods) g reqProps (fmap replacePositionWithAnyPosition ref) refSrc anyPosition
     replacePositionWithAnyPosition (Impl traitName traitTypeArgs f m _) = Impl traitName traitTypeArgs f (map replacePositionWithAnyPosition m) anyPosition
     replacePositionWithAnyPosition (StrictEval a _) = StrictEval (replacePositionWithAnyPosition a) anyPosition
     replacePositionWithAnyPosition (External n a _) = External n (map replacePositionWithAnyPosition a) anyPosition
@@ -867,18 +867,57 @@ trait = do
     keyword "trait"
     name <- identifier <?> "trait name"
     generics <- fromMaybe [] <$> optional generic <?> "trait generics"
-    methods <-
-        ( do
+    hasEquals <- lookAhead (optional (try (symbol "=")))
+    (requiredProperties, refinementSrc, refinement, methods) <- case hasEquals of
+        Just _ -> do
             symbol "="
-            keyword "do"
-            newline'
-            fds <- funcDec `sepEndBy` newline' <?> "trait methods"
-            keyword "end"
-            return fds
-        )
-            <|> return []
+            reqProps <- optional (try (parens (traitField `sepBy` symbol ",")) <?> "required properties")
+            refSrc <- lookAhead $ optional $ do
+                keyword "satisfies"
+                parens (many (noneOf [')'])) <?> "refinement source"
+            ref <- optional $ do
+                keyword "satisfies"
+                parens expr <?> "refinement"
+            methods' <-
+                ( do
+                    keyword "do"
+                    newline'
+                    fds <- funcDec `sepEndBy` newline' <?> "trait methods"
+                    keyword "end"
+                    return fds
+                )
+                    <|> return []
+            return (reqProps, refSrc, ref, methods')
+        Nothing -> do
+            reqProps <- optional (try (parens (traitField `sepBy` symbol ",")) <?> "required properties")
+            refSrc <- lookAhead $ optional $ do
+                keyword "satisfies"
+                parens (many (noneOf [')'])) <?> "refinement source"
+            ref <- optional $ do
+                keyword "satisfies"
+                parens expr <?> "refinement"
+            hasEqualsAfter <- lookAhead (optional (try (symbol "=")))
+            methods' <- case hasEqualsAfter of
+                Just _ -> do
+                    symbol "="
+                    ( do
+                            keyword "do"
+                            newline'
+                            fds <- funcDec `sepEndBy` newline' <?> "trait methods"
+                            keyword "end"
+                            return fds
+                        )
+                        <|> return []
+                Nothing -> return []
+            return (reqProps, refSrc, ref, methods')
     end <- getOffset
-    return $ Trait name methods generics (Position (start, end))
+    return $ Trait name methods generics (fromMaybe [] requiredProperties) refinement (fromMaybe "" refinementSrc) (Position (start, end))
+  where
+    traitField = do
+        fieldName <- identifier <?> "field name"
+        symbol ":"
+        fieldType <- validType <?> "field type"
+        return (fieldName, fieldType)
 
 impl :: Parser Expr
 impl = do

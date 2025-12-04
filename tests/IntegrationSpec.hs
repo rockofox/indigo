@@ -1,7 +1,8 @@
 module IntegrationSpec (spec) where
 
 import BytecodeCompiler
-    ( buildModuleMap
+    ( CompilerError (..)
+    , buildModuleMap
     , compileProgram
     , initCompilerState
     , initCompilerStateWithModules
@@ -10,7 +11,7 @@ import BytecodeCompiler
     )
 import Control.Monad.State (evalStateT)
 import Data.Functor
-import Data.List (elemIndex)
+import Data.List (elemIndex, isInfixOf)
 import Data.Map qualified as Map
 import Data.Text qualified
 import Data.Text qualified as T
@@ -414,6 +415,247 @@ spec = do
                     end
                     |]
                 `shouldReturn` "hello"
+        it "Trait with required properties - valid impl" $ do
+            compileAndRun
+                [r|
+                    trait Printable = (name: String, age: Int) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: Int)
+
+                    impl Printable for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Alice", age: 30 }
+                        println (getName p)
+                    end
+                |]
+                `shouldReturn` "Alice\n"
+        it "Trait with required properties - missing property" $ do
+            let prog =
+                    [r|
+                    trait Printable = (name: String, age: Int) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String)
+
+                    impl Printable for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        println "test"
+                    end
+                |]
+            let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+            case p of
+                Left _ -> return ()
+                Right program -> do
+                    result <- evalStateT (compileProgram program) (initCompilerState program)
+                    case result of
+                        Left _ -> error "Expected compilation error"
+                        Right errs -> if any (\case CompilerError msg _ _ -> "Missing required property" `isInfixOf` msg; _ -> False) errs then return () else error $ "Wrong error: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+        it "Trait with refinement - valid impl" $ do
+            compileAndRun
+                [r|
+                    trait PositiveNumber satisfies (x > 0) = do
+                        getValue :: Self -> Int
+                    end
+
+                    struct PosInt = (x: Int)
+
+                    impl PositiveNumber for PosInt = do
+                        getValue self = self.x
+                    end
+
+                    let main : IO = do
+                        let p = PosInt { x: 5 }
+                        println ((getValue p) as String)
+                    end
+                |]
+                `shouldReturn` "5\n"
+        it "Trait with refinement - failing impl" $ do
+            let prog =
+                    [r|
+                    trait PositiveNumber satisfies (x > 0) = do
+                        getValue :: Self -> Int
+                    end
+
+                    struct Int = (x: Int)
+
+                    impl PositiveNumber for Int = do
+                        getValue self = self.x
+                    end
+
+                    let main : IO = do
+                        let i = Int { x: 0 }
+                        println ((getValue i) as String)
+                    end
+                |]
+            let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+            case p of
+                Left _ -> return ()
+                Right program -> do
+                    result <- evalStateT (compileProgram program) (initCompilerState program)
+                    case result of
+                        Left _ -> error "Expected compilation error"
+                        Right errs -> if any (\case CompilerError msg _ _ -> "Trait 'PositiveNumber' refinement failed" `isInfixOf` msg; _ -> False) errs then return () else error $ "Wrong error: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+        it "Trait with both required properties and refinement" $ do
+            compileAndRun
+                [r|
+                    trait ValidPerson = (name: String, age: Int) satisfies (age > 0) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: Int) satisfies (age > 0)
+
+                    impl ValidPerson for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Bob", age: 25 }
+                        println (getName p)
+                    end
+                |]
+                `shouldReturn` "Bob\n"
+        it "Struct with 'is' clause - trait with required properties (valid)" $ do
+            compileAndRun
+                [r|
+                    trait Printable = (name: String, age: Int) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: Int) is Printable
+
+                    impl Printable for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Alice", age: 30 }
+                        println (getName p)
+                    end
+                |]
+                `shouldReturn` "Alice\n"
+        it "Struct with 'is' clause - trait with required properties (missing property)" $ do
+            let prog =
+                    [r|
+                    trait Printable = (name: String, age: Int) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String) is Printable
+
+                    impl Printable for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        println "test"
+                    end
+                |]
+            let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+            case p of
+                Left _ -> return ()
+                Right program -> do
+                    result <- evalStateT (compileProgram program) (initCompilerState program)
+                    case result of
+                        Left _ -> error "Expected compilation error"
+                        Right errs -> if any (\case CompilerError msg _ _ -> "Missing required property" `isInfixOf` msg; _ -> False) errs then return () else error $ "Wrong error: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+        it "Struct with 'is' clause - trait with required properties (type mismatch)" $ do
+            let prog =
+                    [r|
+                    trait Printable = (name: String, age: Int) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: String) is Printable
+
+                    impl Printable for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        println "test"
+                    end
+                |]
+            let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+            case p of
+                Left _ -> return ()
+                Right program -> do
+                    result <- evalStateT (compileProgram program) (initCompilerState program)
+                    case result of
+                        Left _ -> error "Expected compilation error"
+                        Right errs -> if any (\case CompilerError msg _ _ -> "type mismatch" `isInfixOf` msg && "Required property" `isInfixOf` msg; _ -> False) errs then return () else error $ "Wrong error: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+        it "Struct with 'is' clause - trait with refinement (valid)" $ do
+            compileAndRun
+                [r|
+                    trait PositiveNumber satisfies (x > 0) = do
+                        getValue :: Self -> Int
+                    end
+
+                    struct PosInt = (x: Int) is PositiveNumber
+
+                    impl PositiveNumber for PosInt = do
+                        getValue self = self.x
+                    end
+
+                    let main : IO = do
+                        let p = PosInt { x: 5 }
+                        println ((getValue p) as String)
+                    end
+                |]
+                `shouldReturn` "5\n"
+        it "Struct with 'is' clause - trait with refinement (failing)" $ do
+            let prog =
+                    [r|
+                    trait PositiveNumber satisfies (x > 0) = do
+                        getValue :: Self -> Int
+                    end
+
+                    struct Int = (x: Int) is PositiveNumber
+
+                    impl PositiveNumber for Int = do
+                        getValue self = self.x
+                    end
+
+                    let main : IO = do
+                        let i = Int { x: 0 }
+                        println ((getValue i) as String)
+                    end
+                |]
+            let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+            case p of
+                Left _ -> return ()
+                Right program -> do
+                    result <- evalStateT (compileProgram program) (initCompilerState program)
+                    case result of
+                        Left _ -> error "Expected compilation error"
+                        Right errs -> if any (\case CompilerError msg _ _ -> "Trait 'PositiveNumber' refinement failed" `isInfixOf` msg; _ -> False) errs then return () else error $ "Wrong error: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+        it "Struct with 'is' clause - trait with both required properties and refinement (valid)" $ do
+            compileAndRun
+                [r|
+                    trait ValidPerson = (name: String, age: Int) satisfies (age > 0) do
+                        getName :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
+
+                    impl ValidPerson for Person = do
+                        getName self = self.name
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Bob", age: 25 }
+                        println (getName p)
+                    end
+                |]
+                `shouldReturn` "Bob\n"
         it "Static dispatch" $ do
             compileAndRun
                 [r|

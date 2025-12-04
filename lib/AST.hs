@@ -57,7 +57,7 @@ data Expr
     | Cast {castExpr :: Expr, castType :: Expr, castPos :: Position}
     | TypeLit {typeLitType :: Type, typeLitPos :: Position}
     | Flexible {flexibleExpr :: Expr, flexiblePos :: Position}
-    | Trait {name :: String, methods :: [Expr], generics :: [GenericExpr], traitPos :: Position}
+    | Trait {name :: String, methods :: [Expr], generics :: [GenericExpr], requiredProperties :: [(String, Type)], refinement :: Maybe Expr, refinementSrc :: String, traitPos :: Position}
     | Impl {trait :: String, traitTypeArgs :: [Type], for :: Type, methods :: [Expr], implPos :: Position}
     | StrictEval {strictEvalExpr :: Expr, strictEvalPos :: Position}
     | External {externalName :: String, externalArgs :: [Expr], externalPos :: Position}
@@ -119,7 +119,7 @@ children (Lambda _ a _) = [a]
 children (Cast a b _) = [a, b]
 children (TypeLit _ _) = []
 children (Flexible a _) = [a]
-children (Trait _ a _ _) = a
+children (Trait _ a _ _ r _ _) = a ++ maybeToList r
 children (Impl _ _ _ a _) = a
 children (FuncDec{}) = []
 children (StrictEval a _) = [a]
