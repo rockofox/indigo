@@ -434,6 +434,76 @@ spec = do
                     end
                 |]
                 `shouldReturn` "Alice\n"
+        it "Trait with required properties and methods - multiple methods" $ do
+            compileAndRun
+                [r|
+                    trait Describable = (name: String, age: Int) do
+                        describe :: Self -> String
+                        isAdult :: Self -> Bool
+                    end
+
+                    struct Person = (name: String, age: Int)
+
+                    impl Describable for Person = do
+                        describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
+                        isAdult self = self.age >= 18
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Alice", age: 30 }
+                        println (describe p)
+                        println (isAdult p)
+                    end
+                |]
+                `shouldReturn` "Alice is 30 years old\nTrue\n"
+        it "Trait with required properties and methods - using 'is' clause" $ do
+            compileAndRun
+                [r|
+                    trait Describable = (name: String, age: Int) do
+                        describe :: Self -> String
+                        isAdult :: Self -> Bool
+                    end
+
+                    struct Person = (name: String, age: Int) is Describable
+
+                    impl Describable for Person = do
+                        describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
+                        isAdult self = self.age >= 18
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Bob", age: 17 }
+                        println (describe p)
+                        println (isAdult p)
+                    end
+                |]
+                `shouldReturn` "Bob is 17 years old\nFalse\n"
+        it "Trait with required properties and methods - trait dispatch" $ do
+            compileAndRun
+                [r|
+                    trait Describable = (name: String, age: Int) do
+                        describe :: Self -> String
+                    end
+
+                    struct Person = (name: String, age: Int)
+                    struct Employee = (name: String, age: Int, salary: Int)
+
+                    impl Describable for Person = do
+                        describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
+                    end
+
+                    impl Describable for Employee = do
+                        describe self = self.name ++ " is " ++ (self.age as String) ++ " years old (Employee)"
+                    end
+
+                    let main : IO = do
+                        let p = Person { name: "Alice", age: 30 }
+                        let e = Employee { name: "Bob", age: 25, salary: 50000 }
+                        println (describe p)
+                        println (describe e)
+                    end
+                |]
+                `shouldReturn` "Alice is 30 years old\nBob is 25 years old (Employee)\n"
         it "Trait with required properties - missing property" $ do
             let prog =
                     [r|

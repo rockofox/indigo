@@ -170,6 +170,46 @@ struct Person = (name: String) is Printable
 
 # Error: Type mismatch - trait requires Int, struct has String
 struct Person2 = (name: String, age: String) is Printable""" onLoadCode False "indigo"
+        , h3 [] [ text "Required Properties and Methods" ]
+        , p [] [ text "Traits can combine required properties with methods that perform meaningful operations using those properties:" ]
+        , viewCodeBlock """trait Describable = (name: String, age: Int) do
+    describe :: Self -> String
+    isAdult :: Self -> Bool
+end
+
+struct Person = (name: String, age: Int)
+
+impl Describable for Person = do
+    describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
+    isAdult self = self.age >= 18
+end
+
+let main: IO = do
+    let p = Person { name: "Alice", age: 30 }
+    println (describe p)
+    println (isAdult p)
+end""" onLoadCode True "indigo"
+        , p [] [ text "In this example, the Describable trait requires name and age properties, and provides methods that use these properties to compute results. The describe method formats a string using both properties, while isAdult performs a validation check." ]
+        , p [] [ text "You can also use the is clause with traits that have both required properties and methods:" ]
+        , viewCodeBlock """trait Describable = (name: String, age: Int) do
+    describe :: Self -> String
+    isAdult :: Self -> Bool
+end
+
+struct Person = (name: String, age: Int) is Describable
+
+impl Describable for Person = do
+    describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
+    isAdult self = self.age >= 18
+end
+
+let main: IO = do
+    let p = Person { name: "Bob", age: 17 }
+    println (describe p)
+    println (isAdult p)
+end""" onLoadCode True "indigo"
+        , p [] [ text "The compiler validates that structs implementing the trait have all required properties, and you must provide implementations for all trait methods." ]
+        , p [] [ text "Trait dispatch in Indigo requires concrete types at compile time. When you call a trait method, the compiler must be able to determine the concrete struct type to select the correct implementation. This means trait methods work best when called directly on concrete struct instances, rather than through polymorphic functions that accept Any." ]
         , h3 [] [ text "Trait Refinements" ]
         , p [] [ text "Traits can also have refinement types, similar to structs. These refinements are checked when creating struct literals that implement the trait:" ]
         , viewCodeBlock """trait PositiveNumber satisfies (x > 0)
