@@ -9,7 +9,7 @@
     },
     "devDependencies": {
         "elm": "^0.19.1-5",
-        "vite": "^5.0.0",
+        "vite": "^7.2.6",
         "vite-plugin-elm": "^3.0.0"
     },
     "dependencies": {

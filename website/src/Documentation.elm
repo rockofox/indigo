@@ -10,6 +10,7 @@ type Topic
     | PatternMatching
     | Tuples
     | StructsAndTraits
+    | ImportsAndModules
     | FFI
     | Generics
     | RefinementTypes
@@ -25,6 +26,7 @@ view currentTopic onLoadCode =
                 PatternMatching -> viewPatternMatching onLoadCode
                 Tuples -> viewTuples onLoadCode
                 StructsAndTraits -> viewStructsAndTraits onLoadCode
+                ImportsAndModules -> viewImportsAndModules onLoadCode
                 FFI -> viewFFI onLoadCode
                 Generics -> viewGenerics onLoadCode
                 RefinementTypes -> viewRefinementTypes onLoadCode
@@ -40,6 +42,7 @@ viewSidebar currentTopic =
         , sidebarLink currentTopic PatternMatching "Pattern Matching" "/docs/pattern-matching"
         , sidebarLink currentTopic Tuples "Tuples" "/docs/tuples"
         , sidebarLink currentTopic StructsAndTraits "Structs & Traits" "/docs/structs-and-traits"
+        , sidebarLink currentTopic ImportsAndModules "Imports & Modules" "/docs/imports-and-modules"
         , h3 [] [ text "Advanced Features" ]
         , sidebarLink currentTopic FFI "FFI" "/docs/ffi"
         , sidebarLink currentTopic Generics "Generics" "/docs/generics"
@@ -476,6 +479,64 @@ let main: IO = do
     # let z = Example<String>{content: "hello"}
 end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, the generic parameter N is constrained to the Number trait. This means you can only use types that implement Number (like Int or Float) when creating Example instances." ]
+        ]
+
+viewImportsAndModules : (String -> msg) -> Html msg
+viewImportsAndModules onLoadCode =
+    section [ id "imports-and-modules" ]
+        [ h2 [] [ text "Imports and Modules" ]
+        , p [] [ text "Indigo supports organizing code into modules and importing functionality from other modules. This allows you to structure larger programs and reuse code across multiple files." ]
+        , h3 [] [ text "Module Declarations" ]
+        , p [] [ text "A module declaration at the top of a file defines the module name. The module name is used when other files import from this module:" ]
+        , viewCodeBlock """module Module2
+
+let add (a: Int b: Int) : Int = a + b
+
+let multiply (a: Int b: Int) : Int = a * b
+
+let greet (name: String) : String = "Hello, " ++ name ++ "!" """ onLoadCode False "indigo"
+        , p [] [ text "In the above example, Module2 is declared as the module name. All functions, structs, and traits defined in this file can be accessed from other modules using this name." ]
+        , h3 [] [ text "Unqualified Imports" ]
+        , p [] [ text "An unqualified import brings all names from a module into the current scope without a prefix:" ]
+        , viewCodeBlock """import Module2
+
+let main : IO = do
+    let result = add 5, 3
+    println result
+end""" onLoadCode False "indigo"
+        , p [] [ text "With an unqualified import, you can use functions directly by their name (e.g., add instead of Module2.add). However, this can lead to name conflicts if multiple modules define functions with the same name." ]
+        , h3 [] [ text "Qualified Imports" ]
+        , p [] [ text "A qualified import requires you to prefix imported names with the module name, preventing name conflicts:" ]
+        , viewCodeBlock """import qualified Module2
+
+let main : IO = do
+    let result1 = Module2.add 5, 3
+    let result2 = Module2.multiply 4, 7
+    let message = Module2.greet "World"
+    println result1
+    println result2
+    println message
+end""" onLoadCode False "indigo"
+        , p [] [ text "Qualified imports use the qualified keyword and require accessing functions through the module name (e.g., Module2.add). This is the recommended approach to avoid naming conflicts." ]
+        , h3 [] [ text "Import Aliases" ]
+        , p [] [ text "You can create an alias for a module when importing, which is useful for shortening long module names:" ]
+        , viewCodeBlock """import qualified Module2 as M2
+
+let main : IO = do
+    let result = M2.add 5, 3
+    println result
+end""" onLoadCode False "indigo"
+        , p [] [ text "The as keyword creates an alias for the module. You can use aliases with both qualified and unqualified imports. For qualified imports, the alias replaces the module name when accessing functions." ]
+        , h3 [] [ text "Optional from Keyword" ]
+        , p [] [ text "The from keyword in import statements is optional. Both of these are equivalent:" ]
+        , viewCodeBlock """import Module2
+import from Module2""" onLoadCode False "indigo"
+        , p [] [ text "You can use either syntax; they behave identically." ]
+        , h3 [] [ text "Module Paths" ]
+        , p [] [ text "Module names can contain dots, slashes, and @ symbols, allowing you to organize modules in a hierarchical structure or reference files by path:" ]
+        , viewCodeBlock """import qualified std.File
+import qualified utils/helpers""" onLoadCode False "indigo"
+        , p [] [ text "The compiler resolves module names to file paths, looking for corresponding .in files in the configured source directories." ]
         ]
 
 viewRefinementTypes : (String -> msg) -> Html msg

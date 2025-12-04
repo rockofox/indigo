@@ -126,6 +126,7 @@ routeParser =
         , map (DocsRoute Documentation.PatternMatching) (s "docs" </> s "pattern-matching")
         , map (DocsRoute Documentation.Tuples) (s "docs" </> s "tuples")
         , map (DocsRoute Documentation.StructsAndTraits) (s "docs" </> s "structs-and-traits")
+        , map (DocsRoute Documentation.ImportsAndModules) (s "docs" </> s "imports-and-modules")
         , map (DocsRoute Documentation.FFI) (s "docs" </> s "ffi")
         , map (DocsRoute Documentation.Generics) (s "docs" </> s "generics")
         , map (DocsRoute Documentation.RefinementTypes) (s "docs" </> s "refinement-types")
@@ -205,6 +206,9 @@ update msg model =
 
                         Documentation.StructsAndTraits ->
                             "/docs/structs-and-traits"
+
+                        Documentation.ImportsAndModules ->
+                            "/docs/imports-and-modules"
 
                         Documentation.FFI ->
                             "/docs/ffi"
