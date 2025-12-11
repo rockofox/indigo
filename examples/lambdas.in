@@ -1,4 +1,4 @@
-let main : IO = do
+let main : IO<Unit> = do
     let square (x:Int) = x * x
     let squareAll (xs:[Int]) = square 2
     let strict = $12

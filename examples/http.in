@@ -17,7 +17,7 @@ end
 struct sockaddr = (sa_family: Int, sa_data: String)
 struct sockaddr_in = (sin_family: Int, sin_port: Int, sin_addr: Int)
 
-let main : IO = do
+let main : IO<Unit> = do
     let port = 9000
     let server_fd = $socket 2, 1, 0
     let server_addr = sockaddr_in { sin_family: 2, sin_port: htons port, sin_addr: 0 }

@@ -90,9 +90,9 @@ spec = do
             compareTypes (Tuple [StructT "Int" [], StructT "String" []]) (Tuple [StructT "String" [], StructT "Int" []]) `shouldBe` False
     describe "Basic" $ do
         it "Should parse a simple program" $
-            parseProgram "let main : IO = print \"Hello, world!\"" parserCompilerFlags
+            parseProgram "let main : IO<Unit> = print \"Hello, world!\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall{funcName = "print", funcArgs = [StringLit{stringValue = "Hello, world!", stringPos = anyPosition}], funcPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Function{def = [FuncDef{name = "main", args = [], body = FuncCall{funcName = "print", funcArgs = [StringLit{stringValue = "Hello, world!", stringPos = anyPosition}], funcPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "main", types = [StructT "IO" [StructT "Unit" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
     describe "Struct" $ do
         it "Member access" $ do
             parseProgram "bello{}.name" parserCompilerFlags

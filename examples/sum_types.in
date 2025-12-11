@@ -12,7 +12,7 @@ let pet (a: Animal) : IO = do
     println "petting animal"
 end
 
-let main : IO = do
+let main : IO<Unit> = do
     pet Cat {}
     pet Dog {}
     pet Car {}

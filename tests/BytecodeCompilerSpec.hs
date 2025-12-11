@@ -89,17 +89,17 @@ spec = do
                 [r|
                 f :: Int -> Int
                 f x = x + 1
-                let main : IO = unsafePrint (f 2) + 4|]
+                let main : IO<Unit> = unsafePrint (f 2) + 4|]
                 `shouldReturn` [Label "f#0", StoreSideStack, LStore "x", LLoad "x", LStore "__op_a_1", Push 1, LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 2, Call "f#0", LStore "__op_a_2", Push 4, LStore "__op_b_2", LLoad "__op_a_2", LLoad "__op_b_2", Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     describe "Hello World" $
         it "Should print Hello, world!" $
-            compile [r|let main : IO = unsafePrint "Hello, world!"|]
+            compile [r|let main : IO<Unit> = unsafePrint "Hello, world!"|]
                 `shouldReturn` [Label "main", StoreSideStack, Push $ DString "Hello, world!", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     -- describe "Implicit casting" $ do
     --     it "Should cast from int to float" $ do
-    --         compile [r|let main : IO = unsafePrint ^2 + 4.0|]
+    --         compile [r|let main : IO<Unit> = unsafePrint ^2 + 4.0|]
     --             `shouldReturn` [Label "main", StoreSideStack, Meta "flex", Push 2, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Cast, Push 4.0, Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
-    --         compile [r|let main : IO = unsafePrint 2.0 + ^4|]
+    --         compile [r|let main : IO<Unit> = unsafePrint 2.0 + ^4|]
     --             `shouldReturn` [Label "main", StoreSideStack, Push 2.0, LStore "__op_a_0", Meta "flex", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Swp, Cast, Push 2.0, Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     describe "Explicit casting" $ do
         it "Can cast from int to float" $
@@ -114,7 +114,7 @@ spec = do
                 compileWithErrors
                     [r|
                 value struct PositiveInt = (num: Int)
-                let main : IO = unsafePrint (42 as PositiveInt)
+                let main : IO<Unit> = unsafePrint (42 as PositiveInt)
             |]
             case result of
                 Right _ -> return ()
@@ -124,7 +124,7 @@ spec = do
                 compileWithErrors
                     [r|
                 value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
-                let main : IO = unsafePrint (12 as EvenNumber)
+                let main : IO<Unit> = unsafePrint (12 as EvenNumber)
             |]
             case result of
                 Right _ -> return ()
@@ -134,7 +134,7 @@ spec = do
                 compileWithErrors
                     [r|
                 value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
-                let main : IO = unsafePrint (5 as EvenNumber)
+                let main : IO<Unit> = unsafePrint (5 as EvenNumber)
             |]
             case result of
                 Left errors -> not (null errors) `shouldBe` True
@@ -144,7 +144,7 @@ spec = do
                 compileWithErrors
                     [r|
                 value struct PositiveInt = (num: Int)
-                let main : IO = unsafePrint ("hello" as PositiveInt)
+                let main : IO<Unit> = unsafePrint ("hello" as PositiveInt)
             |]
             case result of
                 Left errors -> not (null errors) `shouldBe` True
@@ -155,7 +155,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Person = (name: String, age: Int)
-                let main : IO = unsafePrint (Person{name: "Alice", age: "30"})
+                let main : IO<Unit> = unsafePrint (Person{name: "Alice", age: "30"})
             |]
             case result of
                 Left errors -> length errors `shouldBe` 1
@@ -165,7 +165,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Person = (name: String, age: Int)
-                let main : IO = unsafePrint (Person{name: "Alice", age: 30})
+                let main : IO<Unit> = unsafePrint (Person{name: "Alice", age: 30})
             |]
             case result of
                 Right _ -> return ()
@@ -211,7 +211,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Age = (value: Int) satisfies (value >= 0)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let a = Age{value: 5}
                 end
                 |]
@@ -227,7 +227,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Age = (value: Int) satisfies (value >= 0)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let a = Age{value: 0 - 1}
                 end
                 |]
@@ -242,7 +242,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Person = (name: String)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let p = Person{name: "Alice"}
                 end
                 |]
@@ -254,7 +254,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Person = (name: String) satisfies (name == "Alice")
-                let main : IO = do
+                let main : IO<Unit> = do
                     let p = Person{name: "Alice"}
                 end
                 |]
@@ -266,7 +266,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Age = (value: Int) satisfies (value >= 0)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let ageValue = 25
                     let a = Age{value: ageValue}
                 end
@@ -283,7 +283,7 @@ spec = do
                 compileWithErrors
                     [r|
                 struct Age = (value: Int) satisfies (value >= 0)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let ageValue = 0 - 5
                     let a = Age{value: ageValue}
                 end
@@ -300,7 +300,7 @@ spec = do
                     [r|
                 let notJohn (x: String): Boolean = x != "John"
                 struct Teacher = (name: String, age: Int) satisfies ((notJohn name) && age > 18)
-                let main : IO = do
+                let main : IO<Unit> = do
                     let hisAge = 19
                     let otherName = "Johnny"
                     let t = Teacher { name: otherName, age: hisAge }
@@ -319,7 +319,7 @@ spec = do
                     [r|
                 struct Age = (value: Int) satisfies (value >= 0)
                 let createAge (x: Int) : Age = Age{value: x}
-                let main : IO = do
+                let main : IO<Unit> = do
                     println (createAge 14)
                 end
                 |]
@@ -334,7 +334,7 @@ spec = do
             compile
                 [r|
                 let id<T> (x: T) : T = x
-                let main : IO = unsafePrint (id 42)
+                let main : IO<Unit> = unsafePrint (id 42)
                 |]
                 `shouldReturn` [Label "id#0", StoreSideStack, LStore "x", LLoad "x", ClearSideStack, Ret, Label "main", StoreSideStack, Push 42, Call "id#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
         it "Should compile generic function with trait constraint" $
@@ -344,7 +344,7 @@ spec = do
                 impl Number for Int
                 impl Number for Float
                 let add<N: Number> (a: N b: N) : N = a + b
-                let main : IO = unsafePrint (add 1, 2)
+                let main : IO<Unit> = unsafePrint (add 1, 2)
                 |]
                 `shouldReturn` [Label "add#0", StoreSideStack, LStore "b", LStore "a", LLoad "a", LStore "__op_a_1", LLoad "b", LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 1, Push 2, Call "add#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
         it "Should require matching generic types" $ do
@@ -354,7 +354,7 @@ spec = do
                 impl Number for Int
                 impl Number for Float
                 let add<N: Number> (a: N b: N) : N = a + b
-                let main : IO = unsafePrint (add 1, 2.0)
+                let main : IO<Unit> = unsafePrint (add 1, 2.0)
                 |]
             compile prog `shouldThrow` (const True :: SomeException -> Bool)
         it "Should compile generic trait with type parameters" $ do
@@ -368,7 +368,7 @@ spec = do
                 impl Monad<Optional> for Optional = do
                     bind Optional{value: x} f = f x
                 end
-                let main : IO = unsafePrint 42
+                let main : IO<Unit> = unsafePrint 42
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -384,7 +384,7 @@ spec = do
                 impl Monad<Optional, Int> for Optional = do
                     bind Optional{value: x} f = f x
                 end
-                let main : IO = unsafePrint 42
+                let main : IO<Unit> = unsafePrint 42
                 |]
             case result of
                 Left errors -> do
@@ -404,7 +404,7 @@ spec = do
                     bind Optional{value: x} f = f x
                     return x = Optional{value: x}
                 end
-                let main : IO = unsafePrint 42
+                let main : IO<Unit> = unsafePrint 42
                 |]
             case result of
                 Left errors -> do
@@ -419,7 +419,7 @@ spec = do
                         [r|
                     trait Optional<T>
                     struct None = () is Optional<T>
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> do
@@ -435,7 +435,7 @@ spec = do
                         [r|
                     trait Optional<T>
                     struct Some<T> = (value: T) is Optional<T>
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -445,7 +445,7 @@ spec = do
                     compileWithErrors
                         [r|
                     struct Some<T> = (value: T)
-                    let main : IO = do
+                    let main : IO<Unit> = do
                         let x = Some<U>{value: 42}
                         unsafePrint x
                     end
@@ -463,7 +463,7 @@ spec = do
                     compileWithErrors
                         [r|
                     struct Some<T> = (value: T)
-                    let main : IO = do
+                    let main : IO<Unit> = do
                         let x = Some<Int>{value: 42}
                         unsafePrint x
                     end
@@ -482,7 +482,7 @@ spec = do
                     impl Monad<T> for Optional = do
                         bind x f = f x
                     end
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> do
@@ -503,7 +503,7 @@ spec = do
                     impl Monad<Optional> for Optional = do
                         bind x f = f x
                     end
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -514,7 +514,7 @@ spec = do
                         [r|
                     struct Some<T> = (value: T)
                     let test<U> (x: Some<U>): Some<U> = x
-                    let main : IO = do
+                    let main : IO<Unit> = do
                         let x = Some<Int>{value: 42}
                         unsafePrint x
                     end
@@ -528,7 +528,7 @@ spec = do
                         [r|
                     trait Optional<T>
                     struct None = () is Optional<List<T>>
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> do
@@ -542,7 +542,7 @@ spec = do
                         [r|
                     trait Optional<T>
                     struct None = () is Optional<List<Int>>
-                    let main : IO = unsafePrint 42
+                    let main : IO<Unit> = unsafePrint 42
                     |]
                 case result of
                     Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -553,7 +553,7 @@ spec = do
                     [r|
                 struct Point = (x: Int, y: Int)
                 let getX<T> (p: T) : Int = p.x
-                let main : IO = unsafePrint (getX Point { x: 1, y: 2 })
+                let main : IO<Unit> = unsafePrint (getX Point { x: 1, y: 2 })
                 |]
             result `shouldSatisfy` any (\case Label name -> "getX" `isInfixOf` name; _ -> False)
             result `shouldSatisfy` any (\case Call name -> "getX" `isInfixOf` name; _ -> False)
@@ -561,7 +561,7 @@ spec = do
             compile
                 [r|
                 let identity<T> (x: T) : T = x
-                let main : IO = unsafePrint (identity "hello")
+                let main : IO<Unit> = unsafePrint (identity "hello")
                 |]
                 `shouldReturn` [Label "identity#0", StoreSideStack, LStore "x", LLoad "x", ClearSideStack, Ret, Label "main", StoreSideStack, Push $ DString "hello", Call "identity#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     describe "Function resolution" $ do
@@ -570,7 +570,7 @@ spec = do
                 compileWithErrors
                     [r|
                 let outer (f: Any) : Int = f 42
-                let main : IO = unsafePrint (outer (\x -> x + 1))
+                let main : IO<Unit> = unsafePrint (outer (\x -> x + 1))
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
@@ -581,7 +581,7 @@ spec = do
                     [r|
                 myFunc :: Int -> Int
                 myFunc (x: Int) : Int = x + 1
-                let main : IO = unsafePrint (myFunc 5)
+                let main : IO<Unit> = unsafePrint (myFunc 5)
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
@@ -590,7 +590,7 @@ spec = do
             result <-
                 compileWithErrors
                     [r|
-                let main : IO = unsafePrint (undefinedFunc 42)
+                let main : IO<Unit> = unsafePrint (undefinedFunc 42)
                 |]
             case result of
                 Left errors -> do
@@ -604,7 +604,7 @@ spec = do
                 compileWithErrors
                     [r|
                 let add (x: Int) : Int = x + 1
-                let main : IO = unsafePrint (add 5)
+                let main : IO<Unit> = unsafePrint (add 5)
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -614,7 +614,7 @@ spec = do
                 compileWithErrors
                     [r|
                 let wrong (x: Int) : Int = "hello"
-                let main : IO = unsafePrint (wrong 5)
+                let main : IO<Unit> = unsafePrint (wrong 5)
                 |]
             case result of
                 Left errors -> do
@@ -627,7 +627,7 @@ spec = do
                 compileWithErrors
                     [r|
                 let toFloat (x: Int) : Float = x as Float
-                let main : IO = unsafePrint (toFloat 5)
+                let main : IO<Unit> = unsafePrint (toFloat 5)
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
@@ -637,7 +637,7 @@ spec = do
                 compileWithErrors
                     [r|
                 let identity (x: Int) : Any = x
-                let main : IO = unsafePrint (identity 5)
+                let main : IO<Unit> = unsafePrint (identity 5)
                 |]
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors

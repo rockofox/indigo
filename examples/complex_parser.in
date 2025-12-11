@@ -55,7 +55,7 @@ showExpr Number{value: v} = "Number(" ++ (v as String) ++ ")"
 showExpr Word{value: v} = "Word(" ++ v ++ ")"
 showExpr x = x as String
 
-let main: IO = do
+let main: IO<Unit> = do
     let pw: Parser = tryParsersN "abc123efg2", [parseWord, parseNumber]
     println (map showExpr, pw.result)
 end

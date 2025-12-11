@@ -11,7 +11,7 @@ impl Monad<Optional> for Optional = do
     return x = Optional{value: x}
 end
 
-let main: IO = do
+let main: IO<Unit> = do
     let opt = Optional{value: 42}
     println opt.value
 end

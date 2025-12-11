@@ -1,6 +1,6 @@
 import qualified Sockets
 
-let main : IO = do
+let main : IO<Unit> = do
   let AF_INET = 2
   let SOCK_STREAM = 1
   let IPPROTO_TCP = 0

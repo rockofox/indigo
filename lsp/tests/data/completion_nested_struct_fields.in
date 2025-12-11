@@ -1,4 +1,4 @@
-let main: IO = do
+let main: IO<Unit> = do
     let opt = Some<Int>{value: 42}
     let v = opt.
 end

@@ -9,6 +9,6 @@ let bottles (i: Int) : IO = do
     end
 end
 
-let main : IO = do
+let main : IO<Unit> = do
     bottles 99
 end

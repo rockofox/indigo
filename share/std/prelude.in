@@ -1,7 +1,10 @@
-struct IO = (inner: Any)
+struct IO<T> = (inner: T)
+struct Unit = ()
 
-nop :: IO
-nop _ = IO{inner: (-1)}
+nop :: IO<Unit>
+nop _ = IO<Unit>{inner: Unit{}}
+
+let return<T: Any> (x: T) : IO<T> = IO<T>{inner: x}
 
 trait Optional<T>
 struct Some<T> = (value: T) is Optional<T>
@@ -11,28 +14,28 @@ maybe :: Any -> Optional -> Any
 maybe x Some{value: y} = y
 maybe x None{} = x
 
-trait Monad = do
-  bind :: Self -> (Any -> Self) -> Self
-  return :: Any -> Self
+trait Monad<T> = do
+  bind :: Self -> (T -> Self) -> Self
+  return :: T -> Self
   sequence :: Self -> Self -> Self
 end
 
-impl Monad for Some<T> = do
+impl Monad<T> for Some<T> = do
   bind Some<T>{value: x} f = f x
   return x = Some<T>{value: x}
   sequence Some<T>{value: x} Some<T>{value: y}= Some<T>{value: y}
 end
 
-impl Monad for None = do
+impl Monad<Any> for None = do
   bind None{} f = None{}
   return x = None{}
   sequence None{} None{} = None{}
 end
 
-impl Monad for IO = do
-  bind IO{inner: x}f = f x
-  return x = IO{inner: x}
-  sequence IO{inner: x} IO{inner: y} = IO{inner: y}
+impl Monad<T> for IO<T> = do
+  bind IO<T>{inner: x}f = f x
+  return x = IO<T>{inner: x}
+  sequence IO<T>{inner: x} IO<T>{inner: y} = IO<T>{inner: y}
 end
 
 trait Number
@@ -61,7 +64,7 @@ map :: (Any -> Any) -> [Any] -> [Any]
 map fun [] = []
 map fun (x:xs) = (fun x) : (map fun, xs)
 
-mapM :: (Any -> IO) -> [Any] -> IO
+mapM :: (Any -> IO<Any>) -> [Any] -> IO<Any>
 mapM fun [] = nop
 mapM fun (x:xs) = do
     fun x
@@ -95,25 +98,25 @@ sum :: [Float] -> Float
 sum [] = 0.0
 sum (x:xs) = x + sum xs
 
-print :: Any -> IO
+print :: Any -> IO<Unit>
 print s = do
   unsafePrint s
-  IO{inner: 0}
+  IO<Unit>{inner: Unit{}}
 end
 
-println :: Any -> IO
+println :: Any -> IO<Unit>
 println s = do
   print s
   print "\n"
-  IO{inner: 0}
+  IO<Unit>{inner: Unit{}}
 end
 
-getLine :: IO
+getLine :: IO<String>
 getLine _ = do
   unsafeGetLine
 end
 
-getChar :: IO
+getChar :: IO<Char>
 getChar _ = do
   unsafeGetChar
 end
@@ -144,7 +147,7 @@ let floor (x: Float) : Float = do
   end
 end
 
-randomFloat :: IO
+randomFloat :: IO<Float>
 randomFloat _ = do
   unsafeRandom
 end
@@ -218,9 +221,9 @@ let update (strucct: Any field: String v: Any) : Any = unsafeUpdate strucct, fie
 
 let mergeStructs (xx: Any yy: Any) : Any = foldl (\acc key -> update acc, key, (yy !!! key)), xx, keys yy
 
-let exit (x: Int) : IO = unsafeExit x
+let exit (x: Int) : IO<Any> = unsafeExit x
 
-let error (x: String) : IO = do
+let error (x: String) : IO<Any> = do
   println ("\x1b[31m" ++ x ++ "\x1b[0m")
   exit 1
 end

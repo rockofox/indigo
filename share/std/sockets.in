@@ -1,49 +1,49 @@
 module Sockets
 
-socket :: Int -> Int -> Int -> IO
+socket :: Int -> Int -> Int -> IO<Int>
 socket domain socktype protocol = do
   let fd = unsafeSocket domain, socktype, protocol
-  IO{inner: fd}
+  IO<Int>{inner: fd}
 end
 
-bindSocket :: Int -> String -> Int -> IO
+bindSocket :: Int -> String -> Int -> IO<Int>
 bindSocket fd host port = do
   unsafeBind fd, host, port
-  IO{inner: 0}
+  IO<Int>{inner: 0}
 end
 
-listen :: Int -> Int -> IO
+listen :: Int -> Int -> IO<Int>
 listen fd backlog = do
   unsafeListen fd, backlog
-  IO{inner: 0}
+  IO<Int>{inner: 0}
 end
 
-accept :: Int -> IO
+accept :: Int -> IO<Int>
 accept fd = do
   let client_fd = unsafeAccept fd
-  IO{inner: client_fd}
+  IO<Int>{inner: client_fd}
 end
 
-connect :: Int -> String -> Int -> IO
+connect :: Int -> String -> Int -> IO<Int>
 connect fd host port = do
   unsafeConnect fd, host, port
-  IO{inner: 0}
+  IO<Int>{inner: 0}
 end
 
-send :: Int -> String -> Int -> IO
+send :: Int -> String -> Int -> IO<Int>
 send fd data flags = do
   let bytes = unsafeSend fd, data, flags
-  IO{inner: bytes}
+  IO<Int>{inner: bytes}
 end
 
-recv :: Int -> Int -> Int -> IO
+recv :: Int -> Int -> Int -> IO<String>
 recv fd size flags = do
   let data = unsafeRecv fd, size, flags
-  IO{inner: data}
+  IO<String>{inner: data}
 end
 
-closeSocket :: Int -> IO
+closeSocket :: Int -> IO<Int>
 closeSocket fd = do
   unsafeCloseSocket fd
-  IO{inner: 0}
+  IO<Int>{inner: 0}
 end

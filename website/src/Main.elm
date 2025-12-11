@@ -44,21 +44,21 @@ type alias Model =
 
 initialCode : String
 initialCode =
-    """let main : IO = do
+    """let main : IO<Unit> = do
     println "Hello, Indigo!"
 end"""
 
 
 examples : List ( String, String )
 examples =
-    [ ( "Hello World", """let main : IO = do
+    [ ( "Hello World", """let main : IO<Unit> = do
     println "Hello, Indigo!"
 end""" )
     , ( "Fibonacci", """let fib (0: Int) : Int = 0
 let fib (1: Int) : Int = 1
 let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
 
-let main : IO = do
+let main : IO<Unit> = do
     println fib 12
 end""" )
     , ( "Bottles", """let bottles (i: Int) : IO = do
@@ -72,7 +72,7 @@ end""" )
     end
 end
 
-let main : IO = do
+let main : IO<Unit> = do
     bottles 99
 end""" )
     , ( "Structs & Traits", """struct Dog = (name: String)
@@ -90,7 +90,7 @@ impl Animal for Cat = do
     makeNoise self = println "Meow"
 end
 
-let main : IO = do
+let main : IO<Unit> = do
     let bello = Dog { name : "Bello" }
     let mauzi = Cat { name : "Mauzi" }
     makeNoise bello

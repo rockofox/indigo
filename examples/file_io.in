@@ -1,6 +1,6 @@
 import qualified File
 
-let main : IO = do
+let main : IO<Unit> = do
   let test_file = "test_output.txt"
   let content = "Hello, World!\nThis is a test file.\n"
   

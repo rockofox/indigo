@@ -1,4 +1,4 @@
-let main : IO = do
+let main : IO<Unit> = do
     let number = randomInt 1, 10
     println "Guess a number between 1 and 10"
     let guess = $getLine

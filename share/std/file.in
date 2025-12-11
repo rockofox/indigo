@@ -1,25 +1,25 @@
 module File
 
-openFile :: String -> String -> IO
+openFile :: String -> String -> IO<Int>
 openFile path mode = do
   let fd = unsafeOpenFile path, mode
-  IO{inner: fd}
+  IO<Int>{inner: fd}
 end
 
-readFile :: Int -> Int -> IO
+readFile :: Int -> Int -> IO<String>
 readFile fd size = do
   let content = unsafeReadFile fd, size
-  IO{inner: content}
+  IO<String>{inner: content}
 end
 
-writeFile :: Int -> String -> IO
+writeFile :: Int -> String -> IO<Int>
 writeFile fd content = do
   let bytes = unsafeWriteFile fd, content
-  IO{inner: bytes}
+  IO<Int>{inner: bytes}
 end
 
-closeFile :: Int -> IO
+closeFile :: Int -> IO<Int>
 closeFile fd = do
   unsafeCloseFile fd
-  IO{inner: 0}
+  IO<Int>{inner: 0}
 end

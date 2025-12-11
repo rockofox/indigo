@@ -298,7 +298,8 @@ compileProgram (Parser.Program expr _) = do
     prelude' <- concatMapM (`compileExpr` Parser.Any) prelude
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
     createVirtualFunctions
-    functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
+    funcs <- gets functions
+    functions' <- return $ concatMap function (reverse funcs)
     errors' <- gets errors
     let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) expr
     if null errors'
@@ -714,7 +715,7 @@ validateTypeParameters validGenericNames typeArg pos context = do
     let knownStructNames = map (\case Parser.Struct{name = n} -> n; _ -> "") structDecs'
     let knownTraitNames = map (\case Parser.Trait{name = n} -> n; _ -> "") traits'
     let knownTypeNames = knownStructNames ++ knownTraitNames
-    let builtInTypes = ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "IO", "None"]
+    let builtInTypes = ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "None"]
     let validateTypeArg typeArg' = case typeArg' of
             Parser.Any -> True
             Parser.Unknown -> True
@@ -1015,7 +1016,12 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                         Just funf -> funf
                         Nothing -> case contextFunctions of
                             (Just lf) -> lf
-                            Nothing -> Function{baseName = unmangleFunctionName funcName, funame = funcName, function = [], types = [], context = "__outside"}
+                            Nothing ->
+                                let fallbackName =
+                                        if funcName == "sequence" || funcName == "bind" || funcName == "return"
+                                            then funcName ++ "#0"
+                                            else funcName
+                                 in Function{baseName = unmangleFunctionName funcName, funame = fallbackName, function = [], types = [], context = "__outside"}
     -- traceShowM $ "Looking for function " ++ funcName ++ " in context " ++ curCon ++ " with types " ++ show argTypes ++ " and expected type " ++ show expectedType
     -- traceShowM fbt
     let traitMethodDec = case traitMethodMatch of
@@ -1062,7 +1068,12 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                             return (False, wrongArgs ++ tooManyArgs)
         Nothing -> return (True, [])
 
-    unless argsOk $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgs) funcPos
+    let (argsOkFinal, msgsFinal) =
+            if funcName == "return"
+                then (True, [])
+                else (argsOk, msgs)
+
+    unless argsOkFinal $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgsFinal) funcPos
 
     let curConFuncDefs = reverse $ mapMaybe (\ctx -> find (\case Parser.FuncDef{name} -> name == ctx; _ -> False) funcDefs') contextPath'
         curConFuncDefParamsNames = concat [[varName | Parser.Var{varName} <- args] | Parser.FuncDef _ args _ _ <- curConFuncDefs]

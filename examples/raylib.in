@@ -48,7 +48,7 @@ let loop (tick: Int) : IO = do
     else do
     end
 end
-let main : IO = do
+let main : IO<Unit> = do
     InitWindow screenWidth, screenHeight, "Hello Indigo"
     SetTargetFPS 60
     loop 0

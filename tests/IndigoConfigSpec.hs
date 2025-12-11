@@ -139,3 +139,7 @@ spec = do
             liftIO $ case maybeConfigFile of
                 Just path -> path `shouldBe` "/indigo.json"
                 Nothing -> return ()
+
+
+
+

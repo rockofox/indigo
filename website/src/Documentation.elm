@@ -108,7 +108,7 @@ viewStructsAndTraits onLoadCode =
         , viewCodeBlock """struct Dog = (name: String)
 struct Cat = (name: String)
 
-let main: IO = do
+let main: IO<Unit> = do
     let bello = Dog { name : "Bello" }
     let mauzi = Cat { name : "Mauzi" }
     println name bello
@@ -123,7 +123,7 @@ impl Number for Float
 
 struct Example<N: Number> = (content: N)
 
-let main: IO = do
+let main: IO<Unit> = do
     let x = Example<Int>{content: 42}
     let y = Example<Float>{content: 3.14}
     println x.content
@@ -143,7 +143,7 @@ impl Animal for Cat = do
     makeNoise self = println "Meow"
 end
 
-let main: IO = do
+let main: IO<Unit> = do
     makeNoise (Dog {})
     makeNoise (Cat {})
 end""" onLoadCode True "indigo"
@@ -184,7 +184,7 @@ impl Describable for Person = do
     isAdult self = self.age >= 18
 end
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person { name: "Alice", age: 30 }
     println (describe p)
     println (isAdult p)
@@ -203,7 +203,7 @@ impl Describable for Person = do
     isAdult self = self.age >= 18
 end
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person { name: "Bob", age: 17 }
     println (describe p)
     println (isAdult p)
@@ -216,7 +216,7 @@ end""" onLoadCode True "indigo"
 
 struct PosInt = (x: Int) is PositiveNumber
 
-let main: IO = do
+let main: IO<Unit> = do
     # Valid - 5 > 0
     let p = PosInt{x: 5}
     
@@ -230,7 +230,7 @@ end""" onLoadCode True "indigo"
 
 struct Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person{name: "Bob", age: 25}
     println p.name
 end""" onLoadCode True "indigo"
@@ -241,7 +241,7 @@ end""" onLoadCode True "indigo"
 
 struct Person = (name: String, age: Int) is Printable
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person{name: "Alice", age: 30}
     println p.name
 end""" onLoadCode True "indigo"
@@ -256,7 +256,7 @@ trait Cloneable
 
 struct Person = (name: String) is Printable, Cloneable
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person{name: "Alice"}
     println p.name
 end""" onLoadCode True "indigo"
@@ -350,7 +350,7 @@ end""" onLoadCode True "indigo"
 let fib (1: Int) : Int = 1
 let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
 
-let main : IO = do
+let main : IO<Unit> = do
   println fib 12
 end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, the fib function has three definitions: one for when the argument is 0, one for when it's 1, and one for any other integer. The compiler will try to match the arguments against these patterns in order." ]
@@ -358,7 +358,7 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """let head ([]: [Any]) = 0
 let head ((x:xs): [Any]) = x
 
-let main : IO = do
+let main : IO<Unit> = do
   println head [1, 2, 3]
 end""" onLoadCode True "indigo"
         , p [] [ text "This head function matches the empty list pattern first, then matches any non-empty list using a cons pattern, binding the first element to x and the rest to xs." ]
@@ -393,7 +393,7 @@ let fst (x, y) = x
 let snd :: (Int, String) -> String
 let snd (x, y) = y
 
-let main: IO = do
+let main: IO<Unit> = do
   println (fst (42, "hello"))
   println (snd (42, "hello"))
 end""" onLoadCode True "indigo"
@@ -406,14 +406,14 @@ viewTuples onLoadCode =
         , p [] [ text "Tuples are fixed-size collections of values of potentially different types. They provide a way to group multiple values together without defining a custom struct." ]
         , h3 [] [ text "Creating Tuples" ]
         , p [] [ text "Tuples are created using parentheses with comma-separated values:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let point = (10, 20)
     let person = ("Alice", 30, True)
     println point
     println person
 end""" onLoadCode True "indigo"
         , p [] [ text "Multi-element tuples require at least 2 elements. Single-element tuples use a trailing comma syntax:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let single = (42,)
     let double = (10, 20)
     println single.0
@@ -426,7 +426,7 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """let point: (Int, Int) = (10, 20)
     let person: (String, Int, Bool) = ("Alice", 30, True)
     let single: (Int,) = (42,)
-    let main: IO = do
+    let main: IO<Unit> = do
     println point
     println person
     println single.0
@@ -434,14 +434,14 @@ end""" onLoadCode True "indigo"
         , p [] [ text "Each position in the tuple type corresponds to the type of the value at that position. Single-element tuple types also use the trailing comma syntax: (Int,) for a tuple containing a single Int." ]
         , h3 [] [ text "Accessing Tuple Elements" ]
         , p [] [ text "Tuple elements are accessed using dot notation with zero-based numeric indices:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let t = (42, "hello", True)
     println t.0
     println t.1
     println t.2
 end""" onLoadCode True "indigo"
         , p [] [ text "The first element is accessed with .0, the second with .1, and so on. For nested tuple access, use intermediate variables:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let t = ((1, 2), (3, 4))
     let first = t.0
     let second = t.1
@@ -455,7 +455,7 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """let swap :: (Int, String) -> (String, Int)
 let swap (x, y) = (y, x)
 
-let main: IO = do
+let main: IO<Unit> = do
     let result = swap (42, "hello")
     println result.0
     println result.1
@@ -464,7 +464,7 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """let divide :: Int -> Int -> (Int, Int)
 let divide a b = (a / b, a % b)
 
-let main: IO = do
+let main: IO<Unit> = do
     let (quotient, remainder) = divide 10 3
     println quotient
     println remainder
@@ -474,11 +474,11 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """let fst :: (Int, String) -> Int
 let fst (x, y) = x
 
-let main: IO = do
+let main: IO<Unit> = do
     println (fst (42, "test"))
 end""" onLoadCode True "indigo"
         , p [] [ text "Pattern matching allows you to extract tuple elements directly in the function signature or when branches:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let t = (1, "hello")
     when t of
         (1, "hello") -> println "matched (1, hello)"
@@ -492,7 +492,7 @@ end""" onLoadCode True "indigo"
 end""" onLoadCode True "indigo"
         , h3 [] [ text "Nested Tuples" ]
         , p [] [ text "Tuples can contain other tuples, allowing you to create more complex data structures:" ]
-        , viewCodeBlock """let main: IO = do
+        , viewCodeBlock """let main: IO<Unit> = do
     let nested = ((1, 2), (3, 4))
     let first = nested.0
     let second = nested.1
@@ -523,7 +523,7 @@ let add<N: Number> (a: N b: N): N = do
   a + b
 end
 
-let main: IO = do
+let main: IO<Unit> = do
   println add 1, 2
 end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]
@@ -536,7 +536,7 @@ impl Number for Float
 
 struct Container<T: Number> = (value: T)
 
-let main: IO = do
+let main: IO<Unit> = do
     let intContainer = Container<Int>{value: 42}
     let floatContainer = Container<Float>{value: 3.14}
     println intContainer.value
@@ -573,7 +573,7 @@ impl Number for Float
 
 struct Example<N: Number> = (content: N)
 
-let main: IO = do
+let main: IO<Unit> = do
     # Valid - Int implements Number
     let x = Example<Int>{content: 42}
     
@@ -605,7 +605,7 @@ let greet (name: String) : String = "Hello, " ++ name ++ "!" """ onLoadCode Fals
         , p [] [ text "An unqualified import brings all names from a module into the current scope without a prefix:" ]
         , viewCodeBlock """import Module2
 
-let main : IO = do
+let main : IO<Unit> = do
     let result = add 5, 3
     println result
 end""" onLoadCode False "indigo"
@@ -614,7 +614,7 @@ end""" onLoadCode False "indigo"
         , p [] [ text "A qualified import requires you to prefix imported names with the module name, preventing name conflicts:" ]
         , viewCodeBlock """import qualified Module2
 
-let main : IO = do
+let main : IO<Unit> = do
     let result1 = Module2.add 5, 3
     let result2 = Module2.multiply 4, 7
     let message = Module2.greet "World"
@@ -627,7 +627,7 @@ end""" onLoadCode False "indigo"
         , p [] [ text "You can create an alias for a module when importing, which is useful for shortening long module names:" ]
         , viewCodeBlock """import qualified Module2 as M2
 
-let main : IO = do
+let main : IO<Unit> = do
     let result = M2.add 5, 3
     println result
 end""" onLoadCode False "indigo"
@@ -652,7 +652,7 @@ viewRefinementTypes onLoadCode =
         , p [] [ text "The syntax for refinement types uses the satisfies keyword followed by a boolean expression that references the struct's fields." ]
         , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
 
-let main: IO = do
+let main: IO<Unit> = do
     let a = Age{value: 5}
 end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, the Age struct has a refinement that requires the value field to be greater than or equal to zero. When creating an Age struct literal, the compiler checks this constraint at compile time." ]
@@ -660,7 +660,7 @@ end""" onLoadCode True "indigo"
         , p [] [ text "If you try to create a struct literal that violates the refinement constraint, the compiler will produce an error:" ]
         , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
 
-let main: IO = do
+let main: IO<Unit> = do
     let a = Age{value: 0 - 1}
 end""" onLoadCode False "indigo"
         , p [] [ text "The above code will fail to compile with a refinement error, since the value -1 does not satisfy the constraint value >= 0." ]
@@ -668,7 +668,7 @@ end""" onLoadCode False "indigo"
         , p [] [ text "Refinements can also use equality checks to enforce specific values:" ]
         , viewCodeBlock """struct Person = (name: String) satisfies (name == "Alice")
 
-let main: IO = do
+let main: IO<Unit> = do
     let p = Person{name: "Alice"}
 end""" onLoadCode True "indigo"
         , p [] [ text "This example shows a Person struct that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
@@ -678,7 +678,7 @@ end""" onLoadCode True "indigo"
         , p [] [ text "Value structs are a special kind of struct that have exactly one field and can be constructed using type casts. They provide a convenient way to create refined types that can be implicitly or explicitly converted from their underlying type." ]
         , viewCodeBlock """value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
 
-let main: IO = do
+let main: IO<Unit> = do
     # Valid - 12 is even
     println (12 as EvenNumber)
     
@@ -692,7 +692,7 @@ end""" onLoadCode True "indigo"
         , p [] [ text "Value structs can also be defined without refinements, allowing any value of the field type to be cast:" ]
         , viewCodeBlock """value struct PositiveInt = (num: Int)
 
-let main: IO = do
+let main: IO<Unit> = do
     let x = 42 as PositiveInt
     println x
 end""" onLoadCode True "indigo"

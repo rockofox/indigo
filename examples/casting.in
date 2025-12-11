@@ -2,7 +2,7 @@ external "__default" = do
     sin :: Double -> Double
 end
 
-let main : IO = do
+let main : IO<Unit> = do
     let tick = $20
     println 100.0 as Double * (sin (tick as Double))
 end

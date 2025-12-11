@@ -12,6 +12,7 @@ import Control.Exception (IOException, try)
 import Control.Monad
 import Control.Monad.RWS hiding (local)
 import Control.Monad.State.Lazy
+import Control.Monad.IO.Class (liftIO)
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
@@ -967,7 +968,10 @@ runInstruction (Call x) = do
     nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
     case nextInstruction of
         Ret -> tailCall
-        _ -> modify $ \vm -> vm{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels vm, callStack = StackFrame{returnAddress = pc vm, locals = []} : callStack vm}
+        _ -> do
+            vm <- get
+            let target = lookup x $ labels vm
+            modify $ \vm' -> vm'{pc = fromMaybe (error $ "Label not found: " ++ x) target, callStack = StackFrame{returnAddress = pc vm', locals = []} : callStack vm'}
   where
     tailCall = do
         runInstruction $ Jmp x
@@ -978,7 +982,9 @@ runInstruction (CallLocal x) = do
         _ -> do
             vm <- get
             case callStack vm of
-                (frame : _) -> modify $ \v -> v{pc = fromMaybe (error $ "Label not found: " ++ x) $ lookup x $ labels v, callStack = StackFrame{returnAddress = pc v, locals = frame.locals} : callStack v}
+                (frame : _) -> do
+                    let target = lookup x $ labels vm
+                    modify $ \v -> v{pc = fromMaybe (error $ "Label not found: " ++ x) target, callStack = StackFrame{returnAddress = pc v, locals = frame.locals} : callStack v}
                 [] -> error "Empty call stack"
   where
     tailCall = do

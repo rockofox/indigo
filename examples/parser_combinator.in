@@ -15,7 +15,7 @@ let parse (input: String parser: (String -> Parser)): Parser = do
     end
 end
 
-let main: IO = do
+let main: IO<Unit> = do
     let pn: Parser = parse "123,456,789", parseNumber
     println pn.result
 end
