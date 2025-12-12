@@ -819,6 +819,15 @@ spec = do
                     end
                 |]
                 `shouldReturn` "42\n"
+        it "Can use generic Monad return with Some" $ do
+            compileAndRun
+                [r|
+                    let main : IO<Unit> = do
+                        let some : Some<Int> = return 42
+                        println some.value
+                    end
+                |]
+                `shouldReturn` "42\n"
         it "Can chain generic Monad bind with IO" $ do
             compileAndRun
                 [r|

@@ -4,7 +4,7 @@ struct Unit = ()
 nop :: IO<Unit>
 nop _ = IO<Unit>{inner: Unit{}}
 
-let return<T: Any> (x: T) : IO<T> = IO<T>{inner: x}
+let return<M, T: Any> (x: T) : M = IO<T>{inner: x}
 
 trait Optional<T>
 struct Some<T> = (value: T) is Optional<T>

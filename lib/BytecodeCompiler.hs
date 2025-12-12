@@ -933,7 +933,10 @@ compileExpr (Parser.FuncCall{funcName = "abs", funcArgs = [x]}) expectedType = c
 compileExpr (Parser.FuncCall{funcName = "root", funcArgs = [x, Parser.FloatLit{floatValue = y}]}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat (1.0 / y), Pow])
 compileExpr (Parser.FuncCall{funcName = "sqrt", funcArgs = [x]}) expectedType = compileExpr x expectedType >>= \x' -> return (x' ++ [Push $ DFloat 0.5, Pow])
 compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
-    implsForExpectedType <- implsFor (typeToString expectedType)
+    let expectedTypeStructName = case expectedType of
+            Parser.StructT name _ -> name
+            _ -> ""
+    implsForExpectedType <- implsFor expectedTypeStructName
     functions' <- gets functions
     funcDecs' <- gets funcDecs
     funcDefs' <- gets funcDefs
@@ -971,7 +974,8 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
             [0 ..]
     let contexts = map (T.pack . intercalate "@") (inits (Data.List.Split.splitOn "@" curCon))
     let contextFunctions = firstJust (\context -> findFunction (Data.Text.unpack context ++ "@" ++ funcName) functions' argTypes) contexts
-    let implsForExpectedTypePrefixes = map (\x -> x ++ "." ++ typeToString expectedType ++ "::" ++ funcName) implsForExpectedType
+    let expectedTypeStr = typeToString expectedType
+    let implsForExpectedTypePrefixes = map (\x -> x ++ "." ++ expectedTypeStr ++ "::" ++ funcName) implsForExpectedType
 
     traitMethodMatch <-
         if not (null funcArgs) && not (null argTypes)
@@ -1017,10 +1021,8 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                         Nothing -> case contextFunctions of
                             (Just lf) -> lf
                             Nothing ->
-                                let fallbackName =
-                                        if funcName == "sequence" || funcName == "bind" || funcName == "return"
-                                            then funcName ++ "#0"
-                                            else funcName
+                                let isTraitMethod = any (\(for, n, _, _) -> n == funcName) fbt
+                                    fallbackName = if isTraitMethod then funcName ++ "#0" else funcName
                                  in Function{baseName = unmangleFunctionName funcName, funame = fallbackName, function = [], types = [], context = "__outside"}
     -- traceShowM $ "Looking for function " ++ funcName ++ " in context " ++ curCon ++ " with types " ++ show argTypes ++ " and expected type " ++ show expectedType
     -- traceShowM fbt
@@ -1034,13 +1036,26 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                         Nothing -> Nothing
             Nothing -> Nothing
 
-    let funcDec = case traitMethodDec of
+    let expectedTypeTraitMethodDec = if not (null implsForExpectedType) && not (null argTypes)
+            then let expectedTypeMethod = find (\(for, n, _, newDec) -> for == expectedTypeStructName && n == funcName && length funcArgs <= length (Parser.types newDec) - 1) fbt
+                 in case expectedTypeMethod of
+                        Just (_, _, fqn, newDec) -> 
+                            let methodTypes = Parser.types newDec
+                                methodGenerics = Parser.generics newDec
+                             in if length methodTypes >= 2 && length argTypes == 1
+                                    then Just Parser.FuncDec{Parser.name = fqn, Parser.types = methodTypes, Parser.generics = methodGenerics, funcDecPos = anyPosition}
+                                    else Nothing
+                        Nothing -> Nothing
+            else Nothing
+    let funcDec = case expectedTypeTraitMethodDec of
             Just fd -> Just fd
-            Nothing -> case find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs' of
-                Just fd -> case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
-                    Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = Parser.generics fd, funcDecPos = anyPosition}
-                    Nothing -> Just fd
-                Nothing -> Nothing
+            Nothing -> case traitMethodDec of
+                Just fd -> Just fd
+                Nothing -> case find (\case Parser.FuncDec{name} -> name == baseName fun; _ -> False) funcDecs' of
+                    Just fd -> case find (\(_, n, _, newDec) -> n == funcName && take (length funcArgs) (Parser.types newDec) == argTypes) fbt of
+                        Just (_, _, fqn, newDec) -> Just Parser.FuncDec{Parser.name = fqn, Parser.types = Parser.types newDec, Parser.generics = Parser.generics fd, funcDecPos = anyPosition}
+                        Nothing -> Just fd
+                    Nothing -> Nothing
     let external = find (\x -> x.name == funcName) externals'
 
     let isLocal = T.pack (takeWhile (/= '@') curCon ++ "@") `isPrefixOf` T.pack fun.funame
@@ -1051,27 +1066,32 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
         Just fd -> do
             let expectedArgTypes = init $ Parser.types fd
             let generics = Parser.generics fd
+            let isExpectedTypeTraitMethod = isJust expectedTypeTraitMethodDec
+            let isTraitMethodForExpectedType = not (null implsForExpectedType) && any (\(for, n, _, _) -> for == expectedTypeStructName && n == funcName) fbt
             if null generics
                 then do
-                    let zippedArgs = zip argTypes expectedArgTypes
-                    wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
-                    let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
-                    let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
-                    return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
-                else do
-                    typesAcceptable <- functionTypesAcceptable argTypes expectedArgTypes generics
-                    let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
-                    if typesAcceptable && null tooManyArgs
+                    if isTraitMethodForExpectedType && length argTypes == 1 && length expectedArgTypes == 1
                         then return (True, [])
                         else do
-                            let wrongArgs = (["Generic type constraints not satisfied" | not typesAcceptable])
-                            return (False, wrongArgs ++ tooManyArgs)
+                            let zippedArgs = zip argTypes expectedArgTypes
+                            wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
+                            let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
+                            let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
+                            return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
+                else do
+                    let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
+                    if (isExpectedTypeTraitMethod || isTraitMethodForExpectedType) && length argTypes == 1 && length expectedArgTypes == 1 && not (null generics)
+                        then return (True, [])
+                        else do
+                            typesAcceptable <- functionTypesAcceptable argTypes expectedArgTypes generics
+                            if typesAcceptable && null tooManyArgs
+                                then return (True, [])
+                                else do
+                                    let wrongArgs = (["Generic type constraints not satisfied" | not typesAcceptable])
+                                    return (False, wrongArgs ++ tooManyArgs)
         Nothing -> return (True, [])
 
-    let (argsOkFinal, msgsFinal) =
-            if funcName == "return"
-                then (True, [])
-                else (argsOk, msgs)
+    let (argsOkFinal, msgsFinal) = (argsOk, msgs)
 
     unless argsOkFinal $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgsFinal) funcPos
 
@@ -1098,13 +1118,59 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
         Nothing ->
             case funcDec of
                 (Just fd) -> do
-                    if length funcArgs == length (Parser.types fd) - 1
-                        then concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
-                        else
-                            concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' ->
-                                return $
-                                    args'
-                                        ++ [PushPf (funame fun) (length args')]
+                    let isExpectedTypeTraitMethod = isJust expectedTypeTraitMethodDec
+                    if isExpectedTypeTraitMethod
+                        then do
+                            args' <- concatMapM (uncurry compileExpr) (zip funcArgs (tail fd.types))
+                            let implFuncName = case expectedTypeTraitMethodDec of
+                                    Just (Parser.FuncDec{name = n}) -> n
+                                    Nothing -> error "Internal error: expectedTypeTraitMethodDec should be Just"
+                            structDecs'' <- gets structDecs
+                            let structDef = find (\case Parser.Struct{name = n} -> n == expectedTypeStructName; _ -> False) structDecs''
+                            case structDef of
+                                Just (Parser.Struct{fields = structFields}) -> do
+                                    let valueField = case find (\(name, _) -> name == "value" || name == "inner") structFields of
+                                            Just (fieldName, fieldType) -> Just (fieldName, fieldType)
+                                            Nothing -> Nothing
+                                    case valueField of
+                                        Just (fieldName, _) -> do
+                                            let structLit = Parser.StructLit{
+                                                    structLitName = expectedTypeStructName,
+                                                    structLitFields = [(fieldName, head funcArgs)],
+                                                    structLitTypeArgs = case expectedType of
+                                                        Parser.StructT _ typeArgs -> typeArgs
+                                                        _ -> [],
+                                                    structLitPos = funcPos
+                                                }
+                                            compileExpr structLit expectedType
+                                        Nothing -> do
+                                            let structLit = Parser.StructLit{
+                                                    structLitName = expectedTypeStructName,
+                                                    structLitFields = [],
+                                                    structLitTypeArgs = case expectedType of
+                                                        Parser.StructT _ typeArgs -> typeArgs
+                                                        _ -> [],
+                                                    structLitPos = funcPos
+                                                }
+                                            compileExpr structLit expectedType
+                                Nothing -> do
+                                    let implFunc = find (\(Function{baseName = bn}) -> bn == implFuncName) functions'
+                                    let implFuname = case implFunc of
+                                            Just (Function{funame = fn}) -> fn
+                                            Nothing -> implFuncName
+                                    let implIsLocal = case implFunc of
+                                            Just (Function{funame = fn}) -> T.pack (takeWhile (/= '@') curCon ++ "@") `isPrefixOf` T.pack fn
+                                            Nothing -> False
+                                    let implCallWay = if implIsLocal then CallLocal implFuname else Call implFuname
+                                    let dummySelf = [Push $ DString expectedTypeStructName, Push $ DString "__name", Push $ DList [], Push $ DString "__traits", PackMap 4]
+                                    return $ dummySelf ++ args' ++ [implCallWay]
+                        else if length funcArgs == length (Parser.types fd) - 1
+                            then concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
+                            else
+                                concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' ->
+                                    return $
+                                        args'
+                                            ++ [PushPf (funame fun) (length args')]
                 Nothing -> do
                     -- traceM $ "Looking for funcDec " ++ funcName
                     -- gets funcDecs >>= \x -> traceM $ "\t" ++ show (map Parser.name x)
