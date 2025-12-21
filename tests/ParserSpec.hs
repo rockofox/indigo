@@ -412,3 +412,24 @@ spec = do
             parseProgram "let x : (Int,) = 1" parserCompilerFlags
                 `shouldBe` Right
                     (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+    describe "Variants" $ do
+        it "Should parse basic variant with single constructor" $ do
+            let result = parseProgram "variant Person = Teacher(subject: String)" parserCompilerFlags
+            case result of
+                Right (Program [DoBlock{doBlockExprs = [Trait{name = "Person"}, Struct{name = "Teacher", fields = [("subject", StructT "String" [])], is = [StructT "Person" []]}]}] _) -> return ()
+                _ -> expectationFailure $ "Failed to parse basic variant: " ++ show result
+        it "Should parse variant with multiple constructors" $ do
+            let result = parseProgram "variant Person = Teacher(subject: String) | FootballPlayer(team: String) | Baby(age: Int)" parserCompilerFlags
+            case result of
+                Right (Program [DoBlock{doBlockExprs = [Trait{name = "Person"}, Struct{name = "Teacher", is = [StructT "Person" []]}, Struct{name = "FootballPlayer", is = [StructT "Person" []]}, Struct{name = "Baby", is = [StructT "Person" []]}]}] _) -> return ()
+                _ -> expectationFailure $ "Failed to parse variant with multiple constructors: " ++ show result
+        it "Should parse variant with constructors having multiple fields" $ do
+            let result = parseProgram "variant Person = Teacher(subject: String, age: Int) | Student(name: String, grade: Int)" parserCompilerFlags
+            case result of
+                Right (Program [DoBlock{doBlockExprs = [Trait{name = "Person"}, Struct{name = "Teacher", fields = [("subject", StructT "String" []), ("age", StructT "Int" [])], is = [StructT "Person" []]}, Struct{name = "Student", fields = [("name", StructT "String" []), ("grade", StructT "Int" [])], is = [StructT "Person" []]}]}] _) -> return ()
+                _ -> expectationFailure $ "Failed to parse variant with multiple fields: " ++ show result
+        it "Should parse variant with constructors having no fields" $ do
+            let result = parseProgram "variant Option = Some(value: Int) | None()" parserCompilerFlags
+            case result of
+                Right (Program [DoBlock{doBlockExprs = [Trait{name = "Option"}, Struct{name = "Some", fields = [("value", StructT "Int" [])], is = [StructT "Option" []]}, Struct{name = "None", fields = [], is = [StructT "Option" []]}]}] _) -> return ()
+                _ -> expectationFailure $ "Failed to parse variant with no fields: " ++ show result

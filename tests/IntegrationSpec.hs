@@ -839,6 +839,25 @@ spec = do
                     end
                 |]
                 `shouldReturn` "4\n"
+        it "Can use variant to create polymorphic types" $ do
+            compileAndRun
+                [r|
+                    variant Person = Teacher(subject: String) | FootballPlayer(team: String) | Baby(age: Int)
+
+                    let describeTeacher (t: Teacher) : String = "Teacher of " ++ t.subject
+                    let describeFootballPlayer (f: FootballPlayer) : String = "Football player for " ++ f.team
+                    let describeBaby (b: Baby) : String = "Baby aged " ++ (b.age as String)
+
+                    let main : IO<Unit> = do
+                        let t = Teacher { subject: "Math" }
+                        let f = FootballPlayer { team: "Lions" }
+                        let b = Baby { age: 2 }
+                        println (describeTeacher t)
+                        println (describeFootballPlayer f)
+                        println (describeBaby b)
+                    end
+                |]
+                `shouldReturn` "Teacher of Math\nFootball player for Lions\nBaby aged 2\n"
     describe "Lambdas" $ do
         it "Can use a lambda in the map function" $ do
             compileAndRun

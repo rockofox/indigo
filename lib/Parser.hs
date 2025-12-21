@@ -268,7 +268,7 @@ keyword :: Text -> Parser ()
 keyword w = (lexeme . try) (string w *> notFollowedBy alphaNumChar)
 
 rws :: [String]
-rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of", "it", "satisfies", "is", "module", "import", "qualified"]
+rws = ["if", "then", "else", "do", "end", "True", "False", "let", "as", "when", "of", "it", "satisfies", "is", "module", "import", "qualified", "variant"]
 
 identifier :: Parser String
 identifier = do
@@ -919,6 +919,43 @@ trait = do
         fieldType <- validType <?> "field type"
         return (fieldName, fieldType)
 
+variant :: Parser Expr
+variant = do
+    start <- getOffset
+    keyword "variant"
+    variantName <- identifier <?> "variant name"
+    symbol "="
+    constructors <- sepBy1 variantConstructor (symbol "|") <?> "variant constructors"
+    end <- getOffset
+    let pos = Position (start, end)
+    let traitExpr = Trait variantName [] [] [] Nothing "" pos
+    let structExprs = map (createStruct variantName pos) constructors
+    return $ DoBlock (traitExpr : structExprs) pos
+  where
+    createStruct :: String -> Position -> (String, [(String, Type)]) -> Expr
+    createStruct variantName pos (ctorName, ctorFields) =
+        Struct
+            { name = ctorName
+            , fields = ctorFields
+            , refinement = Nothing
+            , refinementSrc = ""
+            , is = [StructT variantName []]
+            , isValueStruct = False
+            , generics = []
+            , structPos = pos
+            }
+    variantConstructor :: Parser (String, [(String, Type)])
+    variantConstructor = do
+        ctorName <- extra <?> "constructor name"
+        ctorFields <- parens (structField `sepBy` symbol ",") <?> "constructor fields"
+        return (ctorName, ctorFields)
+    structField :: Parser (String, Type)
+    structField = do
+        fieldName <- identifier <?> "field name"
+        symbol ":"
+        fieldType <- validType <?> "field type"
+        return (fieldName, fieldType)
+
 impl :: Parser Expr
 impl = do
     start <- getOffset
@@ -1032,6 +1069,7 @@ term =
             return $ BoolLit False (Position (start, end))
         , external
         , try valueStruct
+        , try variant
         , struct
         , import_
         , impl
