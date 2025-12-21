@@ -27,8 +27,8 @@ let violet = 0xFF8800FF
 let screenWidth = 800
 let screenHeight = 450
 
-struct RaylibColor = (r: Char, g: Char, b: Char, a: Char)
-struct Vector3 = (x: Float, y: Float, z: Float)
+type RaylibColor = (r: Char, g: Char, b: Char, a: Char)
+type Vector3 = (x: Float, y: Float, z: Float)
 /* test */
 let loop (tick: Int) : IO = do
     BeginDrawing

@@ -8,7 +8,7 @@ syn match ConId "\(\<[A-Z][a-zA-Z0-9_']*\.\)*\<[A-Z][a-zA-Z0-9_']*\>" contains=@
 syn match VarId "\(\<[A-Z][a-zA-Z0-9_']*\.\)*\<[a-z][a-zA-Z0-9_']*\>" contains=@NoSpell
 
 " Infix operators--most punctuation characters and any (qualified) identifier
-" enclosed in `backquotes`. An operator starting with : is a constructor,
+" enclosed in `backquotes`. An operator starting with : is a contypeor,
 " others are variables (e.g. functions).
 syn match inVarSym "\(\<[A-Z][a-zA-Z0-9_']*\.\)\=[-!#$%&\*\+/<=>\?@\\^|~.][-!#$%&\*\+/<=>\?@\\^|~:.]*"
 syn match inConSym "\(\<[A-Z][a-zA-Z0-9_']*\.\)\=:[-!#$%&\*\+./<=>\?@\\^|~:]*"
@@ -37,7 +37,7 @@ syn region  inImportList start='(' skip='([^)]\{-})' end=')' keepend contained c
 
 syn keyword inImportMod contained as qualified hiding from
 syn keyword inInfix as satisfies is
-syn keyword inStructure struct trait impl for let external
+syn keyword inType type trait impl for let external
 syn keyword inTypedef type
 syn keyword inNewtypedef newtype
 syn keyword inTypeFam family
@@ -77,11 +77,11 @@ syn keyword inTodo	        contained FIXME TODO XXX NOTE
 " Define the default highlighting.
 " Only when an item doesn't have highlighting yet
 
-hi def link inModule			  inStructure
+hi def link inModule			  inType
 hi def link inImport			  Include
 hi def link inImportMod			  inImport
 hi def link inInfix			  PreProc
-hi def link inStructure			  Structure
+hi def link inType			  Type
 hi def link inStatement			  Statement
 hi def link inConditional		  Conditional
 hi def link inSpecialChar		  SpecialChar
@@ -90,7 +90,7 @@ hi def link inNewtypedef		  Typedef
 hi def link inVarSym			  inOperator
 hi def link inConSym			  inOperator
 hi def link inOperator			  Operator
-hi def link inTypeFam			  Structure
+hi def link inTypeFam			  Type
 if exists("in_highlight_delimiters")
 " Some people find this highlighting distracting.
 hi def link inDelimiter			  Delimiter

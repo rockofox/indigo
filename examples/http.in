@@ -14,8 +14,8 @@ external "__default" = do
     htons :: Int -> Int
 end
 
-struct sockaddr = (sa_family: Int, sa_data: String)
-struct sockaddr_in = (sin_family: Int, sin_port: Int, sin_addr: Int)
+type sockaddr = (sa_family: Int, sa_data: String)
+type sockaddr_in = (sin_family: Int, sin_port: Int, sin_addr: Int)
 
 let main : IO<Unit> = do
     let port = 9000

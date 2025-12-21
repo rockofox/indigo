@@ -1,7 +1,7 @@
 trait Animal
 
-struct Dog = (name: String)
-struct Cat = (name: String)
+type Dog = (name: String)
+type Cat = (name: String)
 
 impl Animal for Dog
 impl Animal for Cat

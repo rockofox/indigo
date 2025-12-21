@@ -75,8 +75,8 @@ end
 let main : IO<Unit> = do
     bottles 99
 end""" )
-    , ( "Structs & Traits", """struct Dog = (name: String)
-struct Cat = (name: String)
+    , ( "Structs & Traits", """type Dog = (name: String)
+type Cat = (name: String)
 
 trait Animal = do
     makeNoise :: Self -> IO

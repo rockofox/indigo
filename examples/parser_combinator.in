@@ -1,4 +1,4 @@
-struct Parser = (remaining: String, result: Any)
+type Parser = (remaining: String, result: Any)
 
 let parseNumber (input: String): Parser = do
     let number = takeWhile (\c -> (c >= '0') && (c <= '9')), input

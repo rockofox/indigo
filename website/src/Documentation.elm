@@ -105,8 +105,8 @@ viewStructsAndTraits : (String -> msg) -> Html msg
 viewStructsAndTraits onLoadCode =
     section [ id "structs-and-traits" ]
         [ h2 [] [ text "Structs and traits" ]
-        , viewCodeBlock """struct Dog = (name: String)
-struct Cat = (name: String)
+        , viewCodeBlock """type Dog = (name: String)
+type Cat = (name: String)
 
 let main: IO<Unit> = do
     let bello = Dog { name : "Bello" }
@@ -115,13 +115,13 @@ let main: IO<Unit> = do
     println name mauzi
 end""" onLoadCode True "indigo"
         , p [] [ text "The above example shows simple data structures. The name method gets created automatically. Name collisions (shoud be) resolved automatically." ]
-        , h3 [] [ text "Generic Structs" ]
-        , p [] [ text "Structs can have type parameters, allowing you to create reusable data structures that work with different types:" ]
+        , h3 [] [ text "Generic Types" ]
+        , p [] [ text "Types can have type parameters, allowing you to create reusable data structures that work with different types:" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
 
-struct Example<N: Number> = (content: N)
+type Example<N: Number> = (content: N)
 
 let main: IO<Unit> = do
     let x = Example<Int>{content: 42}
@@ -129,8 +129,8 @@ let main: IO<Unit> = do
     println x.content
     println y.content
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Example struct has a generic type parameter N constrained to the Number trait. This means you can create Example instances with any type that implements Number, such as Int or Float." ]
-        , p [] [ text "When creating a struct literal with type arguments, you specify the concrete type in angle brackets: Example<Int>{content: 42}. The compiler validates that the type argument (Int) satisfies the trait constraint (Number)." ]
+        , p [] [ text "In the above example, the Example type has a generic type parameter N constrained to the Number trait. This means you can create Example instances with any type that implements Number, such as Int or Float." ]
+        , p [] [ text "When creating a type literal with type arguments, you specify the concrete type in angle brackets: Example<Int>{content: 42}. The compiler validates that the type argument (Int) satisfies the trait constraint (Number)." ]
         , viewCodeBlock """trait Animal = do
     makeNoise :: Self -> IO
 end
@@ -157,19 +157,19 @@ end""" onLoadCode True "indigo"
 end""" onLoadCode True "indigo"
         , p [] [ text "Generic traits allow you to define reusable abstractions that work with different types. The type parameter T can be used in the trait's method signatures." ]
         , h3 [] [ text "Required Properties" ]
-        , p [] [ text "Traits can specify required properties that implementing structs must have. This ensures that any type implementing the trait has the necessary fields:" ]
+        , p [] [ text "Traits can specify required properties that implementing types must have. This ensures that any type implementing the trait has the necessary fields:" ]
         , viewCodeBlock """trait Printable = (name: String, age: Int)
 
-struct Person = (name: String, age: Int) is Printable""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Printable trait requires that implementing structs have both a name field of type String and an age field of type Int. When you use the is clause, the compiler verifies that Person has these required fields with matching types." ]
-        , p [] [ text "If a struct tries to implement a trait but is missing required properties or has type mismatches, the compiler will produce an error:" ]
+type Person = (name: String, age: Int) is Printable""" onLoadCode True "indigo"
+        , p [] [ text "In the above example, the Printable trait requires that implementing types have both a name field of type String and an age field of type Int. When you use the is clause, the compiler verifies that Person has these required fields with matching types." ]
+        , p [] [ text "If a type tries to implement a trait but is missing required properties or has type mismatches, the compiler will produce an error:" ]
         , viewCodeBlock """trait Printable = (name: String, age: Int)
 
-# Error: Missing required property 'age' in struct Person for trait Printable
-struct Person = (name: String) is Printable
+# Error: Missing required property 'age' in type Person for trait Printable
+type Person = (name: String) is Printable
 
-# Error: Type mismatch - trait requires Int, struct has String
-struct Person2 = (name: String, age: String) is Printable""" onLoadCode False "indigo"
+# Error: Type mismatch - trait requires Int, type has String
+type Person2 = (name: String, age: String) is Printable""" onLoadCode False "indigo"
         , h3 [] [ text "Required Properties and Methods" ]
         , p [] [ text "Traits can combine required properties with methods that perform meaningful operations using those properties:" ]
         , viewCodeBlock """trait Describable = (name: String, age: Int) do
@@ -177,7 +177,7 @@ struct Person2 = (name: String, age: String) is Printable""" onLoadCode False "i
     isAdult :: Self -> Bool
 end
 
-struct Person = (name: String, age: Int)
+type Person = (name: String, age: Int)
 
 impl Describable for Person = do
     describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
@@ -196,7 +196,7 @@ end""" onLoadCode True "indigo"
     isAdult :: Self -> Bool
 end
 
-struct Person = (name: String, age: Int) is Describable
+type Person = (name: String, age: Int) is Describable
 
 impl Describable for Person = do
     describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
@@ -208,13 +208,13 @@ let main: IO<Unit> = do
     println (describe p)
     println (isAdult p)
 end""" onLoadCode True "indigo"
-        , p [] [ text "The compiler validates that structs implementing the trait have all required properties, and you must provide implementations for all trait methods." ]
-        , p [] [ text "Trait dispatch in Indigo requires concrete types at compile time. When you call a trait method, the compiler must be able to determine the concrete struct type to select the correct implementation. This means trait methods work best when called directly on concrete struct instances, rather than through polymorphic functions that accept Any." ]
+        , p [] [ text "The compiler validates that types implementing the trait have all required properties, and you must provide implementations for all trait methods." ]
+        , p [] [ text "Trait dispatch in Indigo requires concrete types at compile time. When you call a trait method, the compiler must be able to determine the concrete type to select the correct implementation. This means trait methods work best when called directly on concrete type instances, rather than through polymorphic functions that accept Any." ]
         , h3 [] [ text "Trait Refinements" ]
-        , p [] [ text "Traits can also have refinement types, similar to structs. These refinements are checked when creating struct literals that implement the trait:" ]
+        , p [] [ text "Traits can also have refinement types, similar to types. These refinements are checked when creating type literals that implement the trait:" ]
         , viewCodeBlock """trait PositiveNumber satisfies (x > 0)
 
-struct PosInt = (x: Int) is PositiveNumber
+type PosInt = (x: Int) is PositiveNumber
 
 let main: IO<Unit> = do
     # Valid - 5 > 0
@@ -223,44 +223,44 @@ let main: IO<Unit> = do
     # Error - trait refinement failed (x > 0)
     # let p2 = PosInt{x: 0}
 end""" onLoadCode True "indigo"
-        , p [] [ text "When a struct implements a trait with a refinement, the compiler checks the trait's refinement constraint when creating struct literals. If the constraint is violated, compilation fails with an error indicating which trait's refinement was violated." ]
+        , p [] [ text "When a type implements a trait with a refinement, the compiler checks the trait's refinement constraint when creating type literals. If the constraint is violated, compilation fails with an error indicating which trait's refinement was violated." ]
         , h3 [] [ text "Combining Required Properties and Refinements" ]
         , p [] [ text "Traits can have both required properties and refinements:" ]
         , viewCodeBlock """trait ValidPerson = (name: String, age: Int) satisfies (age > 0)
 
-struct Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
+type Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
 
 let main: IO<Unit> = do
     let p = Person{name: "Bob", age: 25}
     println p.name
 end""" onLoadCode True "indigo"
-        , p [] [ text "In this example, ValidPerson requires both name and age fields, and also has a refinement that age must be greater than 0. The Person struct must satisfy both the required properties and the refinement constraint." ]
+        , p [] [ text "In this example, ValidPerson requires both name and age fields, and also has a refinement that age must be greater than 0. The Person type must satisfy both the required properties and the refinement constraint." ]
         , h3 [] [ text "Using 'is' Clause" ]
-        , p [] [ text "Structs can declare that they implement a trait directly in their definition using the is clause:" ]
+        , p [] [ text "Types can declare that they implement a trait directly in their definition using the is clause:" ]
         , viewCodeBlock """trait Printable = (name: String, age: Int)
 
-struct Person = (name: String, age: Int) is Printable
+type Person = (name: String, age: Int) is Printable
 
 let main: IO<Unit> = do
     let p = Person{name: "Alice", age: 30}
     println p.name
 end""" onLoadCode True "indigo"
-        , p [] [ text "The is clause creates an implicit implementation of the trait. The compiler validates that the struct has all required properties specified by the trait. If the struct is missing required properties or has type mismatches, compilation fails:" ]
+        , p [] [ text "The is clause creates an implicit implementation of the trait. The compiler validates that the type has all required properties specified by the trait. If the type is missing required properties or has type mismatches, compilation fails:" ]
         , viewCodeBlock """trait Printable = (name: String, age: Int)
 
-# Error: Missing required property 'age' in struct Person for trait Printable
-struct Person = (name: String) is Printable""" onLoadCode False "indigo"
-        , p [] [ text "Structs can implement multiple traits using the is clause by separating them with commas:" ]
+# Error: Missing required property 'age' in type Person for trait Printable
+type Person = (name: String) is Printable""" onLoadCode False "indigo"
+        , p [] [ text "Types can implement multiple traits using the is clause by separating them with commas:" ]
         , viewCodeBlock """trait Printable = (name: String)
 trait Cloneable
 
-struct Person = (name: String) is Printable, Cloneable
+type Person = (name: String) is Printable, Cloneable
 
 let main: IO<Unit> = do
     let p = Person{name: "Alice"}
     println p.name
 end""" onLoadCode True "indigo"
-        , p [] [ text "When using the is clause with traits that have refinements, the compiler checks trait refinements when creating struct literals, unless the struct has its own refinement that would cover the constraint." ]
+        , p [] [ text "When using the is clause with traits that have refinements, the compiler checks trait refinements when creating type literals, unless the type has its own refinement that would cover the constraint." ]
         ]
 
 viewFFI : (String -> msg) -> Html msg
@@ -403,7 +403,7 @@ viewTuples : (String -> msg) -> Html msg
 viewTuples onLoadCode =
     section [ id "tuples" ]
         [ h2 [] [ text "Tuples" ]
-        , p [] [ text "Tuples are fixed-size collections of values of potentially different types. They provide a way to group multiple values together without defining a custom struct." ]
+        , p [] [ text "Tuples are fixed-size collections of values of potentially different types. They provide a way to group multiple values together without defining a custom type." ]
         , h3 [] [ text "Creating Tuples" ]
         , p [] [ text "Tuples are created using parentheses with comma-separated values:" ]
         , viewCodeBlock """let main: IO<Unit> = do
@@ -513,7 +513,7 @@ viewGenerics : (String -> msg) -> Html msg
 viewGenerics onLoadCode =
     section [ id "generics" ]
         [ h2 [] [ text "Generics" ]
-        , p [] [ text "Indigo supports generic type parameters on functions, structs, and traits. This allows you to write reusable code that works with different types while maintaining type safety." ]
+        , p [] [ text "Indigo supports generic type parameters on functions, types, and traits. This allows you to write reusable code that works with different types while maintaining type safety." ]
         , h3 [] [ text "Generic Functions" ]
         , viewCodeBlock """trait Number
 impl Number for Int
@@ -529,12 +529,12 @@ end""" onLoadCode True "indigo"
         , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]
         , p [] [ text "This function takes two parameters of type N and returns a result of the same type." ]
         , p [] [ text "The call to add only suceeds if the given parameters are of the same Number type. The return type N gets type erased to Number." ]
-        , h3 [] [ text "Generic Structs" ]
+        , h3 [] [ text "Generic Types" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
 
-struct Container<T: Number> = (value: T)
+type Container<T: Number> = (value: T)
 
 let main: IO<Unit> = do
     let intContainer = Container<Int>{value: 42}
@@ -542,8 +542,8 @@ let main: IO<Unit> = do
     println intContainer.value
     println floatContainer.value
 end""" onLoadCode True "indigo"
-        , p [] [ text "Structs can have generic type parameters with optional trait constraints. When creating a struct literal, you provide the type arguments in angle brackets: Container<Int>{value: 42}." ]
-        , p [] [ text "The compiler validates that the type argument satisfies any trait constraints specified in the struct definition." ]
+        , p [] [ text "Types can have generic type parameters with optional trait constraints. When creating a type literal, you provide the type arguments in angle brackets: Container<Int>{value: 42}." ]
+        , p [] [ text "The compiler validates that the type argument satisfies any trait constraints specified in the type definition." ]
         , h3 [] [ text "Generic Traits" ]
         , viewCodeBlock """trait Monad<T> = do
     bind :: Self -> (Any -> Self) -> Self
@@ -556,7 +556,7 @@ end""" onLoadCode True "indigo"
     return :: Any -> Self
 end
 
-struct Optional = (value: Any)
+type Optional = (value: Any)
 
 impl Monad<Optional> for Optional = do
     bind Optional{value: x} f = f x
@@ -571,7 +571,7 @@ end""" onLoadCode True "indigo"
 impl Number for Int
 impl Number for Float
 
-struct Example<N: Number> = (content: N)
+type Example<N: Number> = (content: N)
 
 let main: IO<Unit> = do
     # Valid - Int implements Number
@@ -600,7 +600,7 @@ let add (a: Int b: Int) : Int = a + b
 let multiply (a: Int b: Int) : Int = a * b
 
 let greet (name: String) : String = "Hello, " ++ name ++ "!" """ onLoadCode False "indigo"
-        , p [] [ text "In the above example, Module2 is declared as the module name. All functions, structs, and traits defined in this file can be accessed from other modules using this name." ]
+        , p [] [ text "In the above example, Module2 is declared as the module name. All functions, types, and traits defined in this file can be accessed from other modules using this name." ]
         , h3 [] [ text "Unqualified Imports" ]
         , p [] [ text "An unqualified import brings all names from a module into the current scope without a prefix:" ]
         , viewCodeBlock """import Module2
@@ -648,17 +648,17 @@ viewRefinementTypes : (String -> msg) -> Html msg
 viewRefinementTypes onLoadCode =
     section [ id "refinement-types" ]
         [ h2 [] [ text "Refinement Types" ]
-        , p [] [ text "Refinement types allow you to add compile-time constraints to struct definitions. These constraints are checked when creating struct literals, ensuring that only valid values can be constructed." ]
-        , p [] [ text "The syntax for refinement types uses the satisfies keyword followed by a boolean expression that references the struct's fields." ]
-        , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
+        , p [] [ text "Refinement types allow you to add compile-time constraints to type definitions. These constraints are checked when creating type literals, ensuring that only valid values can be constructed." ]
+        , p [] [ text "The syntax for refinement types uses the satisfies keyword followed by a boolean expression that references the type's fields." ]
+        , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
     let a = Age{value: 5}
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Age struct has a refinement that requires the value field to be greater than or equal to zero. When creating an Age struct literal, the compiler checks this constraint at compile time." ]
+        , p [] [ text "In the above example, the Age type has a refinement that requires the value field to be greater than or equal to zero. When creating an Age type literal, the compiler checks this constraint at compile time." ]
         , h3 [] [ text "Compile-Time Validation" ]
-        , p [] [ text "If you try to create a struct literal that violates the refinement constraint, the compiler will produce an error:" ]
-        , viewCodeBlock """struct Age = (value: Int) satisfies (value >= 0)
+        , p [] [ text "If you try to create a type literal that violates the refinement constraint, the compiler will produce an error:" ]
+        , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
     let a = Age{value: 0 - 1}
@@ -666,17 +666,17 @@ end""" onLoadCode False "indigo"
         , p [] [ text "The above code will fail to compile with a refinement error, since the value -1 does not satisfy the constraint value >= 0." ]
         , h3 [] [ text "Equality Constraints" ]
         , p [] [ text "Refinements can also use equality checks to enforce specific values:" ]
-        , viewCodeBlock """struct Person = (name: String) satisfies (name == "Alice")
+        , viewCodeBlock """type Person = (name: String) satisfies (name == "Alice")
 
 let main: IO<Unit> = do
     let p = Person{name: "Alice"}
 end""" onLoadCode True "indigo"
-        , p [] [ text "This example shows a Person struct that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
+        , p [] [ text "This example shows a Person type that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
         , h3 [] [ text "Field References" ]
-        , p [] [ text "Field names from the struct can be referenced directly in the refinement expression. The refinement expression is evaluated with the struct literal's field values to determine if the constraint is satisfied." ]
-        , h3 [] [ text "Value Structs" ]
-        , p [] [ text "Value structs are a special kind of struct that have exactly one field and can be constructed using type casts. They provide a convenient way to create refined types that can be implicitly or explicitly converted from their underlying type." ]
-        , viewCodeBlock """value struct EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+        , p [] [ text "Field names from the type can be referenced directly in the refinement expression. The refinement expression is evaluated with the type literal's field values to determine if the constraint is satisfied." ]
+        , h3 [] [ text "Value Types" ]
+        , p [] [ text "Value types are a special kind of type that have exactly one field and can be constructed using type casts. They provide a convenient way to create refined types that can be implicitly or explicitly converted from their underlying type." ]
+        , viewCodeBlock """value type EvenNumber = (num: Int) satisfies ((num % 2) == 0)
 
 let main: IO<Unit> = do
     # Valid - 12 is even
@@ -688,17 +688,17 @@ let main: IO<Unit> = do
     # Error - String cannot be cast to EvenNumber
     # println ("hello" as EvenNumber)
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, EvenNumber is a value struct with a single field num of type Int. The refinement ensures that only even numbers can be cast to EvenNumber. The cast expression 12 as EvenNumber creates an EvenNumber struct with num = 12, but only if the refinement passes at compile time." ]
-        , p [] [ text "Value structs can also be defined without refinements, allowing any value of the field type to be cast:" ]
-        , viewCodeBlock """value struct PositiveInt = (num: Int)
+        , p [] [ text "In the above example, EvenNumber is a value type with a single field num of type Int. The refinement ensures that only even numbers can be cast to EvenNumber. The cast expression 12 as EvenNumber creates an EvenNumber type with num = 12, but only if the refinement passes at compile time." ]
+        , p [] [ text "Value types can also be defined without refinements, allowing any value of the field type to be cast:" ]
+        , viewCodeBlock """value type PositiveInt = (num: Int)
 
 let main: IO<Unit> = do
     let x = 42 as PositiveInt
     println x
 end""" onLoadCode True "indigo"
-        , p [] [ text "When casting to a value struct, the compiler checks:" ]
-        , p [] [ text "• That the source type is compatible with the value struct's field type" ]
+        , p [] [ text "When casting to a value type, the compiler checks:" ]
+        , p [] [ text "• That the source type is compatible with the value type's field type" ]
         , p [] [ text "• That the refinement constraint is satisfied (if a refinement is defined)" ]
         , p [] [ text "If either check fails, or if the refinement cannot be verified at compile time, the compilation will fail with an appropriate error message." ]
-        , p [] [ text "Value structs are particularly useful for creating type-safe wrappers around primitive types, ensuring that only values meeting certain criteria can be used in specific contexts." ]
+        , p [] [ text "Value types are particularly useful for creating type-safe wrappers around primitive types, ensuring that only values meeting certain criteria can be used in specific contexts." ]
         ]

@@ -1,4 +1,4 @@
-struct Bla = (fn: Any)
+type Bla = (fn: Any)
 
 let foo: Bla = Bla{fn: \x -> x + 1}
 

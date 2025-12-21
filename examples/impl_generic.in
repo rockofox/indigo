@@ -3,7 +3,7 @@ trait Monad<T> = do
     return :: Any -> Self
 end
 
-struct Optional = (value: Any)
+type Optional = (value: Any)
 
 impl Monad<Optional> for Optional = do
     bind Optional{value: x} f = f x

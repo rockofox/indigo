@@ -1,4 +1,4 @@
-struct State = (x: Int, y: Int)
+type State = (x: Int, y: Int)
 
 impl Monad for State = do
   bind State{x: x, y: y} f = f x

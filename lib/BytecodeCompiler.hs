@@ -1460,7 +1460,7 @@ compileExpr st@(Parser.Struct{name = structName, fields, is, generics, structPos
                     Parser.StructT name args -> (name, args)
                     _ -> error "Expected StructT in is clause"
             forM_ traitTypeArgs $ \typeArg -> do
-                validateTypeParameters structGenericNames typeArg structPos ("trait " ++ traitName ++ " for struct " ++ structName)
+                validateTypeParameters structGenericNames typeArg structPos ("trait " ++ traitName ++ " for type " ++ structName)
             _ <- compileExpr (Parser.Impl{trait = traitName, traitTypeArgs = traitTypeArgs, for = Parser.StructT structName [], methods = [], implPos = structPos}) expectedType
             return ()
         )
@@ -1483,7 +1483,7 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
         Just expr -> case expr of
             Parser.Struct{fields = declaredFields, generics = structGenerics} -> do
                 when (not (null structGenerics) && length structLitTypeArgs /= length structGenerics) $ do
-                    cerror ("Type argument count mismatch for struct " ++ structLitName ++ ": expected " ++ show (length structGenerics) ++ ", got " ++ show (length structLitTypeArgs)) structLitPos
+                    cerror ("Type argument count mismatch for type " ++ structLitName ++ ": expected " ++ show (length structGenerics) ++ ", got " ++ show (length structLitTypeArgs)) structLitPos
                 let genericSubstitutions =
                         if null structGenerics || null structLitTypeArgs
                             then []
@@ -1491,14 +1491,14 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                 let structGenericNames = map (\(Parser.GenericExpr n _) -> n) structGenerics
                 unless (null structLitTypeArgs) $ do
                     forM_ structLitTypeArgs $ \typeArg -> do
-                        validateTypeParameters structGenericNames typeArg structLitPos ("struct literal " ++ structLitName)
+                        validateTypeParameters structGenericNames typeArg structLitPos ("type literal " ++ structLitName)
                     forM_ (zip structGenerics structLitTypeArgs) $ \(Parser.GenericExpr genName genConstraint, typeArg) -> do
                         case genConstraint of
                             Just constraint -> do
                                 constraintName <- case constraint of
                                     Parser.StructT traitName [] -> return traitName
                                     _ -> do
-                                        cerror "Trait constraint must be a struct type" structLitPos
+                                        cerror "Trait constraint must be a type" structLitPos
                                         return ""
                                 impls <- implsFor (typeToString typeArg)
                                 unless (constraintName `elem` impls || typeToString typeArg == constraintName) $ do
@@ -1517,7 +1517,7 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                             unless (Parser.compareTypes actualType declaredType) $ do
                                 cerror ("Type mismatch for field '" ++ fieldName ++ "': expected " ++ show declaredType ++ ", got " ++ show actualType) structLitPos
                         Nothing -> do
-                            cerror ("Unknown field '" ++ fieldName ++ "' in struct " ++ structLitName) structLitPos
+                            cerror ("Unknown field '" ++ fieldName ++ "' in type " ++ structLitName) structLitPos
                 unless skipCheck $ do
                     case expr of
                         Parser.Struct{refinement, refinementSrc} -> do
@@ -1527,7 +1527,7 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                                     case r of
                                         Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") structLitPos
                                         Just True -> return ()
-                                        Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - struct fields contain variables without refinement guarantees") structLitPos
+                                        Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - type fields contain variables without refinement guarantees") structLitPos
                                 Nothing -> do
                                     implsForStruct <- implsFor structLitName
                                     traits' <- gets traits
@@ -1542,7 +1542,7 @@ compileExpr sl@(Parser.StructLit{structLitName, structLitFields, structLitTypeAr
                                                         let transformedRefinement = transformRefinementExpr rf structFields
                                                         r <- runRefinement transformedRefinement sl
                                                         case r of
-                                                            Just False -> cerror ("Trait '" ++ traitName ++ "' refinement failed (" ++ traitRefinementSrc ++ ") for struct literal " ++ structLitName) structLitPos
+                                                            Just False -> cerror ("Trait '" ++ traitName ++ "' refinement failed (" ++ traitRefinementSrc ++ ") for type literal " ++ structLitName) structLitPos
                                                             Just True -> return ()
                                                             Nothing -> return ()
                                                     Nothing -> return ()
@@ -1744,11 +1744,11 @@ compileExpr impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expe
                     case Data.Map.lookup reqName structFieldMap of
                         Just structType -> do
                             unless (Parser.compareTypes reqType structType) $ do
-                                cerror ("Required property '" ++ reqName ++ "' type mismatch in impl " ++ trait ++ " for " ++ typeToString for ++ ": trait requires " ++ show reqType ++ ", struct has " ++ show structType) implPos
+                                cerror ("Required property '" ++ reqName ++ "' type mismatch in impl " ++ trait ++ " for " ++ typeToString for ++ ": trait requires " ++ show reqType ++ ", type has " ++ show structType) implPos
                         Nothing -> do
-                            cerror ("Missing required property '" ++ reqName ++ "' in struct " ++ forStructName ++ " for trait " ++ trait) implPos
+                            cerror ("Missing required property '" ++ reqName ++ "' in type " ++ forStructName ++ " for trait " ++ trait) implPos
             Nothing -> do
-                cerror ("Cannot validate required properties: struct " ++ forStructName ++ " not found") implPos
+                cerror ("Cannot validate required properties: type " ++ forStructName ++ " not found") implPos
     when (isJust traitRefinement) $ do
         case forStruct of
             Just (Parser.Struct{refinement = structRefinement}) -> do

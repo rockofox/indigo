@@ -2,7 +2,7 @@ trait Number
 impl Number for Int
 impl Number for Float
 
-struct Example<N: Number> = (content: N)
+type Example<N: Number> = (content: N)
 
 let main: IO<Unit> = do
     let x = Example<Int>{content: 42}

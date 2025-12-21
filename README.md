@@ -10,7 +10,7 @@
 Indigo is an **experimental** programming language designed to lay focus on functional programming, clearity and convinience.
 Inspired by F# and Haskell, it aims to deliver satisfactory functional programming features, while exploring new concepts.
 ```julia
-struct Person = (name: String, age: Int)
+type Person = (name: String, age: Int)
 
 let greet (p: Person): IO = println "Hello " ++ p.name
 let main: IO<Unit> = do

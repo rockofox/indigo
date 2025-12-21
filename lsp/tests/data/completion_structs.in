@@ -1,2 +1,2 @@
-struct Person = (name: String, age: Int)
+type Person = (name: String, age: Int)
 let p = Person{name: "Alice", age: 30}

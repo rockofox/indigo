@@ -1,9 +1,9 @@
 trait Animal
 
-struct Cat = ()
-struct Dog = ()
+type Cat = ()
+type Dog = ()
 
-struct Car = ()
+type Car = ()
 
 impl Animal for Cat
 impl Animal for Dog

@@ -1,9 +1,9 @@
-struct Parser = (remaining: String, result: [Any], failed: Bool)
+type Parser = (remaining: String, result: [Any], failed: Bool)
 
 trait Expr
 
-struct Number = (value: Int) is Expr
-struct Word = (value: String) is Expr
+type Number = (value: Int) is Expr
+type Word = (value: String) is Expr
 
 let parseNumber (input: String): Parser = do
     let number = takeWhile (\c -> (c >= '0') && (c <= '9')), input

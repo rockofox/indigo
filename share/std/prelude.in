@@ -1,5 +1,5 @@
-struct IO<T> = (inner: T)
-struct Unit = ()
+type IO<T> = (inner: T)
+type Unit = ()
 
 nop :: IO<Unit>
 nop _ = IO<Unit>{inner: Unit{}}
@@ -7,8 +7,8 @@ nop _ = IO<Unit>{inner: Unit{}}
 let return<M, T: Any> (x: T) : M = IO<T>{inner: x}
 
 trait Optional<T>
-struct Some<T> = (value: T) is Optional<T>
-struct None = () is Optional<Any>
+type Some<T> = (value: T) is Optional<T>
+type None = () is Optional<Any>
 
 maybe :: Any -> Optional -> Any
 maybe x Some{value: y} = y

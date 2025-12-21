@@ -1,5 +1,5 @@
-struct TestResult = (name: String, result: Bool)
-struct TestSuite = (name: String, results: [TestResult])
+type TestResult = (name: String, result: Bool)
+type TestSuite = (name: String, results: [TestResult])
 
 impl Monad for TestSuite = do
   bind _ f = error "Bind not implemented for TestSuite"
