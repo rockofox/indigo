@@ -40,6 +40,8 @@ library
         Compiler.Modules
         Compiler.Literals
         Compiler.Structs
+        Compiler.Traits
+        Compiler.Functions
     default-language:   Haskell2010
     default-extensions:
         OverloadedStrings ImportQualifiedPost DisambiguateRecordFields

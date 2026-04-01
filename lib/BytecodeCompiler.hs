@@ -1033,17 +1033,19 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                         Nothing -> Nothing
             Nothing -> Nothing
 
-    let expectedTypeTraitMethodDec = if not (null implsForExpectedType) && not (null argTypes)
-            then let expectedTypeMethod = find (\(for, n, _, newDec) -> for == expectedTypeStructName && n == funcName && length funcArgs <= length (Parser.types newDec) - 1) fbt
-                 in case expectedTypeMethod of
-                        Just (_, _, fqn, newDec) -> 
-                            let methodTypes = Parser.types newDec
-                                methodGenerics = Parser.generics newDec
-                             in if length methodTypes >= 2 && length argTypes == 1
-                                    then Just Parser.FuncDec{Parser.name = fqn, Parser.types = methodTypes, Parser.generics = methodGenerics, funcDecPos = anyPosition}
-                                    else Nothing
-                        Nothing -> Nothing
-            else Nothing
+    let expectedTypeTraitMethodDec =
+            if not (null implsForExpectedType) && not (null argTypes)
+                then
+                    let expectedTypeMethod = find (\(for, n, _, newDec) -> for == expectedTypeStructName && n == funcName && length funcArgs <= length (Parser.types newDec) - 1) fbt
+                     in case expectedTypeMethod of
+                            Just (_, _, fqn, newDec) ->
+                                let methodTypes = Parser.types newDec
+                                    methodGenerics = Parser.generics newDec
+                                 in if length methodTypes >= 2 && length argTypes == 1
+                                        then Just Parser.FuncDec{Parser.name = fqn, Parser.types = methodTypes, Parser.generics = methodGenerics, funcDecPos = anyPosition}
+                                        else Nothing
+                            Nothing -> Nothing
+                else Nothing
     let funcDec = case expectedTypeTraitMethodDec of
             Just fd -> Just fd
             Nothing -> case traitMethodDec of
@@ -1131,24 +1133,26 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                                             Nothing -> Nothing
                                     case valueField of
                                         Just (fieldName, _) -> do
-                                            let structLit = Parser.StructLit{
-                                                    structLitName = expectedTypeStructName,
-                                                    structLitFields = [(fieldName, head funcArgs)],
-                                                    structLitTypeArgs = case expectedType of
-                                                        Parser.StructT _ typeArgs -> typeArgs
-                                                        _ -> [],
-                                                    structLitPos = funcPos
-                                                }
+                                            let structLit =
+                                                    Parser.StructLit
+                                                        { structLitName = expectedTypeStructName
+                                                        , structLitFields = [(fieldName, head funcArgs)]
+                                                        , structLitTypeArgs = case expectedType of
+                                                            Parser.StructT _ typeArgs -> typeArgs
+                                                            _ -> []
+                                                        , structLitPos = funcPos
+                                                        }
                                             compileExpr structLit expectedType
                                         Nothing -> do
-                                            let structLit = Parser.StructLit{
-                                                    structLitName = expectedTypeStructName,
-                                                    structLitFields = [],
-                                                    structLitTypeArgs = case expectedType of
-                                                        Parser.StructT _ typeArgs -> typeArgs
-                                                        _ -> [],
-                                                    structLitPos = funcPos
-                                                }
+                                            let structLit =
+                                                    Parser.StructLit
+                                                        { structLitName = expectedTypeStructName
+                                                        , structLitFields = []
+                                                        , structLitTypeArgs = case expectedType of
+                                                            Parser.StructT _ typeArgs -> typeArgs
+                                                            _ -> []
+                                                        , structLitPos = funcPos
+                                                        }
                                             compileExpr structLit expectedType
                                 Nothing -> do
                                     let implFunc = find (\(Function{baseName = bn}) -> bn == implFuncName) functions'
@@ -1161,13 +1165,14 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                                     let implCallWay = if implIsLocal then CallLocal implFuname else Call implFuname
                                     let dummySelf = [Push $ DString expectedTypeStructName, Push $ DString "__name", Push $ DList [], Push $ DString "__traits", PackMap 4]
                                     return $ dummySelf ++ args' ++ [implCallWay]
-                        else if length funcArgs == length (Parser.types fd) - 1
-                            then concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
-                            else
-                                concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' ->
-                                    return $
-                                        args'
-                                            ++ [PushPf (funame fun) (length args')]
+                        else
+                            if length funcArgs == length (Parser.types fd) - 1
+                                then concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
+                                else
+                                    concatMapM (uncurry compileExpr) (zip funcArgs fd.types) >>= \args' ->
+                                        return $
+                                            args'
+                                                ++ [PushPf (funame fun) (length args')]
                 Nothing -> do
                     -- traceM $ "Looking for funcDec " ++ funcName
                     -- gets funcDecs >>= \x -> traceM $ "\t" ++ show (map Parser.name x)
