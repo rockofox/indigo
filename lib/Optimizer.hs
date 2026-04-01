@@ -34,8 +34,6 @@ treeShake prog = do
                 Jmp l' -> match l'
                 Jt l' -> match l'
                 Jf l' -> match l'
-                Jz l' -> match l'
-                Jnz l' -> match l'
                 Call l' -> match l'
                 CallLocal l' -> match l'
                 PushPf l' _ -> match l'

@@ -778,7 +778,7 @@ compilePatternMatch lex@(Parser.ListLit{listLitExprs}) nextLabel expectedType = 
                     lex' <- compileExpr lex expectedType
                     return $ lex' ++ [Eq, Jf nextLabel]
 compilePatternMatch (Parser.ListPattern{listPatternExprs}) nextLabel expectedType = do
-    let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listPatternExprs - 1, Lt, StackLength, Push $ DInt 1, Neq, And, Jt nextLabel]
+    let lengthCheck = [Dup, Length, Push $ DInt $ fromIntegral $ length listPatternExprs - 1, Lt, Jt nextLabel]
     case last listPatternExprs of
         Parser.ListLit{listLitExprs} -> do
             elements' <- mapM (\p -> compilePatternMatch p nextLabel expectedType) (init listPatternExprs)
@@ -2013,7 +2013,7 @@ createVirtualFunctions = do
                                         let traitTypeArgs = Parser.traitTypeArgs impl
                                             traitTypeArgsStr = if null traitTypeArgs then "" else "<" ++ intercalate "," (map typeToString traitTypeArgs) ++ ">"
                                             implForTypeStr = typeToString (Parser.for impl)
-                                         in [LStow (length typess - 2) "__ts", Dup, Push $ DTypeQuery forStructName, TypeEq, LStore "__ta", LUnstow "__ts", LLoad "__ta", Jt (traitName ++ traitTypeArgsStr ++ "." ++ implForTypeStr ++ "::" ++ name)]
+                                         in [PackList (length typess - 2), LStore "__ts", Dup, Push $ DTypeQuery forStructName, TypeEq, LStore "__ta", LLoad "__ts", UnpackList, LLoad "__ta", Jt (traitName ++ traitTypeArgsStr ++ "." ++ implForTypeStr ++ "::" ++ name)]
                                     Nothing -> []
                         )
                         fors

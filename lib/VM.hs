@@ -93,10 +93,6 @@ data Instruction
       Builtin Action -- TODO: Seperate IO?
     | -- | Jump to a label
       Jmp String
-    | -- | Jump to a label if the top value of the stack is not zero
-      Jnz String
-    | -- | Jump to a label if the top value of the stack is falsy
-      Jz String
     | -- | Jump to a label if the top value of the stack is truthy
       Jt String
     | -- | Jump to a label if the top value of the stack is falsy
@@ -113,8 +109,6 @@ data Instruction
       Pop
     | -- | Duplicate the top value of the stack
       Dup
-    | -- | Duplicate the n values of the stack
-      DupN Int
     | -- | Swap the top two values of the stack
       Swp
     | -- | A label
@@ -135,10 +129,6 @@ data Instruction
       LoadSideStack
     | -- Clear the sidestack
       ClearSideStack
-    | -- | Stow away N values from the stack into a named register
-      LStow Int String
-    | -- | Unstow values from a named register to the stack
-      LUnstow String
     | -- | Pop n values off the stack, concatenate them, and push the result
       Concat Int
     | -- | Pop a value off the stack, add it to the list at the top of the stack, and push the result
@@ -153,16 +143,10 @@ data Instruction
       Slice
     | -- | Length of a list
       Length
-    | -- | Get length of the stack
-      StackLength
     | -- | Casts a to the type of b
       Cast
     | -- | Get the type of a
       TypeOf
-    | -- | Panic with a message
-      Panic
-    | -- | Repeat the last instruction (n - 1) times
-      Repeat Int
     | -- | Comment, does nothing
       Comment String
     | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
@@ -718,7 +702,6 @@ runInstruction (PushPf name nArgs) = do
     locals <- gets (locals . safeHead . callStack)
     stackPopN nArgs >>= \args -> stackPush $ DFuncRef label args locals
 runInstruction Pop = void stackPop
-runInstruction StackLength = stackLen >>= stackPush . DInt . fromIntegral
 -- Arithmetic
 runInstruction Add = stackPopN 2 >>= \case [y, x] -> stackPush $ x + y; _ -> error "Add: expected 2 values"
 runInstruction Sub = stackPopN 2 >>= \case [y, x] -> stackPush $ x - y; _ -> error "Sub: expected 2 values"
@@ -1000,8 +983,6 @@ runInstruction CallS =
 runInstruction (Jmp x) = do
     (_, n) <- findLabelFuzzy x
     modify $ \vm -> vm{pc = n}
-runInstruction (Jnz x) = stackPop >>= \d -> when (d /= DInt 0) $ runInstruction (Jmp x)
-runInstruction (Jz x) = stackPop >>= \d -> when (d == DInt 0) $ runInstruction (Jmp x)
 runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
 runInstruction (Jf x) = stackPop >>= \d -> when (d == DBool False) $ runInstruction (Jmp x)
 runInstruction Ret = do
@@ -1042,7 +1023,6 @@ runInstruction (Label _) = return ()
 -- Stack
 runInstruction Swp = stackPopN 2 >>= \case (x : y : _) -> stackPushN [y, x]; _ -> error "Swp: expected 2 values"
 runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
-runInstruction (DupN n) = stackPeek >>= \d -> stackPushN $ replicate n d
 -- Memory
 runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
 runInstruction (Store x) = stackPop >>= \d -> modify $ \vm -> vm{memory = take x (memory vm) ++ [d] ++ drop (x + 1) (memory vm)}
@@ -1204,10 +1184,6 @@ runInstruction TypeOf =
         DTypeQuery s -> stackPush $ DString $ "TypeQuery{" ++ s ++ "}"
         DCPtr _ -> stackPush $ DString "CPtr"
         DDouble _ -> stackPush $ DString "Double"
-runInstruction (Repeat n) = do
-    vm <- get
-    let inst = program vm V.! (pc vm - 1)
-    replicateM_ (n - 1) $ runInstruction inst
 runInstruction TypeEq = do
     popped <- stackPopN 2
     case popped of
@@ -1245,8 +1221,6 @@ runInstruction (Mov n dat) = do
     -- Move data into register %n
     vm <- get
     put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
-runInstruction (LStow n l) = [PackList n, LStore l] & mapM_ runInstruction
-runInstruction (LUnstow l) = [LLoad l, UnpackList] & mapM_ runInstruction
 runInstruction StoreSideStack = modify $ \vm -> vm{sideStack = stack vm}
 runInstruction LoadSideStack = modify $ \vm -> vm{stack = if null $ sideStack vm then stack vm else sideStack vm}
 runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
@@ -1254,7 +1228,6 @@ runInstruction (ListAdd n) = do
     stackPopN n >>= \x -> do
         stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> map DChar string; el -> [el]) x
         stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\case DChar char -> char; _ -> error "Non-char in list") elements)); _ -> return ()
-runInstruction Panic = stackPop >>= \x -> error $ "panic: " ++ show x
 
 printAssembly :: Program -> Bool -> String
 printAssembly program showLineNumbers =
@@ -1269,8 +1242,6 @@ printAssembly program showLineNumbers =
     printAssembly' (Push x) = asmLine $ "push " ++ show x
     printAssembly' (Call name) = asmLine ("call " <> name)
     printAssembly' (Jmp name) = asmLine ("jmp " <> name)
-    printAssembly' (Jz name) = asmLine ("jz " <> name)
-    printAssembly' (Jnz name) = asmLine ("jnz " <> name)
     printAssembly' (Jt name) = asmLine ("jt " <> name)
     printAssembly' (Jf name) = asmLine ("jf " <> name)
     printAssembly' (LLoad name) = asmLine ("lload " <> name)
