@@ -945,12 +945,10 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
     contextPath' <- gets contextPath
     fbt <- gets functionsByTrait
 
-    -- Try to get expected argument types from function declarations for better lambda type inference
     let maybeExpectedArgTypes = case find (\x -> x.name == funcName) funcDecs' of
             Just fd -> Just $ init $ Parser.types fd
             Nothing -> Nothing
 
-    -- Compute argument types, using expected types for lambdas when available
     argTypes <-
         zipWithM
             ( \arg idx -> case (arg, maybeExpectedArgTypes) of
@@ -959,7 +957,6 @@ compileExpr (Parser.FuncCall{funcName, funcArgs, funcPos}) expectedType = do
                     returnType <- typeOf lambdaBody
                     case expectedArgType of
                         Parser.Fn expectedArgTypes expectedReturnType -> do
-                            -- Use expected types for lambda arguments if available
                             let argTypes' =
                                     if length lambdaArgs == length expectedArgTypes
                                         then expectedArgTypes

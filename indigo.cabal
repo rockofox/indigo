@@ -30,7 +30,9 @@ library
         IndigoConfig
 
     hs-source-dirs:     lib
-    other-modules:      Paths_indigo
+    other-modules:
+        Paths_indigo
+        Compiler.State
     default-language:   Haskell2010
     default-extensions:
         OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
