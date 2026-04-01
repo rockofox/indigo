@@ -191,3 +191,6 @@ structNameFromType t = internalError $ "structNameFromType: expected StructT, go
 
 concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
+
+internalFunctions :: [String]
+internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]

@@ -19,7 +19,7 @@ import Control.Monad.State (gets, modify)
 import Data.Bifunctor (second)
 import Data.List (find, intercalate)
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, isJust)
+import Data.Maybe (catMaybes)
 import VM (Action (..), Data (..), Instruction (..))
 
 compileTrait :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
@@ -57,14 +57,12 @@ compileImpl compileExpr' impl@(Parser.Impl{trait, traitTypeArgs, for, methods, i
             if null traitGenerics || null traitTypeArgs
                 then []
                 else zip (map (\(Parser.GenericExpr n _) -> n) traitGenerics) traitTypeArgs
-    structDecs'' <- gets structDecs
-    forStruct <- case find (\case Parser.Struct{name = name'} -> name' == forStructName; _ -> False) structDecs'' of
+    forStruct <- case find (\case Parser.Struct{name = name'} -> name' == forStructName; _ -> False) structDecs' of
         Just s -> return $ Just s
         Nothing -> return Nothing
     unless (null traitRequiredProps) $ do
         case forStruct of
             Just (Parser.Struct{fields = structFields, generics = structGenerics}) -> do
-                let _structGenericNames = map (\(Parser.GenericExpr n _) -> n) structGenerics
                 let substitutedRequiredProps =
                         if null genericSubstitutions
                             then traitRequiredProps
@@ -79,13 +77,7 @@ compileImpl compileExpr' impl@(Parser.Impl{trait, traitTypeArgs, for, methods, i
                             cerror ("Missing required property '" ++ reqName ++ "' in type " ++ forStructName ++ " for trait " ++ trait) implPos
             Nothing -> do
                 cerror ("Cannot validate required properties: type " ++ forStructName ++ " not found") implPos
-    when (isJust (Parser.refinement trait')) $ do
-        case forStruct of
-            Just (Parser.Struct{refinement = structRefinement}) -> do
-                case structRefinement of
-                    Just _ -> return ()
-                    Nothing -> return ()
-            Nothing -> return ()
+    -- TODO: validate refinement constraints against struct (not yet implemented)
     methods' <-
         catMaybes
             <$> mapM

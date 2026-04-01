@@ -1,6 +1,6 @@
 module Compiler.Functions where
 
-import AST (Position (..), anyPosition, zeroPosition)
+import AST (Position (..), anyPosition)
 import AST qualified as Parser
 import Compiler.ControlFlow (compilePatternMatch)
 import Compiler.State
@@ -17,8 +17,10 @@ import Compiler.State
     , getErrorCount
     , implsFor
     , internalError
+    , internalFunctions
     , structNameFromType
     )
+import Compiler.Structs (validateTypeParameters)
 import Compiler.Types
     ( evaluateFunction
     , functionTypesAcceptable
@@ -32,12 +34,11 @@ import Compiler.Types
 import Control.Monad (forM_, unless, when, zipWithM)
 import Control.Monad.State (gets, modify)
 import Data.Bifunctor (second)
-import Data.Functor ((<&>))
 import Data.List (find, inits, intercalate, isInfixOf)
 import Data.List.Split qualified
 import Data.Map qualified
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing)
-import Data.String
+import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe)
+import Data.String (fromString)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
 import Data.Text qualified as T
@@ -75,9 +76,6 @@ typesMatch fun typess = all (uncurry Parser.compareTypes) (zip fun.types typess)
 
 typesMatchExactly :: Function -> [Parser.Type] -> Bool
 typesMatchExactly fun typess = all (uncurry (==)) (zip fun.types typess) && length typess <= length fun.types
-
-internalFunctions :: [String]
-internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
 
 unmangleFunctionName :: String -> String
 unmangleFunctionName = takeWhile (/= '#')
@@ -446,11 +444,9 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
                                     return (False, wrongArgs ++ tooManyArgs)
         Nothing -> return (True, [])
 
-    let (argsOkFinal, msgsFinal) = (argsOk, msgs)
+    unless argsOk $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgs) funcPos
 
-    unless argsOkFinal $ cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ intercalate ", " msgsFinal) funcPos
-
-    let curConFuncDefs = reverse $ mapMaybe' (\ctx -> find (\case Parser.FuncDef{name} -> name == ctx; _ -> False) funcDefs') contextPath'
+    let curConFuncDefs = reverse $ mapMaybe (\ctx -> find (\case Parser.FuncDef{name} -> name == ctx; _ -> False) funcDefs') contextPath'
         curConFuncDefParamsNames = concat [[varName | Parser.Var{varName} <- args] | Parser.FuncDef _ args _ _ <- curConFuncDefs]
         inContext = funcName `elem` curConFuncDefParamsNames
 
@@ -536,13 +532,6 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
                                 ++ [ LLoad funcName
                                    , CallS
                                    ]
-  where
-    -- Local mapMaybe to avoid import collision
-    mapMaybe' :: (a -> Maybe b) -> [a] -> [b]
-    mapMaybe' _ [] = []
-    mapMaybe' f (x : xs) = case f x of
-        Just y -> y : mapMaybe' f xs
-        Nothing -> mapMaybe' f xs
 
 compileFuncDec :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileFuncDec _compileExpr' fd@(Parser.FuncDec{name, types, generics, funcDecPos}) _ = do
@@ -551,31 +540,6 @@ compileFuncDec _compileExpr' fd@(Parser.FuncDec{name, types, generics, funcDecPo
         validateTypeParameters funcGenericNames type' funcDecPos ("function declaration " ++ name)
     modify (\s -> s{funcDecs = fd : funcDecs s})
     return [] -- Function declarations are only used for compilation
-  where
-    validateTypeParameters :: [String] -> Parser.Type -> AST.Position -> String -> Compiler ()
-    validateTypeParameters validGenericNames typeArg pos context = do
-        structDecs' <- gets structDecs
-        let knownStructNames = [n | Parser.Struct{name = n} <- structDecs']
-        let knownTraitNames = [] :: [String] -- traits are validated elsewhere
-        checkType validGenericNames typeArg pos context knownStructNames knownTraitNames
-
-    checkType :: [String] -> Parser.Type -> AST.Position -> String -> [String] -> [String] -> Compiler ()
-    checkType validGenericNames (Parser.StructT typeName typeArgs) pos context knownStructNames _knownTraitNames = do
-        unless
-            ( typeName `elem` validGenericNames
-                || typeName `elem` knownStructNames
-                || typeName `elem` ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "Unit", "Self"]
-            )
-            $ cerror ("Unknown type '" ++ typeName ++ "' in " ++ context) pos
-        mapM_ (\ta -> checkType validGenericNames ta pos context knownStructNames _knownTraitNames) typeArgs
-    checkType validGenericNames (Parser.List t) pos context ks kt =
-        checkType validGenericNames t pos context ks kt
-    checkType validGenericNames (Parser.Tuple ts) pos context ks kt =
-        mapM_ (\t -> checkType validGenericNames t pos context ks kt) ts
-    checkType validGenericNames (Parser.Fn args ret) pos context ks kt = do
-        mapM_ (\t -> checkType validGenericNames t pos context ks kt) args
-        checkType validGenericNames ret pos context ks kt
-    checkType _ _ _ _ _ _ = return ()
 compileFuncDec _ _ _ = internalError "compileFuncDec: expected FuncDec"
 
 compileFuncDef :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]

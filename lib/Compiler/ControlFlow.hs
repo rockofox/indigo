@@ -11,13 +11,11 @@ import Compiler.State
     , concatMapM
     , currentContext
     , internalError
+    , internalFunctions
     )
 import Control.Monad.State (gets)
 import Data.List (nub)
 import VM (Data (..), Instruction (..))
-
-internalFunctions :: [String]
-internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
 
 extractPatternVars :: Parser.Expr -> [String]
 extractPatternVars (Parser.Var{varName}) = [varName]
