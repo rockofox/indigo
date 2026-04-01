@@ -34,3 +34,4 @@ examples/scratch.in
 # Website 
 node_modules/
 elm-stuff/
+.worktrees/
