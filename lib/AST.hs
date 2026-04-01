@@ -1,8 +1,9 @@
 module AST where
 
 import Data.Binary qualified
+import Data.Functor.Const (Const (..))
+import Data.Functor.Identity (Identity (..))
 import Data.List (intercalate)
-import Data.Maybe (maybeToList)
 import GHC.Generics (Generic)
 
 data GenericExpr = GenericExpr String (Maybe Type) deriving (Show, Eq, Generic, Ord)
@@ -72,65 +73,78 @@ data Expr
         , Eq
         )
 
+traverseExprChildren :: (Applicative f) => (Expr -> f Expr) -> Expr -> f Expr
+traverseExprChildren _ e@Var{} = pure e
+traverseExprChildren _ e@BoolLit{} = pure e
+traverseExprChildren _ e@IntLit{} = pure e
+traverseExprChildren _ e@StringLit{} = pure e
+traverseExprChildren _ e@FloatLit{} = pure e
+traverseExprChildren _ e@DoubleLit{} = pure e
+traverseExprChildren _ e@CharLit{} = pure e
+traverseExprChildren _ e@Placeholder{} = pure e
+traverseExprChildren _ e@ExternDec{} = pure e
+traverseExprChildren _ e@Import{} = pure e
+traverseExprChildren _ e@TypeLit{} = pure e
+traverseExprChildren _ e@FuncDec{} = pure e
+traverseExprChildren f (Not e p) = Not <$> f e <*> pure p
+traverseExprChildren f (UnaryMinus e p) = UnaryMinus <$> f e <*> pure p
+traverseExprChildren f (Discard e p) = Discard <$> f e <*> pure p
+traverseExprChildren f (Ref e p) = Ref <$> f e <*> pure p
+traverseExprChildren f (Flexible e p) = Flexible <$> f e <*> pure p
+traverseExprChildren f (StrictEval e p) = StrictEval <$> f e <*> pure p
+traverseExprChildren f (Target n e p) = Target n <$> f e <*> pure p
+traverseExprChildren f (Add a b p) = Add <$> f a <*> f b <*> pure p
+traverseExprChildren f (Sub a b p) = Sub <$> f a <*> f b <*> pure p
+traverseExprChildren f (Mul a b p) = Mul <$> f a <*> f b <*> pure p
+traverseExprChildren f (Div a b p) = Div <$> f a <*> f b <*> pure p
+traverseExprChildren f (Eq a b p) = Eq <$> f a <*> f b <*> pure p
+traverseExprChildren f (Neq a b p) = Neq <$> f a <*> f b <*> pure p
+traverseExprChildren f (Lt a b p) = Lt <$> f a <*> f b <*> pure p
+traverseExprChildren f (Gt a b p) = Gt <$> f a <*> f b <*> pure p
+traverseExprChildren f (Le a b p) = Le <$> f a <*> f b <*> pure p
+traverseExprChildren f (Ge a b p) = Ge <$> f a <*> f b <*> pure p
+traverseExprChildren f (And a b p) = And <$> f a <*> f b <*> pure p
+traverseExprChildren f (Or a b p) = Or <$> f a <*> f b <*> pure p
+traverseExprChildren f (ListConcat a b p) = ListConcat <$> f a <*> f b <*> pure p
+traverseExprChildren f (ListAdd a b p) = ListAdd <$> f a <*> f b <*> pure p
+traverseExprChildren f (ArrayAccess a b p) = ArrayAccess <$> f a <*> f b <*> pure p
+traverseExprChildren f (Modulo a b p) = Modulo <$> f a <*> f b <*> pure p
+traverseExprChildren f (Power a b p) = Power <$> f a <*> f b <*> pure p
+traverseExprChildren f (Then a b p) = Then <$> f a <*> f b <*> pure p
+traverseExprChildren f (Pipeline a b p) = Pipeline <$> f a <*> f b <*> pure p
+traverseExprChildren f (Cast a b p) = Cast <$> f a <*> f b <*> pure p
+traverseExprChildren f (StructAccess a b p) = StructAccess <$> f a <*> f b <*> pure p
+traverseExprChildren f (If c t e p) = If <$> f c <*> f t <*> f e <*> pure p
+traverseExprChildren f (Let n e p) = Let n <$> f e <*> pure p
+traverseExprChildren f (FuncDef n as body p) = FuncDef n as <$> f body <*> pure p
+traverseExprChildren f (FuncCall n as p) = FuncCall n <$> traverse f as <*> pure p
+traverseExprChildren f (Function defs dec p) = Function <$> traverse f defs <*> f dec <*> pure p
+traverseExprChildren f (DoBlock es p) = DoBlock <$> traverse f es <*> pure p
+traverseExprChildren f (ListLit es p) = ListLit <$> traverse f es <*> pure p
+traverseExprChildren f (ListPattern es p) = ListPattern <$> traverse f es <*> pure p
+traverseExprChildren f (TupleLit es p) = TupleLit <$> traverse f es <*> pure p
+traverseExprChildren f (External n as p) = External n <$> traverse f as <*> pure p
+traverseExprChildren f (Impl t ta ft ms p) = Impl t ta ft <$> traverse f ms <*> pure p
+traverseExprChildren f (ParenApply e as p) = ParenApply <$> f e <*> traverse f as <*> pure p
+traverseExprChildren f (Lambda as body p) = Lambda as <$> f body <*> pure p
+traverseExprChildren f (StructLit n fields typeArgs p) =
+    StructLit n <$> traverse (\(k, v) -> fmap (\v' -> (k, v')) (f v)) fields <*> pure typeArgs <*> pure p
+traverseExprChildren f (Struct n fs ref refSrc is isV gs p) =
+    Struct n fs <$> traverse f ref <*> pure refSrc <*> pure is <*> pure isV <*> pure gs <*> pure p
+traverseExprChildren f (Trait n ms gs reqProps ref refSrc p) =
+    Trait n <$> traverse f ms <*> pure gs <*> pure reqProps <*> traverse f ref <*> pure refSrc <*> pure p
+traverseExprChildren f (When e branches elseE p) =
+    When <$> f e <*> traverse (\(pat, body) -> (,) <$> f pat <*> f body) branches <*> traverse f elseE <*> pure p
+traverseExprChildren f (TupleAccess e i p) = TupleAccess <$> f e <*> pure i <*> pure p
+
+mapExprChildren :: (Expr -> Expr) -> Expr -> Expr
+mapExprChildren f = runIdentity . traverseExprChildren (Identity . f)
+
+foldExprChildren :: (Monoid m) => (Expr -> m) -> Expr -> m
+foldExprChildren f = getConst . traverseExprChildren (Const . f)
+
 children :: Expr -> [Expr]
-children (Add a b _) = [a, b]
-children (Sub a b _) = [a, b]
-children (Mul a b _) = [a, b]
-children (Div a b _) = [a, b]
-children (Eq a b _) = [a, b]
-children (Neq a b _) = [a, b]
-children (Lt a b _) = [a, b]
-children (Gt a b _) = [a, b]
-children (Le a b _) = [a, b]
-children (Ge a b _) = [a, b]
-children (And a b _) = [a, b]
-children (Or a b _) = [a, b]
-children (Not a _) = [a]
-children (UnaryMinus a _) = [a]
-children (If a b c _) = [a, b, c]
-children (Let _ a _) = [a]
-children (FuncDef{body}) = [body]
-children (FuncCall{funcArgs}) = funcArgs
-children (Function a b _) = a ++ [b]
-children (DoBlock a _) = a
-children (ExternDec{}) = []
-children (Placeholder _) = []
-children (Var _ _) = []
-children (BoolLit _ _) = []
-children (IntLit _ _) = []
-children (StringLit _ _) = []
-children (FloatLit _ _) = []
-children (Discard a _) = [a]
-children (Import{}) = []
-children (Ref a _) = [a]
-children (Struct{refinement = r}) = maybeToList r
-children (StructLit{structLitFields}) = map snd structLitFields
-children (StructAccess a b _) = [a, b]
-children (ListLit a _) = a
-children (ListPattern a _) = a
-children (ListConcat a b _) = [a, b]
-children (ArrayAccess a b _) = [a, b]
-children (Modulo a b _) = [a, b]
-children (Power a b _) = [a, b]
-children (Target _ a _) = [a]
-children (Then a b _) = [a, b]
-children (Pipeline a b _) = [a, b]
-children (Lambda _ a _) = [a]
-children (Cast a b _) = [a, b]
-children (TypeLit _ _) = []
-children (Flexible a _) = [a]
-children (Trait _ a _ _ r _ _) = a ++ maybeToList r
-children (Impl _ _ _ a _) = a
-children (FuncDec{}) = []
-children (StrictEval a _) = [a]
-children (External _ a _) = a
-children (CharLit _ _) = []
-children (DoubleLit _ _) = []
-children (ParenApply a b _) = a : b
-children (ListAdd a b _) = [a, b]
-children (When expr branches else_ _) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
-children (TupleLit a _) = a
-children (TupleAccess a _ _) = [a]
+children = foldExprChildren (: [])
 
 newtype Position = Position (Int, Int) deriving (Show, Generic, Ord)
 

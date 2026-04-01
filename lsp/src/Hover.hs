@@ -18,7 +18,7 @@ findExprAtPosition expr offset =
         (AST.Position (start, end)) = exprPos
      in if offset >= start && offset <= end
             then
-                let childMatches = concatMap (\child -> maybeToList (findExprAtPosition child offset)) (getExprChildren expr)
+                let childMatches = concatMap (\child -> maybeToList (findExprAtPosition child offset)) (AST.children expr)
                  in case childMatches of
                         [] -> Just (expr, exprPos)
                         (match : _) -> Just match
@@ -68,41 +68,6 @@ getExprPosition (AST.TupleLit{tupleLitPos}) = tupleLitPos
 getExprPosition (AST.TupleAccess{tupleAccessPos}) = tupleAccessPos
 getExprPosition _ = AST.Position (-1, -1)
 
-getExprChildren :: AST.Expr -> [AST.Expr]
-getExprChildren (AST.Add a b _) = [a, b]
-getExprChildren (AST.Sub a b _) = [a, b]
-getExprChildren (AST.Mul a b _) = [a, b]
-getExprChildren (AST.Div a b _) = [a, b]
-getExprChildren (AST.Eq a b _) = [a, b]
-getExprChildren (AST.Neq a b _) = [a, b]
-getExprChildren (AST.Lt a b _) = [a, b]
-getExprChildren (AST.Gt a b _) = [a, b]
-getExprChildren (AST.Le a b _) = [a, b]
-getExprChildren (AST.Ge a b _) = [a, b]
-getExprChildren (AST.And a b _) = [a, b]
-getExprChildren (AST.Or a b _) = [a, b]
-getExprChildren (AST.Not a _) = [a]
-getExprChildren (AST.If a b c _) = [a, b, c]
-getExprChildren (AST.Let _ a _) = [a]
-getExprChildren (AST.FuncDef{body}) = [body]
-getExprChildren (AST.Function{def, dec}) = dec : def
-getExprChildren (AST.FuncCall{funcArgs}) = funcArgs
-getExprChildren (AST.DoBlock a _) = a
-getExprChildren (AST.StructLit{structLitFields}) = map snd structLitFields
-getExprChildren (AST.StructAccess a b _) = [a, b]
-getExprChildren (AST.ListLit a _) = a
-getExprChildren (AST.ListConcat a b _) = [a, b]
-getExprChildren (AST.ListAdd a b _) = [a, b]
-getExprChildren (AST.ArrayAccess a b _) = [a, b]
-getExprChildren (AST.Modulo a b _) = [a, b]
-getExprChildren (AST.Power a b _) = [a, b]
-getExprChildren (AST.Pipeline a b _) = [a, b]
-getExprChildren (AST.Lambda _ a _) = [a]
-getExprChildren (AST.Cast a b _) = [a, b]
-getExprChildren (AST.When expr branches else_ _) = expr : concatMap (\(p, b) -> [p, b]) branches ++ maybeToList else_
-getExprChildren (AST.TupleLit a _) = a
-getExprChildren (AST.TupleAccess a _ _) = [a]
-getExprChildren _ = []
 
 getHoverForExpr :: AST.Expr -> Text -> Maybe Hover
 getHoverForExpr expr _sourceText =
@@ -167,7 +132,7 @@ findQualifiedAccessAtOffset offset expr =
                     then Just (moduleName, symbolName)
                     else Nothing
         _ ->
-            listToMaybe $ mapMaybe (findQualifiedAccessAtOffset offset) (getExprChildren expr)
+            listToMaybe $ mapMaybe (findQualifiedAccessAtOffset offset) (AST.children expr)
 
 getHover :: (MonadIO m) => Text -> Position -> ModuleResolver -> FilePath -> m (Maybe Hover)
 getHover sourceText pos resolver filePath = do
