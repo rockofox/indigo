@@ -34,6 +34,11 @@ library
         Paths_indigo
         Compiler.State
         Compiler.Types
+        Compiler.Refinements
+        Compiler.Lists
+        Compiler.ControlFlow
+        Compiler.Modules
+        Compiler.Literals
     default-language:   Haskell2010
     default-extensions:
         OverloadedStrings ImportQualifiedPost DisambiguateRecordFields
