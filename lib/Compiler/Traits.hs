@@ -9,6 +9,7 @@ import Compiler.State
     , Function (..)
     , cerror
     , implsFor
+    , internalError
     , structNameFromType
     )
 import Compiler.Structs (substituteGenerics, validateTypeParameters)
@@ -23,11 +24,11 @@ import VM (Action (..), Data (..), Instruction (..))
 
 compileTrait :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileTrait compileExpr' (Parser.Trait{name, methods, generics, requiredProperties, refinement, refinementSrc}) expectedType = do
-    let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> error "Expected FuncDec in Trait methods") methods
+    let methods' = map (\case Parser.FuncDec{name = name', types} -> Parser.FuncDec{name = name', types = types, generics = [], funcDecPos = anyPosition}; _ -> internalError "Expected FuncDec in Trait methods") methods
     modify (\s -> s{traits = Parser.Trait{name = name, methods = methods, generics = generics, requiredProperties = requiredProperties, refinement = refinement, refinementSrc = refinementSrc, traitPos = anyPosition} : traits s})
     mapM_ (`compileExpr'` expectedType) methods'
     return []
-compileTrait _ _ _ = error "compileTrait: expected Trait"
+compileTrait _ _ _ = internalError "compileTrait: expected Trait"
 
 compileImpl :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileImpl compileExpr' impl@(Parser.Impl{trait, traitTypeArgs, for, methods, implPos}) expectedType = do
@@ -107,7 +108,7 @@ compileImpl compileExpr' impl@(Parser.Impl{trait, traitTypeArgs, for, methods, i
                                 _ <- compileExpr' newDec Parser.Any
                                 modify (\s -> s{functionsByTrait = (forStructName, name', fullyQualifiedName, newDec) : functionsByTrait s})
                                 return $ Just $ Parser.FuncDef{name = fullyQualifiedName, args = args, body = body, funcDefPos = anyPosition}
-                    _ -> error "Expected FuncDef in Impl methods"
+                    _ -> internalError "Expected FuncDef in Impl methods"
                 )
                 methods
     modify (\s -> s{impls = impl : impls s})
@@ -116,7 +117,7 @@ compileImpl compileExpr' impl@(Parser.Impl{trait, traitTypeArgs, for, methods, i
   where
     unself :: [Parser.Type] -> Parser.Type -> [Parser.Type]
     unself types selfType = map (\case Parser.Self -> selfType; x -> x) types
-compileImpl _ _ _ = error "compileImpl: expected Impl"
+compileImpl _ _ _ = internalError "compileImpl: expected Impl"
 
 createVirtualFunctions :: Compiler ()
 createVirtualFunctions = do
