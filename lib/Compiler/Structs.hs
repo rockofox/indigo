@@ -45,7 +45,7 @@ validateTypeParameters validGenericNames typeArg pos context = do
     let knownStructNames = map (\case Parser.Struct{name = n} -> n; _ -> "") structDecs'
     let knownTraitNames = map (\case Parser.Trait{name = n} -> n; _ -> "") traits'
     let knownTypeNames = knownStructNames ++ knownTraitNames
-    let builtInTypes = ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "None"]
+    let builtInTypes = ["Int", "Float", "Double", "Bool", "String", "Char", "CPtr", "None", "Unit"]
     let validateTypeArg typeArg' = case typeArg' of
             Parser.Any -> True
             Parser.Unknown -> True

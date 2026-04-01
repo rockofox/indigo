@@ -155,9 +155,6 @@ initCompilerStateWithModules modules' prog sourcePath' =
         , currentSourceFile = sourcePath'
         }
 
-{- | Record a compiler error at the given position.
-Skips silently when pos == zeroPosition (unknown location).
--}
 cerror :: String -> AST.Position -> Compiler ()
 cerror msg pos = do
     currentFile <- gets currentSourceFile
@@ -182,9 +179,6 @@ implsFor structName = do
     let matching = filter (\x -> structNameFromType (Parser.for x) == structName) impls'
     return $ map Parser.trait matching
 
-{- | Extract the struct name from a 'StructT'; crashes with an internal error
-on any other constructor (mirrors the original BytecodeCompiler behaviour).
--}
 structNameFromType :: Parser.Type -> String
 structNameFromType (Parser.StructT n _) = n
 structNameFromType t = internalError $ "structNameFromType: expected StructT, got " ++ show t
