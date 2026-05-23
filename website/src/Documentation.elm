@@ -648,57 +648,84 @@ viewRefinementTypes : (String -> msg) -> Html msg
 viewRefinementTypes onLoadCode =
     section [ id "refinement-types" ]
         [ h2 [] [ text "Refinement Types" ]
-        , p [] [ text "Refinement types allow you to add compile-time constraints to type definitions. These constraints are checked when creating type literals, ensuring that only valid values can be constructed." ]
-        , p [] [ text "The syntax for refinement types uses the satisfies keyword followed by a boolean expression that references the type's fields." ]
+        , p [] [ text "Refinement types let you attach logical constraints to type definitions. The compiler uses an SMT solver (Z3) to verify these constraints at compile time — not just for literal values, but for variables, arithmetic expressions, and values flowing through branches." ]
+        , p [] [ text "The syntax uses the satisfies keyword followed by a boolean predicate over the type's fields." ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
     let a = Age{value: 5}
+    println a.value
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Age type has a refinement that requires the value field to be greater than or equal to zero. When creating an Age type literal, the compiler checks this constraint at compile time." ]
+        , p [] [ text "In the example above, the Age type requires its value field to be non-negative. The compiler discharges this constraint through Z3 at compile time." ]
         , h3 [] [ text "Compile-Time Validation" ]
-        , p [] [ text "If you try to create a type literal that violates the refinement constraint, the compiler will produce an error:" ]
+        , p [] [ text "If a value provably violates the constraint, the compiler produces an error:" ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
-    let a = Age{value: 0 - 1}
+    let a = Age{value: 0 - 1}   # error: Refinement failed (value >= 0)
 end""" onLoadCode False "indigo"
-        , p [] [ text "The above code will fail to compile with a refinement error, since the value -1 does not satisfy the constraint value >= 0." ]
+        , h3 [] [ text "Variables and Path Conditions" ]
+        , p [] [ text "Unlike a simple interpreter-based check, the SMT backend can verify refinements for variables by tracking path conditions from if/when branches." ]
+        , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
+
+let clamp (n: Int) : Age =
+    # In the true branch the solver knows n >= 0, so Age{value: n} is provable
+    if n >= 0 then
+        Age{value: n}
+    else
+        Age{value: 0}
+    end
+
+let main: IO<Unit> = do
+    println (clamp 42).value    # 42
+    println (clamp (0-5)).value # 0
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Value Types and Casts" ]
+        , p [] [ text "Value types have exactly one field and can be constructed via type casts. The cast is verified by the SMT solver." ]
+        , viewCodeBlock """value type EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+
+let main: IO<Unit> = do
+    # Valid — 12 is even, Z3 proves it
+    println (12 as EvenNumber)
+
+    # Error — 5 is odd, refinement fails at compile time
+    # println (5 as EvenNumber)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "String and Collection Constraints" ]
+        , p [] [ text "Refinements can constrain string lengths using len() and collection sizes using size()." ]
+        , viewCodeBlock """type Username = (name: String) satisfies ((len name) > 0 && (len name) <= 20)
+type Tag = (label: String) satisfies ((len label) > 0)
+
+let main: IO<Unit> = do
+    let u = Username{name: "alice"}
+    let t = Tag{label: "haskell"}
+    println u.name
+    println t.label
+end""" onLoadCode True "indigo"
         , h3 [] [ text "Equality Constraints" ]
-        , p [] [ text "Refinements can also use equality checks to enforce specific values:" ]
+        , p [] [ text "Refinements can enforce specific values using equality checks:" ]
         , viewCodeBlock """type Person = (name: String) satisfies (name == "Alice")
 
 let main: IO<Unit> = do
     let p = Person{name: "Alice"}
+    println p.name
 end""" onLoadCode True "indigo"
-        , p [] [ text "This example shows a Person type that can only be created with the name \"Alice\". Any other name value will cause a compilation error." ]
-        , h3 [] [ text "Field References" ]
-        , p [] [ text "Field names from the type can be referenced directly in the refinement expression. The refinement expression is evaluated with the type literal's field values to determine if the constraint is satisfied." ]
-        , h3 [] [ text "Value Types" ]
-        , p [] [ text "Value types are a special kind of type that have exactly one field and can be constructed using type casts. They provide a convenient way to create refined types that can be implicitly or explicitly converted from their underlying type." ]
-        , viewCodeBlock """value type EvenNumber = (num: Int) satisfies ((num % 2) == 0)
+        , h3 [] [ text "Runtime Fallback: unchecked" ]
+        , p [] [ text "When the solver cannot prove a refinement at compile time — for example, for values read from user input — use the unchecked keyword to defer the check to runtime. If the constraint is violated at runtime, the program exits with an error." ]
+        , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
-    # Valid - 12 is even
-    println (12 as EvenNumber)
-    
-    # Error - 5 is not even, refinement fails
-    # println (5 as EvenNumber)
-    
-    # Error - String cannot be cast to EvenNumber
-    # println ("hello" as EvenNumber)
-end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, EvenNumber is a value type with a single field num of type Int. The refinement ensures that only even numbers can be cast to EvenNumber. The cast expression 12 as EvenNumber creates an EvenNumber type with num = 12, but only if the refinement passes at compile time." ]
-        , p [] [ text "Value types can also be defined without refinements, allowing any value of the field type to be cast:" ]
-        , viewCodeBlock """value type PositiveInt = (num: Int)
+    let raw = unsafeGetLine
+    let n   = raw as Int
 
-let main: IO<Unit> = do
-    let x = 42 as PositiveInt
-    println x
+    # Compiler cannot prove n >= 0 without knowing the input,
+    # so we opt in to a runtime check instead.
+    let age = unchecked Age{value: n}
+
+    println age.value
 end""" onLoadCode True "indigo"
-        , p [] [ text "When casting to a value type, the compiler checks:" ]
-        , p [] [ text "• That the source type is compatible with the value type's field type" ]
-        , p [] [ text "• That the refinement constraint is satisfied (if a refinement is defined)" ]
-        , p [] [ text "If either check fails, or if the refinement cannot be verified at compile time, the compilation will fail with an appropriate error message." ]
-        , p [] [ text "Value types are particularly useful for creating type-safe wrappers around primitive types, ensuring that only values meeting certain criteria can be used in specific contexts." ]
+        , h3 [] [ text "How It Works" ]
+        , p [] [ text "The compiler accumulates verification conditions (VCs) as it compiles struct literals, casts, and function call sites. After compilation, all VCs are sent to Z3 via the SBV library. Failures are reported as ordinary compiler errors, compatible with the language server." ]
+        , p [] [ text "The SMT backend supports: arithmetic (+ - * / %), comparisons, boolean logic (&&, ||, !), string length constraints (len()), collection size constraints (size()), and path conditions from if/when branches." ]
+        , p [] [ text "The WASM playground target is built without SMT support; refinements there fall back to the interpreter-based check for literal values only." ]
         ]
