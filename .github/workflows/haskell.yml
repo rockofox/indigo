@@ -26,7 +26,7 @@ jobs:
             download-buffer-size = 524288000
 
       - name: Set up Cachix
-        uses: cachix/cachix-action@v14
+        uses: cachix/cachix-action@v16
         with:
           name: indigo
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -78,7 +78,7 @@ jobs:
             download-buffer-size = 524288000
 
       - name: Set up Cachix
-        uses: cachix/cachix-action@v14
+        uses: cachix/cachix-action@v16
         with:
           name: indigo
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
@@ -124,7 +124,7 @@ jobs:
             download-buffer-size = 524288000 
 
       - name: Set up Cachix
-        uses: cachix/cachix-action@v14
+        uses: cachix/cachix-action@v16
         with:
           name: indigo
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
