@@ -42,12 +42,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cabal/packages
-          key: cabal-index-${{ runner.os }}
+          key: cabal-index-${{ runner.os }}-${{ hashFiles('**/*.cabal') }}
+          restore-keys: |
+            cabal-index-${{ runner.os }}-
+
+      - name: Update Cabal index
+        run: nix develop --command cabal update
 
       - name: Run tests
-        run: |
-          nix develop --command bash -c "cabal update && cabal test"
-        continue-on-error: false
+        run: nix develop --command cabal test
 
       - name: Upload executable artifact
         uses: actions/upload-artifact@v4
