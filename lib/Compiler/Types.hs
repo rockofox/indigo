@@ -76,7 +76,13 @@ typeCompatible x y = do
             let bothBool = x' `elem` boolAliases && y' `elem` boolAliases
             if bothNumeric || bothBool
                 then return True
-                else return $ y' `elem` impls
+                else do
+                    structDecs' <- gets CS.structDecs
+                    let yValueStruct = find (\case Parser.Struct{name, isValueStruct = True} -> name == y'; _ -> False) structDecs'
+                    valueStructOk <- case yValueStruct of
+                        Just (Parser.Struct{fields = [(_, fieldType)]}) -> typeCompatible x fieldType
+                        _ -> return False
+                    return $ valueStructOk || y' `elem` impls
 
 compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> Compiler Bool
 compareTypes' (Parser.List x) (Parser.List y) generics = compareTypes' x y generics

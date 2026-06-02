@@ -296,6 +296,7 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
     functions' <- gets functions
     funcDecs' <- gets funcDecs
     funcDefs' <- gets funcDefs
+    structDecs' <- gets structDecs
     curCon <- gets (\s -> case contextStack s of (c : _) -> c; [] -> "__outside")
     externals' <- gets externals
     contextPath' <- gets contextStack
@@ -519,9 +520,9 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
                                     return $ dummySelf ++ args' ++ [implCallWay]
                         else
                             if length funcArgs == length (Parser.types fd) - 1
-                                then concatMapM (uncurry compileExpr') (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
+                                then concatMapM (uncurry (compileArgWithCoerce compileExpr' structDecs' funcPos)) (zip funcArgs fd.types) >>= \args' -> return (args' ++ [callWay])
                                 else
-                                    concatMapM (uncurry compileExpr') (zip funcArgs fd.types) >>= \args' ->
+                                    concatMapM (uncurry (compileArgWithCoerce compileExpr' structDecs' funcPos)) (zip funcArgs fd.types) >>= \args' ->
                                         return $
                                             args'
                                                 ++ [PushPf (funame fun) (length args')]
@@ -532,6 +533,30 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
                                 ++ [ LLoad funcName
                                    , CallS
                                    ]
+
+compileArgWithCoerce :: CompileExpr -> [Parser.Expr] -> AST.Position -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
+compileArgWithCoerce compileExpr' structDecs' pos arg expectedType = do
+    argType <- typeOf arg
+    let maybeValueStruct = case expectedType of
+            Parser.StructT name _ ->
+                find (\case Parser.Struct{name = n, isValueStruct = True} -> n == name; _ -> False) structDecs'
+            _ -> Nothing
+    case maybeValueStruct of
+        Just (Parser.Struct{name = vsName, fields = [(fieldName, fieldType)]}) -> do
+            compatible <- typeCompatible argType fieldType
+            if compatible && not (Parser.compareTypes argType expectedType)
+                then
+                    compileExpr'
+                        ( Parser.StructLit
+                            { structLitName = vsName
+                            , structLitFields = [(fieldName, arg)]
+                            , structLitTypeArgs = []
+                            , structLitPos = pos
+                            }
+                        )
+                        expectedType
+                else compileExpr' arg expectedType
+        _ -> compileExpr' arg expectedType
 
 compileFuncDec :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileFuncDec _compileExpr' fd@(Parser.FuncDec{name, types, generics, funcDecPos}) _ = do
