@@ -130,6 +130,7 @@ routeParser =
         , map (DocsRoute Documentation.FFI) (s "docs" </> s "ffi")
         , map (DocsRoute Documentation.Generics) (s "docs" </> s "generics")
         , map (DocsRoute Documentation.RefinementTypes) (s "docs" </> s "refinement-types")
+        , map (DocsRoute Documentation.ProjectConfig) (s "docs" </> s "project-config")
         , map (DocsRoute Documentation.FunctionsAndBindings) (s "docs")
         ]
 
@@ -218,6 +219,9 @@ update msg model =
 
                         Documentation.RefinementTypes ->
                             "/docs/refinement-types"
+
+                        Documentation.ProjectConfig ->
+                            "/docs/project-config"
             in
             ( model, Nav.pushUrl model.key path )
 

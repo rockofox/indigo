@@ -14,6 +14,7 @@ type Topic
     | FFI
     | Generics
     | RefinementTypes
+    | ProjectConfig
 
 view : Topic -> (String -> msg) -> Html msg
 view currentTopic onLoadCode =
@@ -30,6 +31,7 @@ view currentTopic onLoadCode =
                 FFI -> viewFFI onLoadCode
                 Generics -> viewGenerics onLoadCode
                 RefinementTypes -> viewRefinementTypes onLoadCode
+                ProjectConfig -> viewProjectConfig onLoadCode
             ]
         ]
 
@@ -47,6 +49,8 @@ viewSidebar currentTopic =
         , sidebarLink currentTopic FFI "FFI" "/docs/ffi"
         , sidebarLink currentTopic Generics "Generics" "/docs/generics"
         , sidebarLink currentTopic RefinementTypes "Refinement Types" "/docs/refinement-types"
+        , h3 [] [ text "Tooling" ]
+        , sidebarLink currentTopic ProjectConfig "Project Config" "/docs/project-config"
         ]
 
 sidebarLink : Topic -> Topic -> String -> String -> Html msg
@@ -728,4 +732,23 @@ end""" onLoadCode True "indigo"
         , p [] [ text "The compiler accumulates verification conditions (VCs) as it compiles struct literals, casts, and function call sites. After compilation, all VCs are sent to Z3 via the SBV library. Failures are reported as ordinary compiler errors, compatible with the language server." ]
         , p [] [ text "The SMT backend supports: arithmetic (+ - * / %), comparisons, boolean logic (&&, ||, !), string length constraints (len()), collection size constraints (size()), and path conditions from if/when branches." ]
         , p [] [ text "The WASM playground target is built without SMT support; refinements there fall back to the interpreter-based check for literal values only." ]
+        ]
+
+viewProjectConfig : (String -> msg) -> Html msg
+viewProjectConfig onLoadCode =
+    section [ id "project-config" ]
+        [ h2 [] [ text "Project Config" ]
+        , p [] [ text "Indigo projects can be configured with an indigo.json file in the project root. The compiler walks up the directory tree from the current file to find it." ]
+        , h3 [] [ text "indigo.json Fields" ]
+        , viewCodeBlock """{
+  "main": "examples/main.in",
+  "sourceDirs": ["src", "lib"]
+}""" onLoadCode False "json"
+        , p [] [ text "main — the entry point file for your project. When present, running indigo without arguments will compile and run this file." ]
+        , p [] [ text "sourceDirs — a list of directories the compiler searches when resolving imports. Defaults to an empty list if omitted." ]
+        , h3 [] [ text "Minimal Config" ]
+        , viewCodeBlock """{"main": "main.in"}""" onLoadCode False "json"
+        , p [] [ text "All fields are optional. An empty object {} is valid and uses defaults (no main entry point, no extra source directories)." ]
+        , h3 [] [ text "Discovery" ]
+        , p [] [ text "The compiler searches for indigo.json starting from the directory of the file being compiled, then checks each parent directory in turn until it reaches the filesystem root. The first indigo.json found is used." ]
         ]
