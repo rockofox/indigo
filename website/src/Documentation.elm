@@ -1,20 +1,105 @@
-module Documentation exposing (view, Topic(..))
+module Documentation exposing (Topic(..), topicPath, view)
 
-import Html exposing (Html, div, h2, h3, p, pre, code, section, text, a, button, node)
-import Html.Attributes exposing (class, id, href, attribute)
+
+import Html exposing (Html, a, button, div, h2, h3, node, p, pre, code, section, text)
+import Html.Attributes exposing (attribute, class, href, id)
 import Html.Events exposing (onClick)
 
+
 type Topic
-    = FunctionsAndBindings
+    = Overview
+    | FunctionsAndBindings
     | Comments
-    | PatternMatching
+    | LiteralsAndTypes
+    | OperatorsAndPipelines
+    | ControlFlow
+    | LambdasAndPartials
+    | Lists
     | Tuples
-    | StructsAndTraits
+    | ProductTypes
+    | SumTypes
+    | TraitsAndImpls
+    | Generics
+    | CastingAndValueTypes
+    | RefinementTypes
+    | PatternMatching
+    | IOAndSequencing
     | ImportsAndModules
     | FFI
-    | Generics
-    | RefinementTypes
+    | Prelude
+    | StdFile
     | ProjectConfig
+
+
+topicPath : Topic -> String
+topicPath topic =
+    case topic of
+        Overview ->
+            "/docs/overview"
+
+        FunctionsAndBindings ->
+            "/docs/functions-and-bindings"
+
+        Comments ->
+            "/docs/comments"
+
+        LiteralsAndTypes ->
+            "/docs/literals-and-types"
+
+        OperatorsAndPipelines ->
+            "/docs/operators-and-pipelines"
+
+        ControlFlow ->
+            "/docs/control-flow"
+
+        LambdasAndPartials ->
+            "/docs/lambdas-and-partials"
+
+        Lists ->
+            "/docs/lists"
+
+        Tuples ->
+            "/docs/tuples"
+
+        ProductTypes ->
+            "/docs/product-types"
+
+        SumTypes ->
+            "/docs/sum-types"
+
+        TraitsAndImpls ->
+            "/docs/traits-and-impls"
+
+        Generics ->
+            "/docs/generics"
+
+        CastingAndValueTypes ->
+            "/docs/casting-and-value-types"
+
+        RefinementTypes ->
+            "/docs/refinement-types"
+
+        PatternMatching ->
+            "/docs/pattern-matching"
+
+        IOAndSequencing ->
+            "/docs/io-and-sequencing"
+
+        ImportsAndModules ->
+            "/docs/imports-and-modules"
+
+        FFI ->
+            "/docs/ffi"
+
+        Prelude ->
+            "/docs/prelude"
+
+        StdFile ->
+            "/docs/stdlib-file"
+
+        ProjectConfig ->
+            "/docs/project-config"
+
 
 view : Topic -> (String -> msg) -> Html msg
 view currentTopic onLoadCode =
@@ -22,46 +107,137 @@ view currentTopic onLoadCode =
         [ viewSidebar currentTopic
         , div [ class "docs-content" ]
             [ case currentTopic of
-                FunctionsAndBindings -> viewFunctionsAndBindings onLoadCode
-                Comments -> viewComments onLoadCode
-                PatternMatching -> viewPatternMatching onLoadCode
-                Tuples -> viewTuples onLoadCode
-                StructsAndTraits -> viewStructsAndTraits onLoadCode
-                ImportsAndModules -> viewImportsAndModules onLoadCode
-                FFI -> viewFFI onLoadCode
-                Generics -> viewGenerics onLoadCode
-                RefinementTypes -> viewRefinementTypes onLoadCode
-                ProjectConfig -> viewProjectConfig onLoadCode
+                Overview ->
+                    viewOverview onLoadCode
+
+                FunctionsAndBindings ->
+                    viewFunctionsAndBindings onLoadCode
+
+                Comments ->
+                    viewComments onLoadCode
+
+                LiteralsAndTypes ->
+                    viewLiteralsAndTypes onLoadCode
+
+                OperatorsAndPipelines ->
+                    viewOperatorsAndPipelines onLoadCode
+
+                ControlFlow ->
+                    viewControlFlow onLoadCode
+
+                LambdasAndPartials ->
+                    viewLambdasAndPartials onLoadCode
+
+                Lists ->
+                    viewLists onLoadCode
+
+                Tuples ->
+                    viewTuples onLoadCode
+
+                ProductTypes ->
+                    viewProductTypes onLoadCode
+
+                SumTypes ->
+                    viewSumTypes onLoadCode
+
+                TraitsAndImpls ->
+                    viewTraitsAndImpls onLoadCode
+
+                Generics ->
+                    viewGenerics onLoadCode
+
+                CastingAndValueTypes ->
+                    viewCastingAndValueTypes onLoadCode
+
+                RefinementTypes ->
+                    viewRefinementTypes onLoadCode
+
+                PatternMatching ->
+                    viewPatternMatching onLoadCode
+
+                IOAndSequencing ->
+                    viewIOAndSequencing onLoadCode
+
+                ImportsAndModules ->
+                    viewImportsAndModules onLoadCode
+
+                FFI ->
+                    viewFFI onLoadCode
+
+                Prelude ->
+                    viewPrelude onLoadCode
+
+                StdFile ->
+                    viewStdFile onLoadCode
+
+                ProjectConfig ->
+                    viewProjectConfig onLoadCode
             ]
         ]
+
 
 viewSidebar : Topic -> Html msg
 viewSidebar currentTopic =
     div [ class "docs-sidebar" ]
-        [ h3 [] [ text "Language Basics" ]
-        , sidebarLink currentTopic FunctionsAndBindings "Functions & Bindings" "/docs/functions-and-bindings"
-        , sidebarLink currentTopic Comments "Comments" "/docs/comments"
-        , sidebarLink currentTopic PatternMatching "Pattern Matching" "/docs/pattern-matching"
-        , sidebarLink currentTopic Tuples "Tuples" "/docs/tuples"
-        , sidebarLink currentTopic StructsAndTraits "Structs & Traits" "/docs/structs-and-traits"
-        , sidebarLink currentTopic ImportsAndModules "Imports & Modules" "/docs/imports-and-modules"
-        , h3 [] [ text "Advanced Features" ]
-        , sidebarLink currentTopic FFI "FFI" "/docs/ffi"
-        , sidebarLink currentTopic Generics "Generics" "/docs/generics"
-        , sidebarLink currentTopic RefinementTypes "Refinement Types" "/docs/refinement-types"
+        [ h3 [] [ text "Getting Started" ]
+        , sidebarLink currentTopic Overview "Overview"
+        , h3 [] [ text "Basics" ]
+        , sidebarLink currentTopic FunctionsAndBindings "Functions & Bindings"
+        , sidebarLink currentTopic Comments "Comments"
+        , sidebarLink currentTopic LiteralsAndTypes "Literals & Types"
+        , sidebarLink currentTopic OperatorsAndPipelines "Operators & Pipelines"
+        , sidebarLink currentTopic ControlFlow "Control Flow"
+        , sidebarLink currentTopic LambdasAndPartials "Lambdas & Partials"
+        , h3 [] [ text "Data & Types" ]
+        , sidebarLink currentTopic Lists "Lists"
+        , sidebarLink currentTopic Tuples "Tuples"
+        , sidebarLink currentTopic ProductTypes "Product Types"
+        , sidebarLink currentTopic SumTypes "Sum Types"
+        , sidebarLink currentTopic TraitsAndImpls "Traits & Impls"
+        , sidebarLink currentTopic Generics "Generics"
+        , sidebarLink currentTopic CastingAndValueTypes "Casting & Value Types"
+        , sidebarLink currentTopic RefinementTypes "Refinement Types"
+        , h3 [] [ text "Expressions" ]
+        , sidebarLink currentTopic PatternMatching "Pattern Matching"
+        , sidebarLink currentTopic IOAndSequencing "IO & Sequencing"
+        , h3 [] [ text "Modules" ]
+        , sidebarLink currentTopic ImportsAndModules "Imports & Modules"
+        , h3 [] [ text "Interop" ]
+        , sidebarLink currentTopic FFI "FFI"
+        , h3 [] [ text "Standard Library" ]
+        , sidebarLink currentTopic Prelude "Prelude"
+        , sidebarLink currentTopic StdFile "File"
         , h3 [] [ text "Tooling" ]
-        , sidebarLink currentTopic ProjectConfig "Project Config" "/docs/project-config"
+        , sidebarLink currentTopic ProjectConfig "Project Config"
         ]
 
-sidebarLink : Topic -> Topic -> String -> String -> Html msg
-sidebarLink currentTopic linkTopic label path =
-    a [ href path, class (if currentTopic == linkTopic then "active" else "") ] [ text label ]
+
+sidebarLink : Topic -> Topic -> String -> Html msg
+sidebarLink currentTopic linkTopic label =
+    a
+        [ href (topicPath linkTopic)
+        , class
+            (if currentTopic == linkTopic then
+                "active"
+
+             else
+                ""
+            )
+        ]
+        [ text label ]
+
 
 viewCodeBlock : String -> (String -> msg) -> Bool -> String -> Html msg
 viewCodeBlock code onLoadCode showTryButton language =
     div [ class "code-block-container" ]
         [ if showTryButton then
-            button [ class "try-button", onClick (onLoadCode code), attribute "title" "Try in Playground" ] [ text "▶" ]
+            button
+                [ class "try-button"
+                , onClick (onLoadCode code)
+                , attribute "title" "Try in Playground"
+                ]
+                [ text "▶" ]
+
           else
             text ""
         , node "code-editor"
@@ -69,75 +245,417 @@ viewCodeBlock code onLoadCode showTryButton language =
             , attribute "read-only" "true"
             , attribute "auto-height" "true"
             , attribute "language" language
-            ] []
+            ]
+            []
         ]
+
+
+playgroundNote : String -> Html msg
+playgroundNote note =
+    p [ class "playground-note" ] [ text note ]
+
+
+viewOverview : (String -> msg) -> Html msg
+viewOverview onLoadCode =
+    section [ id "overview" ]
+        [ h2 [] [ text "Overview" ]
+        , p [] [ text "Indigo is an experimental functional language inspired by F# and Haskell. It compiles to bytecode for a custom VM, with targets for WebAssembly and a language server." ]
+        , p [] [ text "Programs are written in .in files. A typical entry point is a main binding that returns IO." ]
+        , viewCodeBlock """type Person = (name: String, age: Int)
+
+let greet (p: Person): IO = println "Hello " ++ p.name
+
+let main: IO<Unit> = do
+    let person = Person { name: "Lily", age: 22 }
+    greet person
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "What you will find here" ]
+        , p [] [ text "These docs cover the full language surface: bindings, control flow, lists and tuples, product and sum types, traits, generics, casts, refinement types, pattern matching, modules, FFI, the prelude, and project config." ]
+        , h3 [] [ text "Quick pointers" ]
+        , p [] [ text "Functions use let (and optional :: signatures). Records use type Name = (fields...). Traits use trait / impl. Pattern matching uses when ... of ... end. IO sequences use do ... end and operators like |> , >> , and >>= ." ]
+        , p [] [ text "Open any code sample with ▶ to load it in the playground. Features that need native libraries (FFI, File I/O) are documented without a playground run." ]
+        ]
+
 
 viewFunctionsAndBindings : (String -> msg) -> Html msg
 viewFunctionsAndBindings onLoadCode =
     section [ id "functions-and-bindings" ]
         [ h2 [] [ text "Functions and bindings" ]
-        , p [] [ text "Indigo doesn't differentiate between functions and bindings. They are both defined using the let keyword." ]
+        , p [] [ text "Indigo does not separate constants from functions. Both use let. A binding with parameters is a function; one without is a value." ]
         , viewCodeBlock """let name = "Rocko"
+
 let main = println "Hello " ++ name""" onLoadCode True "indigo"
-        , p [] [ text "The above code defines a binding name and a function main. The function main is called when the program is run." ]
+        , h3 [] [ text "Parameters and return types" ]
+        , p [] [ text "Parameter types are written in the parameter list. A return type after : is optional but recommended for public APIs." ]
         , viewCodeBlock """let multiple_args (a: Int b: Int): Int = a + b
-let main = print (multiple_args 2, 3)""" onLoadCode True "indigo"
-        , p [] [ text "Functions can have multiple arguments. The above function adds two integers. Specifying the return type is optional, specifying parameter types is mandatory currently." ]
+
+let main = println (multiple_args 2, 3)""" onLoadCode True "indigo"
+        , h3 [] [ text "Type signatures" ]
+        , p [] [ text "You can declare a signature with :: and implement the body with one or more let / name clauses." ]
+        , viewCodeBlock """add :: Int -> Int -> Int
+add x y = x + y
+
+let main = println (add 2, 3)""" onLoadCode True "indigo"
+        , h3 [] [ text "Multiple clauses" ]
+        , p [] [ text "Functions can be defined with several clauses that pattern-match on arguments." ]
+        , viewCodeBlock """let fib (0: Int) : Int = 0
+let fib (1: Int) : Int = 1
+let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
+
+let main = println (fib 10)""" onLoadCode True "indigo"
+        , h3 [] [ text "do blocks" ]
+        , p [] [ text "Group sequential statements with do ... end. This is how multi-step IO and scoped lets are written." ]
         , viewCodeBlock """let println (s: String): IO = do
     print s
     print "\\n"
-end""" onLoadCode True "indigo"
-        , p [] [ text "The above code shows the source code of the println function. As you can see here, the return type of IO actions is IO. Such functions can only used in functions that also return IO." ]
-        , p [] [ text "Also, this example shows how it is possible to group statements using do and end." ]
+end
+
+let main = println "hi"
+""" onLoadCode True "indigo"
+        , h3 [] [ text "Custom operators" ]
+        , p [] [ text "Identifiers may include operator characters. Backticks name operators as functions; free operators can also be defined as bindings." ]
+        , viewCodeBlock """let double_plus (x: Int y: Int): Int = x + y + y
+
+let main = println (double_plus 2, 3)""" onLoadCode True "indigo"
+        , p [] [ text "Operators such as +, ==, and ++ are ordinary bindings in the prelude (often spelled with backticks when the name is pure operator characters). You can define similarly named helpers for domain-specific arithmetic." ]
         ]
+
 
 viewComments : (String -> msg) -> Html msg
 viewComments onLoadCode =
     section [ id "comments" ]
         [ h2 [] [ text "Comments" ]
+        , p [] [ text "Line comments start with #. Block comments use /* */." ]
         , viewCodeBlock """# This is a single-line comment
 /* This
- * is 
- * a
- * multi-line
+ * is a multi-line
  * comment
- */""" onLoadCode True "indigo"
-        , p [] [ text "Not a lot to explain here. Line comments use # and block comments /* */" ]
+ */
+
+let main = println "ok"
+""" onLoadCode True "indigo"
         ]
 
-viewStructsAndTraits : (String -> msg) -> Html msg
-viewStructsAndTraits onLoadCode =
-    section [ id "structs-and-traits" ]
-        [ h2 [] [ text "Structs and traits" ]
-        , viewCodeBlock """type Dog = (name: String)
-type Cat = (name: String)
 
-let main: IO<Unit> = do
-    let bello = Dog { name : "Bello" }
-    let mauzi = Cat { name : "Mauzi" }
-    println name bello
-    println name mauzi
+viewLiteralsAndTypes : (String -> msg) -> Html msg
+viewLiteralsAndTypes onLoadCode =
+    section [ id "literals-and-types" ]
+        [ h2 [] [ text "Literals and primitive types" ]
+        , p [] [ text "Indigo has integers, floats, doubles, characters, booleans, and strings (lists of characters)." ]
+        , h3 [] [ text "Numbers" ]
+        , viewCodeBlock """let main = do
+    println 42
+    println 3.14
+    println 2.5d
 end""" onLoadCode True "indigo"
-        , p [] [ text "The above example shows simple data structures. The name method gets created automatically. Name collisions (shoud be) resolved automatically." ]
-        , h3 [] [ text "Generic Types" ]
-        , p [] [ text "Types can have type parameters, allowing you to create reusable data structures that work with different types:" ]
-        , viewCodeBlock """trait Number
-impl Number for Int
-impl Number for Float
-
-type Example<N: Number> = (content: N)
-
-let main: IO<Unit> = do
-    let x = Example<Int>{content: 42}
-    let y = Example<Float>{content: 3.14}
-    println x.content
-    println y.content
+        , p [] [ text "Integer literals are Int. A trailing f marks Float; a trailing d marks Double. Bare decimals are Float." ]
+        , h3 [] [ text "Booleans" ]
+        , viewCodeBlock """let main = do
+    println True
+    println False
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Example type has a generic type parameter N constrained to the Number trait. This means you can create Example instances with any type that implements Number, such as Int or Float." ]
-        , p [] [ text "When creating a type literal with type arguments, you specify the concrete type in angle brackets: Example<Int>{content: 42}. The compiler validates that the type argument (Int) satisfies the trait constraint (Number)." ]
-        , viewCodeBlock """trait Animal = do
-    makeNoise :: Self -> IO
+        , h3 [] [ text "Characters and strings" ]
+        , p [] [ text "Characters use single quotes or an integer with a c suffix. Strings use double quotes and are lists of Char." ]
+        , viewCodeBlock """let main = do
+    println 'A'
+    println 65c
+    println "hello"
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Built-in type names" ]
+        , p [] [ text "Common base types include Int, Float, Double, Bool, Char, String, Any, Unit, and IO (often written IO or IO<T>). Trait constraints and generics appear elsewhere in these docs." ]
+        , h3 [] [ text "Unit" ]
+        , p [] [ text "Unit is the empty product: type Unit = (). Value Unit{} (or related constructors from the prelude) represents \"no data\"." ]
+        ]
+
+
+viewOperatorsAndPipelines : (String -> msg) -> Html msg
+viewOperatorsAndPipelines onLoadCode =
+    section [ id "operators-and-pipelines" ]
+        [ h2 [] [ text "Operators and pipelines" ]
+        , p [] [ text "Most operators are ordinary functions in the prelude. Precedence follows a built-in operator table." ]
+        , h3 [] [ text "Arithmetic and comparison" ]
+        , viewCodeBlock """let main = do
+    println 1 + 2 * 3
+    println 10 % 3
+    println 2 ** 8
+    println 3 < 5
+    println 3 != 4
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Boolean logic" ]
+        , viewCodeBlock """let main = do
+    println True && False
+    println True || False
+    println !False
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Lists" ]
+        , p [] [ text ": conses an element onto a list. ++ concatenates list-like values (including strings)." ]
+        , viewCodeBlock """let main = do
+    println 1 : [2, 3]
+    println [1, 2] ++ [3, 4]
+    println "hi" ++ "!"
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Pipeline" ]
+        , p [] [ text "|> pipes a value into a function as its first argument." ]
+        , viewCodeBlock """let double (x: Int): Int = x * 2
+
+let main = println (5 |> double |> double)""" onLoadCode True "indigo"
+        , h3 [] [ text "Flexible application" ]
+        , p [] [ text "Prefix ^ flexible-evaluates an expression in contexts that otherwise expect a different form (for example string conversion sites)." ]
+        , viewCodeBlock """let main = println (^42 ++ " is the answer")
+""" onLoadCode True "indigo"
+        , h3 [] [ text "Strict markers" ]
+        , p [] [ text "Prefix $ forces strict evaluation of its operand." ]
+        , viewCodeBlock """let main = do
+    let n = $12
+    println n
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Infix operators" ]
+        , p [] [ text "Binary operators from the prelude (+, ==, &&, and friends) parse as infix with standard precedence." ]
+        , viewCodeBlock """let main = do
+    println (2 + 4)
+    println (3 == 3)
+    println (True && False)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Monadic operators" ]
+        , p [] [ text ">> sequences two monadic actions; >>= binds. See IO & Sequencing and the prelude Monad trait." ]
+        ]
+
+
+viewControlFlow : (String -> msg) -> Html msg
+viewControlFlow onLoadCode =
+    section [ id "control-flow" ]
+        [ h2 [] [ text "Control flow" ]
+        , h3 [] [ text "if then else" ]
+        , p [] [ text "Conditionals use if condition then ... else ... . Branches can be single expressions or do blocks." ]
+        , viewCodeBlock """let abs (n: Int): Int =
+    if n < 0 then (0 - n) else n
+
+let main = println (abs (0 - 7))""" onLoadCode True "indigo"
+        , viewCodeBlock """let bottles (i: Int) : IO<Unit> = do
+    if i > 0 then do
+        println ^i ++ " bottles"
+        bottles ((i) - 1)
+    else do
+        println "done"
+    end
 end
+
+let main : IO<Unit> = bottles 3""" onLoadCode True "indigo"
+        , h3 [] [ text "do ... end" ]
+        , p [] [ text "do blocks sequence expressions. Local let bindings are scoped to the block. do is also used for trait/impl/external bodies." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    let x = 1
+    let y = 2
+    println (x + y)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "when expressions" ]
+        , p [] [ text "Branching on patterns uses when value of ... end. Full details are under Pattern Matching." ]
+        , viewCodeBlock """let label (n: Int): String = when n of
+    0 -> "zero"
+    1 -> "one"
+    else -> "many"
+end
+
+let main = println (label 1)""" onLoadCode True "indigo"
+        ]
+
+
+viewLambdasAndPartials : (String -> msg) -> Html msg
+viewLambdasAndPartials onLoadCode =
+    section [ id "lambdas-and-partials" ]
+        [ h2 [] [ text "Lambdas and partials" ]
+        , h3 [] [ text "Lambda syntax" ]
+        , p [] [ text "Anonymous functions use a backslash, argument patterns, ->, and a body." ]
+        , viewCodeBlock """let main = do
+    println (map (\\x -> x * 2), [1, 2, 3])
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Multi-argument lambdas" ]
+        , viewCodeBlock """let main = do
+    let add = \\x y -> x + y
+    println (add 2, 3)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Placeholders" ]
+        , p [] [ text "The placeholder _ stands for an ignored binding or pattern slot. Void-style helpers may return _ when a value is discarded." ]
+        , viewCodeBlock """let head ((x:xs): [Any]) : Any = x
+let tail ((_:xs): [Any]) : [Any] = xs
+
+let main = do
+    println (head [10, 20, 30])
+    println (tail [10, 20, 30])
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Passing functions" ]
+        , p [] [ text "Named functions and lambdas are first-class and work with prelude helpers such as map, filter, and foldl." ]
+        , viewCodeBlock """let square (x: Int): Int = x * x
+
+let main = println (map square, [1, 2, 3, 4])""" onLoadCode True "indigo"
+        ]
+
+
+viewLists : (String -> msg) -> Html msg
+viewLists onLoadCode =
+    section [ id "lists" ]
+        [ h2 [] [ text "Lists" ]
+        , p [] [ text "Lists are ordered collections written with square brackets. The element type can be written as [T]." ]
+        , h3 [] [ text "Literals and construction" ]
+        , viewCodeBlock """let main = do
+    println [1, 2, 3]
+    println 0 : [1, 2, 3]
+    println [] 
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Concatenation and length" ]
+        , viewCodeBlock """let main = do
+    println [1, 2] ++ [3]
+    println (length [1, 2, 3, 4])
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Indexing and slicing" ]
+        , p [] [ text "The prelude defines !! for indexing and slice for ranges. Strings are character lists, so the same tools apply." ]
+        , viewCodeBlock """let main = do
+    println ([10, 20, 30] !! 1)
+    println (slice [0, 1, 2, 3, 4], 1, 4)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "map, filter, folds" ]
+        , viewCodeBlock """let main = do
+    println (map (\\x -> x + 1), [1, 2, 3])
+    println (filter (\\x -> x > 2), [1, 2, 3, 4])
+    println (foldl (\\acc x -> acc + x), 0, [1, 2, 3, 4])
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Destructuring" ]
+        , p [] [ text "List patterns use [] , [x, y] , and cons patterns such as (x:xs) or (x:y:rest). See Pattern Matching." ]
+        ]
+
+
+viewTuples : (String -> msg) -> Html msg
+viewTuples onLoadCode =
+    section [ id "tuples" ]
+        [ h2 [] [ text "Tuples" ]
+        , p [] [ text "Tuples are fixed-size products of values that may have different types. They need no named type definition." ]
+        , h3 [] [ text "Creating tuples" ]
+        , viewCodeBlock """let main = do
+    let point = (10, 20)
+    let person = ("Alice", 30, True)
+    println point
+    println person
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuple types" ]
+        , p [] [ text "Tuple types use parentheses with types: (Int, String) or (Int, String, Bool)." ]
+        , h3 [] [ text "Access" ]
+        , p [] [ text "Elements use zero-based numeric field access: t.0 , t.1 , ..." ]
+        , viewCodeBlock """let main = do
+    let point = (10, 20)
+    println point.0
+    println point.1
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Parameters and returns" ]
+        , viewCodeBlock """let swap ((a, b): (Int, String)): (String, Int) = (b, a)
+
+let main = do
+    let result = swap (42, "hello")
+    println result.0
+    println result.1
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Pattern matching" ]
+        , viewCodeBlock """let describe ((x, y): (Int, Int)): String =
+    when (x, y) of
+        (0, 0) -> "origin"
+        (0, _) -> "on y-axis"
+        (_, 0) -> "on x-axis"
+        else -> "somewhere else"
+    end
+
+let main = println (describe (0, 5))""" onLoadCode True "indigo"
+        , h3 [] [ text "Nested tuples" ]
+        , viewCodeBlock """let main = do
+    let nested = ((1, 2), (3, 4))
+    println nested.0.1
+    println nested.1.0
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuples vs lists" ]
+        , p [] [ text "Tuples have fixed length and heterogeneous types. Lists have uniform element type and variable length. Prefer tuples for small fixed groupings; lists for sequences." ]
+        ]
+
+
+viewProductTypes : (String -> msg) -> Html msg
+viewProductTypes onLoadCode =
+    section [ id "product-types" ]
+        [ h2 [] [ text "Product types" ]
+        , p [] [ text "Product types (records / structs) group named fields. Define them with type Name = (field: Type, ...)." ]
+        , viewCodeBlock """type Person = (name: String, age: Int)
+
+let main = do
+    let p = Person { name: "Ada", age: 36 }
+    println p.name
+    println p.age
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Construction and access" ]
+        , p [] [ text "Construct with TypeName { field: expr, ... }. Read fields with dot syntax. Empty products use () and often Unit{} / TypeName{}." ]
+        , h3 [] [ text "is clause" ]
+        , p [] [ text "A type can declare trait implementations it carries with is Trait, OtherTrait." ]
+        , viewCodeBlock """trait Printable = do
+    print_value :: Self -> IO<Unit>
+end
+
+type Person = (name: String, age: Int) is Printable
+
+impl Printable for Person = do
+    print_value self = println self.name
+end
+
+let main = print_value (Person { name: "Ada", age: 36 })""" onLoadCode True "indigo"
+        , h3 [] [ text "Generic product types" ]
+        , viewCodeBlock """type Box<T> = (value: T)
+
+let main = do
+    let b = Box<Int> { value: 99 }
+    println b.value
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Refinements" ]
+        , p [] [ text "Attach logical constraints with satisfies (...). See Refinement Types." ]
+        , viewCodeBlock """type Positive = (x: Int) satisfies (x > 0)
+
+let main = println (Positive { x: 3 }).x""" onLoadCode True "indigo"
+        , p [] [ text "For variant-style ADTs using | , see Sum Types. Traits are covered under Traits & Impls." ]
+        ]
+
+
+viewSumTypes : (String -> msg) -> Html msg
+viewSumTypes onLoadCode =
+    section [ id "sum-types" ]
+        [ h2 [] [ text "Sum types" ]
+        , p [] [ text "Sum types (tagged unions) list constructors after =, separated by | . Each constructor takes its fields in parentheses (no space before the '(')." ]
+        , viewCodeBlock """type Shape = Circle(radius: Float) | Rect(width: Float, height: Float)
+
+let areaCircle (c: Circle): Float = 3.14159 * c.radius * c.radius
+let areaRect (r: Rect): Float = r.width * r.height
+
+let main = do
+    println (areaCircle (Circle { radius: 2.0 }))
+    println (areaRect (Rect { width: 3.0, height: 4.0 }))
+end""" onLoadCode True "indigo"
+        , p [] [ text "Each constructor becomes its own product type that implements a trait named after the sum type, so you can still abstract over Shape when you need polymorphism." ]
+        , h3 [] [ text "Simple tags" ]
+        , viewCodeBlock """type Color = Red() | Green() | Blue()
+
+let nameGreen (_: Green): String = "green"
+let nameRed (_: Red): String = "red"
+
+let main = println (nameGreen (Green {}))""" onLoadCode True "indigo"
+        , h3 [] [ text "Traits as open sums" ]
+        , p [] [ text "For open sets of cases (possibly across modules), use a trait plus separate types with impl — see Traits & Impls." ]
+        ]
+
+
+viewTraitsAndImpls : (String -> msg) -> Html msg
+viewTraitsAndImpls onLoadCode =
+    section [ id "traits-and-impls" ]
+        [ h2 [] [ text "Traits and implementations" ]
+        , p [] [ text "Traits describe shared behavior. Implementations attach that behavior to concrete types." ]
+        , h3 [] [ text "Declaring a trait" ]
+        , viewCodeBlock """trait Animal = do
+    makeNoise :: Self -> IO<Unit>
+end
+
+type Dog = (name: String)
+type Cat = (name: String)
 
 impl Animal for Dog = do
     makeNoise self = println "Woof"
@@ -147,378 +665,59 @@ impl Animal for Cat = do
     makeNoise self = println "Meow"
 end
 
-let main: IO<Unit> = do
-    makeNoise (Dog {})
-    makeNoise (Cat {})
+let main : IO<Unit> = do
+    makeNoise (Dog { name: "Bello" })
+    makeNoise (Cat { name: "Mauzi" })
 end""" onLoadCode True "indigo"
-        , p [] [ text "The above example defines a trait called Animal with a method makeNoise." ]
-        , p [] [ text "Then, two implementations of the Animal trait are provided for the types Dog and Cat. The implementation for Dog specifies that when makeNoise is called, it will print \"Woof,\" and the implementation for Cat will print \"Meow.\"" ]
-        , h3 [] [ text "Generic Traits" ]
-        , p [] [ text "Traits can also have type parameters:" ]
-        , viewCodeBlock """trait Monad<T> = do
-    bind :: Self -> (Any -> Self) -> Self
-    return :: Any -> Self
-end""" onLoadCode True "indigo"
-        , p [] [ text "Generic traits allow you to define reusable abstractions that work with different types. The type parameter T can be used in the trait's method signatures." ]
-        , h3 [] [ text "Required Properties" ]
-        , p [] [ text "Traits can specify required properties that implementing types must have. This ensures that any type implementing the trait has the necessary fields:" ]
-        , viewCodeBlock """trait Printable = (name: String, age: Int)
+        , h3 [] [ text "Marker traits" ]
+        , p [] [ text "A trait body may be empty (or implementations may omit methods) when no methods are required." ]
+        , viewCodeBlock """trait Pet
 
-type Person = (name: String, age: Int) is Printable""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the Printable trait requires that implementing types have both a name field of type String and an age field of type Int. When you use the is clause, the compiler verifies that Person has these required fields with matching types." ]
-        , p [] [ text "If a type tries to implement a trait but is missing required properties or has type mismatches, the compiler will produce an error:" ]
-        , viewCodeBlock """trait Printable = (name: String, age: Int)
+type Dog = ()
+type Rock = ()
 
-# Error: Missing required property 'age' in type Person for trait Printable
-type Person = (name: String) is Printable
+impl Pet for Dog
 
-# Error: Type mismatch - trait requires Int, type has String
-type Person2 = (name: String, age: String) is Printable""" onLoadCode False "indigo"
-        , h3 [] [ text "Required Properties and Methods" ]
-        , p [] [ text "Traits can combine required properties with methods that perform meaningful operations using those properties:" ]
+let pet (a: Pet) : IO<Unit> = println "petting"
+
+let main = pet (Dog {})""" onLoadCode True "indigo"
+        , h3 [] [ text "Required properties" ]
+        , p [] [ text "Traits can require fields that implementing types must provide." ]
+        , viewCodeBlock """trait Named = (name: String)
+
+type Person = (name: String) is Named
+
+type Person2 = (name: String, age: String) is Named
+
+let main = println "ok"
+""" onLoadCode True "indigo"
+        , h3 [] [ text "Required properties and methods" ]
         , viewCodeBlock """trait Describable = (name: String, age: Int) do
     describe :: Self -> String
-    isAdult :: Self -> Bool
-end
-
-type Person = (name: String, age: Int)
-
-impl Describable for Person = do
-    describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
-    isAdult self = self.age >= 18
-end
-
-let main: IO<Unit> = do
-    let p = Person { name: "Alice", age: 30 }
-    println (describe p)
-    println (isAdult p)
-end""" onLoadCode True "indigo"
-        , p [] [ text "In this example, the Describable trait requires name and age properties, and provides methods that use these properties to compute results. The describe method formats a string using both properties, while isAdult performs a validation check." ]
-        , p [] [ text "You can also use the is clause with traits that have both required properties and methods:" ]
-        , viewCodeBlock """trait Describable = (name: String, age: Int) do
-    describe :: Self -> String
-    isAdult :: Self -> Bool
 end
 
 type Person = (name: String, age: Int) is Describable
 
 impl Describable for Person = do
-    describe self = self.name ++ " is " ++ (self.age as String) ++ " years old"
-    isAdult self = self.age >= 18
+    describe self = self.name ++ " (" ++ (self.age as String) ++ ")"
 end
 
-let main: IO<Unit> = do
-    let p = Person { name: "Bob", age: 17 }
-    println (describe p)
-    println (isAdult p)
-end""" onLoadCode True "indigo"
-        , p [] [ text "The compiler validates that types implementing the trait have all required properties, and you must provide implementations for all trait methods." ]
-        , p [] [ text "Trait dispatch in Indigo requires concrete types at compile time. When you call a trait method, the compiler must be able to determine the concrete type to select the correct implementation. This means trait methods work best when called directly on concrete type instances, rather than through polymorphic functions that accept Any." ]
-        , h3 [] [ text "Trait Refinements" ]
-        , p [] [ text "Traits can also have refinement types, similar to types. These refinements are checked when creating type literals that implement the trait:" ]
-        , viewCodeBlock """trait PositiveNumber satisfies (x > 0)
-
-type PosInt = (x: Int) is PositiveNumber
-
-let main: IO<Unit> = do
-    # Valid - 5 > 0
-    let p = PosInt{x: 5}
-    
-    # Error - trait refinement failed (x > 0)
-    # let p2 = PosInt{x: 0}
-end""" onLoadCode True "indigo"
-        , p [] [ text "When a type implements a trait with a refinement, the compiler checks the trait's refinement constraint when creating type literals. If the constraint is violated, compilation fails with an error indicating which trait's refinement was violated." ]
-        , h3 [] [ text "Combining Required Properties and Refinements" ]
-        , p [] [ text "Traits can have both required properties and refinements:" ]
-        , viewCodeBlock """trait ValidPerson = (name: String, age: Int) satisfies (age > 0)
-
-type Person = (name: String, age: Int) satisfies (age > 0) is ValidPerson
-
-let main: IO<Unit> = do
-    let p = Person{name: "Bob", age: 25}
-    println p.name
-end""" onLoadCode True "indigo"
-        , p [] [ text "In this example, ValidPerson requires both name and age fields, and also has a refinement that age must be greater than 0. The Person type must satisfy both the required properties and the refinement constraint." ]
-        , h3 [] [ text "Using 'is' Clause" ]
-        , p [] [ text "Types can declare that they implement a trait directly in their definition using the is clause:" ]
-        , viewCodeBlock """trait Printable = (name: String, age: Int)
-
-type Person = (name: String, age: Int) is Printable
-
-let main: IO<Unit> = do
-    let p = Person{name: "Alice", age: 30}
-    println p.name
-end""" onLoadCode True "indigo"
-        , p [] [ text "The is clause creates an implicit implementation of the trait. The compiler validates that the type has all required properties specified by the trait. If the type is missing required properties or has type mismatches, compilation fails:" ]
-        , viewCodeBlock """trait Printable = (name: String, age: Int)
-
-# Error: Missing required property 'age' in type Person for trait Printable
-type Person = (name: String) is Printable""" onLoadCode False "indigo"
-        , p [] [ text "Types can implement multiple traits using the is clause by separating them with commas:" ]
-        , viewCodeBlock """trait Printable = (name: String)
-trait Cloneable
-
-type Person = (name: String) is Printable, Cloneable
-
-let main: IO<Unit> = do
-    let p = Person{name: "Alice"}
-    println p.name
-end""" onLoadCode True "indigo"
-        , p [] [ text "When using the is clause with traits that have refinements, the compiler checks trait refinements when creating type literals, unless the type has its own refinement that would cover the constraint." ]
+let main = println (describe (Person { name: "Ada", age: 36 }))""" onLoadCode True "indigo"
+        , h3 [] [ text "Self" ]
+        , p [] [ text "In trait signatures, Self refers to the implementing type." ]
+        , h3 [] [ text "Trait refinements" ]
+        , p [] [ text "Traits may include satisfies constraints checked for implementing value construction. Combine with required fields as needed." ]
+        , h3 [] [ text "is on the type" ]
+        , p [] [ text "Prefer type Person = (...) is Trait so implementations and field requirements stay next to the type. Multiple traits: is Printable, Cloneable." ]
         ]
 
-viewFFI : (String -> msg) -> Html msg
-viewFFI onLoadCode =
-    section [ id "ffi" ]
-        [ h2 [] [ text "FFI" ]
-        , viewCodeBlock """// example.c
-void greet(char *name) {
-  printf("Hello, %s!\\n", name);
-}
-
-struct Point {
-  float x;
-  float y;
-};
-
-void printPoint(struct Point p) {
-  printf("(%f, %f)\\n", p.x, p.y);
-}
-
-void printNumbers(int *numbers, int count) {
-  for (int i = 0; i < count; i++) {
-    printf("%d\\n", numbers[i]);
-  }
-}""" onLoadCode False "c"
-        , pre [] [ code [] [ text """gcc -dynamiclib example.c -o example.dylib""" ] ]
-        , viewCodeBlock """# example.in
-external "sayhello" = do
-    greet :: String -> IO
-    printNumbers :: List{Int} -> Int -> IO
-end
-external "__default" = do
-    puts :: List{Char} -> IO
-end
-
-let main = do
-    puts ['H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd', '!', '\\0']
-    printNumbers [1, 2, 3, 4, 5], 5
-    greet "Rocko"
-end""" onLoadCode False "indigo"
-        , p [] [ text "Indigo can interact with dynamic libraries by declaring their function in an external block. The runtime will look for the specified library (+ the appropriate extension for dynamic libraries on your OS) in your OS's search path and ./" ]
-        ]
-
-viewPatternMatching : (String -> msg) -> Html msg
-viewPatternMatching onLoadCode =
-    section [ id "pattern-matching" ]
-        [ h2 [] [ text "Pattern Matching" ]
-        , p [] [ text "Indigo provides pattern matching through the when expression, which allows you to match values against patterns and execute different code based on the match." ]
-        , viewCodeBlock """let x = 5
-when x of
-  1 -> println("x is one")
-  2 -> println("x is two")
-  3 -> println("x is three")
-  else -> println("x is something else")
-end""" onLoadCode True "indigo"
-        , p [] [ text "The when expression starts with when followed by the expression to match, then of, followed by pattern branches. Each branch consists of a pattern, an arrow ->, and the expression to execute if the pattern matches. The else branch is optional and serves as a default case." ]
-        , h3 [] [ text "List Pattern Matching" ]
-        , p [] [ text "You can match against lists using various patterns:" ]
-        , viewCodeBlock """let list = [1, 2, 3]
-when list of
-  [] -> println("empty list")
-  [x] -> println("single element: " ++ show(x))
-  [x, y] -> println("two elements: " ++ show(x) ++ ", " ++ show(y))
-  (x:y:rest) -> println("three or more elements, first two: " ++ show(x) ++ ", " ++ show(y))
-  else -> println("unexpected list")
-end""" onLoadCode True "indigo"
-        , p [] [ text "List patterns include: empty list [], single element [x], multiple elements [x, y], and cons patterns (x:y:rest) for matching the head and tail of a list." ]
-        , h3 [] [ text "String Pattern Matching" ]
-        , p [] [ text "Since strings are lists of characters, you can use list patterns to match strings:" ]
-        , viewCodeBlock """let str = "hello"
-when str of
-  [] -> println("empty string")
-  ['h', 'e', 'l', 'l', 'o'] -> println("matched 'hello'")
-  (c:rest) -> println("starts with: " ++ show(c))
-  else -> println("other string")
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Boolean Matching" ]
-        , viewCodeBlock """let b = True
-when b of
-  True -> println("b is true")
-  False -> println("b is false")
-  else -> println("b is something else")
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Function Pattern Matching" ]
-        , p [] [ text "Functions can also pattern match directly on their arguments by defining multiple function clauses with different patterns:" ]
-        , viewCodeBlock """let fib (0: Int) : Int = 0
-let fib (1: Int) : Int = 1
-let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
-
-let main : IO<Unit> = do
-  println fib 12
-end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the fib function has three definitions: one for when the argument is 0, one for when it's 1, and one for any other integer. The compiler will try to match the arguments against these patterns in order." ]
-        , p [] [ text "Function pattern matching also works with list patterns:" ]
-        , viewCodeBlock """let head ([]: [Any]) = 0
-let head ((x:xs): [Any]) = x
-
-let main : IO<Unit> = do
-  println head [1, 2, 3]
-end""" onLoadCode True "indigo"
-        , p [] [ text "This head function matches the empty list pattern first, then matches any non-empty list using a cons pattern, binding the first element to x and the rest to xs." ]
-        , h3 [] [ text "Using when as a Function Body" ]
-        , p [] [ text "The when expression can be used directly as a function body:" ]
-        , viewCodeBlock """let main = when 5 of
-  1 -> println("one")
-  5 -> println("five")
-  else -> println("other")
-end""" onLoadCode True "indigo"
-        , p [] [ text "This allows for concise pattern matching in function definitions." ]
-        , h3 [] [ text "Tuple Pattern Matching" ]
-        , p [] [ text "You can pattern match on tuples to extract their elements:" ]
-        , viewCodeBlock """let t = (42, "hello")
-when t of
-  (x, y) -> do
-    println x
-    println y
-  end
-end""" onLoadCode True "indigo"
-        , p [] [ text "Tuple patterns allow you to destructure tuples and bind their elements to variables. You can also match against specific tuple values:" ]
-        , viewCodeBlock """let t = (1, "test")
-when t of
-  (1, "hello") -> println "matched (1, hello)"
-  (2, "world") -> println "matched (2, world)"
-  (x, y) -> println "matched other tuple"
-end""" onLoadCode True "indigo"
-        , p [] [ text "Functions can also pattern match on tuple arguments:" ]
-        , viewCodeBlock """let fst :: (Int, String) -> Int
-let fst (x, y) = x
-
-let snd :: (Int, String) -> String
-let snd (x, y) = y
-
-let main: IO<Unit> = do
-  println (fst (42, "hello"))
-  println (snd (42, "hello"))
-end""" onLoadCode True "indigo"
-        ]
-
-viewTuples : (String -> msg) -> Html msg
-viewTuples onLoadCode =
-    section [ id "tuples" ]
-        [ h2 [] [ text "Tuples" ]
-        , p [] [ text "Tuples are fixed-size collections of values of potentially different types. They provide a way to group multiple values together without defining a custom type." ]
-        , h3 [] [ text "Creating Tuples" ]
-        , p [] [ text "Tuples are created using parentheses with comma-separated values:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let point = (10, 20)
-    let person = ("Alice", 30, True)
-    println point
-    println person
-end""" onLoadCode True "indigo"
-        , p [] [ text "Multi-element tuples require at least 2 elements. Single-element tuples use a trailing comma syntax:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let single = (42,)
-    let double = (10, 20)
-    println single.0
-    println double.0
-    println double.1
-end""" onLoadCode True "indigo"
-        , p [] [ text "Note that (1) is treated as a parenthesized expression (just the value 1), while (1,) is a single-element tuple. The trailing comma distinguishes single-element tuples from parenthesized expressions." ]
-        , h3 [] [ text "Tuple Types" ]
-        , p [] [ text "Tuple types are specified using parentheses with type names:" ]
-        , viewCodeBlock """let point: (Int, Int) = (10, 20)
-    let person: (String, Int, Bool) = ("Alice", 30, True)
-    let single: (Int,) = (42,)
-    let main: IO<Unit> = do
-    println point
-    println person
-    println single.0
-end""" onLoadCode True "indigo"
-        , p [] [ text "Each position in the tuple type corresponds to the type of the value at that position. Single-element tuple types also use the trailing comma syntax: (Int,) for a tuple containing a single Int." ]
-        , h3 [] [ text "Accessing Tuple Elements" ]
-        , p [] [ text "Tuple elements are accessed using dot notation with zero-based numeric indices:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let t = (42, "hello", True)
-    println t.0
-    println t.1
-    println t.2
-end""" onLoadCode True "indigo"
-        , p [] [ text "The first element is accessed with .0, the second with .1, and so on. For nested tuple access, use intermediate variables:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let t = ((1, 2), (3, 4))
-    let first = t.0
-    let second = t.1
-    println first.0
-    println first.1
-    println second.0
-    println second.1
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Tuples in Functions" ]
-        , p [] [ text "Tuples can be used as function parameters and return types:" ]
-        , viewCodeBlock """let swap :: (Int, String) -> (String, Int)
-let swap (x, y) = (y, x)
-
-let main: IO<Unit> = do
-    let result = swap (42, "hello")
-    println result.0
-    println result.1
-end""" onLoadCode True "indigo"
-        , p [] [ text "Functions can return tuples to provide multiple values:" ]
-        , viewCodeBlock """let divide :: Int -> Int -> (Int, Int)
-let divide a b = (a / b, a % b)
-
-let main: IO<Unit> = do
-    let (quotient, remainder) = divide 10 3
-    println quotient
-    println remainder
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Tuple Pattern Matching" ]
-        , p [] [ text "Tuples can be destructured using pattern matching in function definitions and when expressions:" ]
-        , viewCodeBlock """let fst :: (Int, String) -> Int
-let fst (x, y) = x
-
-let main: IO<Unit> = do
-    println (fst (42, "test"))
-end""" onLoadCode True "indigo"
-        , p [] [ text "Pattern matching allows you to extract tuple elements directly in the function signature or when branches:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let t = (1, "hello")
-    when t of
-        (1, "hello") -> println "matched (1, hello)"
-        (2, "world") -> println "matched (2, world)"
-        (x, y) -> do
-            println "matched other: "
-            println x
-            println y
-        end
-    end
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Nested Tuples" ]
-        , p [] [ text "Tuples can contain other tuples, allowing you to create more complex data structures:" ]
-        , viewCodeBlock """let main: IO<Unit> = do
-    let nested = ((1, 2), (3, 4))
-    let first = nested.0
-    let second = nested.1
-    println first.0
-    println first.1
-    println second.0
-    println second.1
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "Tuples vs Lists" ]
-        , p [] [ text "Tuples differ from lists in several important ways:" ]
-        , p [] [ text "• Tuples have a fixed size determined at compile time, while lists can have any length" ]
-        , p [] [ text "• Tuple elements can be of different types, while list elements must all be the same type" ]
-        , p [] [ text "• Tuples use numeric indices (.0, .1, etc.) for access, while lists use bracket notation ([0], [1], etc.)" ]
-        , p [] [ text "• Tuples are best for grouping a known number of related values, while lists are for collections of unknown size" ]
-        ]
 
 viewGenerics : (String -> msg) -> Html msg
 viewGenerics onLoadCode =
     section [ id "generics" ]
         [ h2 [] [ text "Generics" ]
-        , p [] [ text "Indigo supports generic type parameters on functions, types, and traits. This allows you to write reusable code that works with different types while maintaining type safety." ]
-        , h3 [] [ text "Generic Functions" ]
+        , p [] [ text "Type parameters make functions, types, and traits reusable across concrete types." ]
+        , h3 [] [ text "Generic functions" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
@@ -530,10 +729,8 @@ end
 let main: IO<Unit> = do
   println add 1, 2
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, a function add is declared with a generic type parameter N constrained to the Number trait." ]
-        , p [] [ text "This function takes two parameters of type N and returns a result of the same type." ]
-        , p [] [ text "The call to add only suceeds if the given parameters are of the same Number type. The return type N gets type erased to Number." ]
-        , h3 [] [ text "Generic Types" ]
+        , p [] [ text "Here add is generic over N constrained to Number. Calls succeed only when both arguments share a Number instance; the result is erased to Number at the call site in simple cases." ]
+        , h3 [] [ text "Generic types" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
@@ -546,31 +743,16 @@ let main: IO<Unit> = do
     println intContainer.value
     println floatContainer.value
 end""" onLoadCode True "indigo"
-        , p [] [ text "Types can have generic type parameters with optional trait constraints. When creating a type literal, you provide the type arguments in angle brackets: Container<Int>{value: 42}." ]
-        , p [] [ text "The compiler validates that the type argument satisfies any trait constraints specified in the type definition." ]
-        , h3 [] [ text "Generic Traits" ]
-        , viewCodeBlock """trait Monad<T> = do
-    bind :: Self -> (Any -> Self) -> Self
-    return :: Any -> Self
-end""" onLoadCode True "indigo"
-        , p [] [ text "Traits can also have type parameters, allowing you to define reusable abstractions that work with different types. The type parameters can be used in the trait's method signatures." ]
-        , h3 [] [ text "Implementing Generic Traits" ]
-        , viewCodeBlock """trait Monad<T> = do
-    bind :: Self -> (Any -> Self) -> Self
-    return :: Any -> Self
-end
+        , p [] [ text "Provide type arguments in angle brackets on literals: Container<Int>{value: 42}." ]
+        , h3 [] [ text "Inferring type parameters" ]
+        , viewCodeBlock """let identity<T> (x: T) : T = x
 
-type Optional = (value: Any)
-
-impl Monad<Optional> for Optional = do
-    bind Optional{value: x} f = f x
-    bind None{} f = None{}
-    return x = Optional{value: x}
+let main : IO<Unit> = println (identity "hello")""" onLoadCode True "indigo"
+        , h3 [] [ text "Generic traits" ]
+        , viewCodeBlock """trait Boxable<T> = do
+    get :: Self -> T
 end""" onLoadCode True "indigo"
-        , p [] [ text "When implementing a generic trait, you provide the type arguments in angle brackets after the trait name: impl Monad<Optional> for Optional. The compiler validates that the number of type arguments matches the trait's generic parameters." ]
-        , p [] [ text "The type arguments are substituted into the trait's method signatures during compilation, allowing the implementation to work with the specific types you've chosen." ]
-        , h3 [] [ text "Trait Constraints" ]
-        , p [] [ text "Type parameters can be constrained to traits using the colon syntax. This ensures that only types implementing the specified trait can be used:" ]
+        , h3 [] [ text "Trait constraints" ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
@@ -578,177 +760,373 @@ impl Number for Float
 type Example<N: Number> = (content: N)
 
 let main: IO<Unit> = do
-    # Valid - Int implements Number
     let x = Example<Int>{content: 42}
-    
-    # Valid - Float implements Number
     let y = Example<Float>{content: 3.14}
-    
-    # Error - String does not implement Number
-    # let z = Example<String>{content: "hello"}
+    println x.content
+    println y.content
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the above example, the generic parameter N is constrained to the Number trait. This means you can only use types that implement Number (like Int or Float) when creating Example instances." ]
         ]
 
-viewImportsAndModules : (String -> msg) -> Html msg
-viewImportsAndModules onLoadCode =
-    section [ id "imports-and-modules" ]
-        [ h2 [] [ text "Imports and Modules" ]
-        , p [] [ text "Indigo supports organizing code into modules and importing functionality from other modules. This allows you to structure larger programs and reuse code across multiple files." ]
-        , h3 [] [ text "Module Declarations" ]
-        , p [] [ text "A module declaration at the top of a file defines the module name. The module name is used when other files import from this module:" ]
-        , viewCodeBlock """module Module2
 
-let add (a: Int b: Int) : Int = a + b
+viewCastingAndValueTypes : (String -> msg) -> Html msg
+viewCastingAndValueTypes onLoadCode =
+    section [ id "casting-and-value-types" ]
+        [ h2 [] [ text "Casting and value types" ]
+        , h3 [] [ text "as cast" ]
+        , p [] [ text "The binary as operator converts a value to another type when the conversion is allowed." ]
+        , viewCodeBlock """let main = do
+    println (100 as Float)
+    println ((3.5 as Int))
+    println (42 as String)
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Value types" ]
+        , p [] [ text "A value type wraps exactly one field and can be constructed via cast as well as the usual struct form." ]
+        , viewCodeBlock """value type Meters = (n: Float)
 
-let multiply (a: Int b: Int) : Int = a * b
+let main = do
+    let m = 3.0 as Meters
+    println m.n
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "With refinements" ]
+        , p [] [ text "Casts into refined value types are checked (SMT on native builds; limited checks in WASM). See Refinement Types for unchecked." ]
+        , viewCodeBlock """value type Positive = (x: Int) satisfies (x > 0)
 
-let greet (name: String) : String = "Hello, " ++ name ++ "!" """ onLoadCode False "indigo"
-        , p [] [ text "In the above example, Module2 is declared as the module name. All functions, types, and traits defined in this file can be accessed from other modules using this name." ]
-        , h3 [] [ text "Unqualified Imports" ]
-        , p [] [ text "An unqualified import brings all names from a module into the current scope without a prefix:" ]
-        , viewCodeBlock """import Module2
-
-let main : IO<Unit> = do
-    let result = add 5, 3
-    println result
-end""" onLoadCode False "indigo"
-        , p [] [ text "With an unqualified import, you can use functions directly by their name (e.g., add instead of Module2.add). However, this can lead to name conflicts if multiple modules define functions with the same name." ]
-        , h3 [] [ text "Qualified Imports" ]
-        , p [] [ text "A qualified import requires you to prefix imported names with the module name, preventing name conflicts:" ]
-        , viewCodeBlock """import qualified Module2
-
-let main : IO<Unit> = do
-    let result1 = Module2.add 5, 3
-    let result2 = Module2.multiply 4, 7
-    let message = Module2.greet "World"
-    println result1
-    println result2
-    println message
-end""" onLoadCode False "indigo"
-        , p [] [ text "Qualified imports use the qualified keyword and require accessing functions through the module name (e.g., Module2.add). This is the recommended approach to avoid naming conflicts." ]
-        , h3 [] [ text "Import Aliases" ]
-        , p [] [ text "You can create an alias for a module when importing, which is useful for shortening long module names:" ]
-        , viewCodeBlock """import qualified Module2 as M2
-
-let main : IO<Unit> = do
-    let result = M2.add 5, 3
-    println result
-end""" onLoadCode False "indigo"
-        , p [] [ text "The as keyword creates an alias for the module. You can use aliases with both qualified and unqualified imports. For qualified imports, the alias replaces the module name when accessing functions." ]
-        , h3 [] [ text "Optional from Keyword" ]
-        , p [] [ text "The from keyword in import statements is optional. Both of these are equivalent:" ]
-        , viewCodeBlock """import Module2
-import from Module2""" onLoadCode False "indigo"
-        , p [] [ text "You can use either syntax; they behave identically." ]
-        , h3 [] [ text "Module Paths" ]
-        , p [] [ text "Module names can contain dots, slashes, and @ symbols, allowing you to organize modules in a hierarchical structure or reference files by path:" ]
-        , viewCodeBlock """import qualified std.File
-import qualified utils/helpers""" onLoadCode False "indigo"
-        , p [] [ text "The compiler resolves module names to file paths, looking for corresponding .in files in the configured source directories." ]
+let main = println ((5 as Positive).x)""" onLoadCode True "indigo"
         ]
+
 
 viewRefinementTypes : (String -> msg) -> Html msg
 viewRefinementTypes onLoadCode =
     section [ id "refinement-types" ]
-        [ h2 [] [ text "Refinement Types" ]
-        , p [] [ text "Refinement types let you attach logical constraints to type definitions. The compiler uses an SMT solver (Z3) to verify these constraints at compile time — not just for literal values, but for variables, arithmetic expressions, and values flowing through branches." ]
-        , p [] [ text "The syntax uses the satisfies keyword followed by a boolean predicate over the type's fields." ]
+        [ h2 [] [ text "Refinement types" ]
+        , p [] [ text "Refinement types attach logical constraints to type definitions. The compiler uses an SMT solver (Z3) to verify constraints at compile time for literals, arithmetic, and values flowing through branches." ]
+        , p [] [ text "Syntax: satisfies followed by a boolean predicate over the type's fields." ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
     let a = Age{value: 5}
     println a.value
 end""" onLoadCode True "indigo"
-        , p [] [ text "In the example above, the Age type requires its value field to be non-negative. The compiler discharges this constraint through Z3 at compile time." ]
-        , h3 [] [ text "Compile-Time Validation" ]
-        , p [] [ text "If a value provably violates the constraint, the compiler produces an error:" ]
+        , h3 [] [ text "Compile-time validation" ]
+        , p [] [ text "If a value provably violates the constraint, the compiler produces an error." ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
-    let a = Age{value: 0 - 1}   # error: Refinement failed (value >= 0)
+    let a = Age{value: 0 - 1}   # error: refinement failed
 end""" onLoadCode False "indigo"
-        , h3 [] [ text "Variables and Path Conditions" ]
-        , p [] [ text "Unlike a simple interpreter-based check, the SMT backend can verify refinements for variables by tracking path conditions from if/when branches." ]
+        , h3 [] [ text "Variables and path conditions" ]
+        , p [] [ text "The SMT backend can track path conditions from if / when branches so refinements may be proven for variables (support is evolving). Prefer literals and arithmetic the solver can discharge today." ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
-let clamp (n: Int) : Age =
-    # In the true branch the solver knows n >= 0, so Age{value: n} is provable
-    if n >= 0 then
-        Age{value: n}
-    else
-        Age{value: 0}
-    end
-
+# Prefer building refined values from proven literals, or from arithmetic
+# the solver can discharge (e.g. 0, 1, x+1 when x is known non-negative).
 let main: IO<Unit> = do
-    println (clamp 42).value    # 42
-    println (clamp (0-5)).value # 0
+    let a = Age{value: 0}
+    let b = Age{value: 1 + 2}
+    println a.value
+    println b.value
 end""" onLoadCode True "indigo"
-        , h3 [] [ text "Value Types and Casts" ]
-        , p [] [ text "Value types have exactly one field and can be constructed via type casts. The cast is verified by the SMT solver." ]
+        , h3 [] [ text "Value types and casts" ]
+        , p [] [ text "Single-field value types constructed with as are verified the same way." ]
         , viewCodeBlock """value type EvenNumber = (num: Int) satisfies ((num % 2) == 0)
 
 let main: IO<Unit> = do
-    # Valid — 12 is even, Z3 proves it
     println (12 as EvenNumber)
-
-    # Error — 5 is odd, refinement fails at compile time
-    # println (5 as EvenNumber)
+    # println (5 as EvenNumber)  # fails at compile time
 end""" onLoadCode True "indigo"
-        , h3 [] [ text "String and Collection Constraints" ]
-        , p [] [ text "Refinements can constrain string lengths using len() and collection sizes using size()." ]
+        , h3 [] [ text "String and collection constraints" ]
+        , p [] [ text "Use len(...) for strings and size(...) for collections in predicates." ]
         , viewCodeBlock """type Username = (name: String) satisfies ((len name) > 0 && (len name) <= 20)
 type Tag = (label: String) satisfies ((len label) > 0)
 
 let main: IO<Unit> = do
     let u = Username{name: "alice"}
-    let t = Tag{label: "haskell"}
+    let t = Tag{label: "indigo"}
     println u.name
     println t.label
 end""" onLoadCode True "indigo"
-        , h3 [] [ text "Equality Constraints" ]
-        , p [] [ text "Refinements can enforce specific values using equality checks:" ]
+        , h3 [] [ text "Equality constraints" ]
         , viewCodeBlock """type Person = (name: String) satisfies (name == "Alice")
 
 let main: IO<Unit> = do
     let p = Person{name: "Alice"}
     println p.name
 end""" onLoadCode True "indigo"
-        , h3 [] [ text "Runtime Fallback: unchecked" ]
-        , p [] [ text "When the solver cannot prove a refinement at compile time — for example, for values read from user input — use the unchecked keyword to defer the check to runtime. If the constraint is violated at runtime, the program exits with an error." ]
+        , h3 [] [ text "Runtime fallback: unchecked" ]
+        , p [] [ text "When a constraint cannot be proven (for example input from the user), unchecked defers the check to runtime. Violation exits with an error. Full unchecked support lands with the SMT refinements workstream; prefer path-conditioned construction on current mainline." ]
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
     let raw = unsafeGetLine
     let n   = raw as Int
-
-    # Compiler cannot prove n >= 0 without knowing the input,
-    # so we opt in to a runtime check instead.
     let age = unchecked Age{value: n}
-
     println age.value
-end""" onLoadCode True "indigo"
-        , h3 [] [ text "How It Works" ]
-        , p [] [ text "The compiler accumulates verification conditions (VCs) as it compiles struct literals, casts, and function call sites. After compilation, all VCs are sent to Z3 via the SBV library. Failures are reported as ordinary compiler errors, compatible with the language server." ]
-        , p [] [ text "The SMT backend supports: arithmetic (+ - * / %), comparisons, boolean logic (&&, ||, !), string length constraints (len()), collection size constraints (size()), and path conditions from if/when branches." ]
-        , p [] [ text "The WASM playground target is built without SMT support; refinements there fall back to the interpreter-based check for literal values only." ]
+end""" onLoadCode False "indigo"
+        , h3 [] [ text "How it works" ]
+        , p [] [ text "The compiler collects verification conditions for struct literals, casts, and call sites, then discharges them with Z3 via SBV. Failures surface as ordinary compiler errors (including through the LSP)." ]
+        , p [] [ text "Supported in predicates: arithmetic (+ - * / %), comparisons, boolean logic (&& || !), len / size, and path conditions from branches." ]
+        , playgroundNote "The WASM playground is built without full SMT support. Refinements there fall back to interpreter checks on literals only."
         ]
+
+
+viewPatternMatching : (String -> msg) -> Html msg
+viewPatternMatching onLoadCode =
+    section [ id "pattern-matching" ]
+        [ h2 [] [ text "Pattern matching" ]
+        , p [] [ text "when expresses multi-way matching. Clauses use pattern -> body . An else clause covers remaining cases." ]
+        , viewCodeBlock """let main = do
+    let x = 5
+    when x of
+        1 -> println "one"
+        2 -> println "two"
+        3 -> println "three"
+        else -> println "something else"
+    end
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "List patterns" ]
+        , viewCodeBlock """let main = do
+    let list = [1, 2, 3]
+    when list of
+        [] -> println "empty"
+        [x] -> println "single"
+        [x, y] -> println "two"
+        (x:y:rest) -> println "three or more"
+        else -> println "other"
+    end
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "String patterns" ]
+        , p [] [ text "Strings are lists of characters, so list and cons patterns apply." ]
+        , viewCodeBlock """let main = do
+    let str = "hi"
+    when str of
+        [] -> println "empty"
+        ['h', 'i'] -> println "matched hi"
+        (c:rest) -> println "starts with something"
+        else -> println "?"
+    end
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Boolean and literals" ]
+        , viewCodeBlock """let main = do
+    when True of
+        True -> println "yes"
+        False -> println "no"
+        else -> println "?"
+    end
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Function clauses" ]
+        , p [] [ text "Define multiple function heads with different patterns instead of a single when." ]
+        , viewCodeBlock """let fact (0: Int): Int = 1
+let fact (n: Int): Int = n * (fact ((n) - 1))
+
+let main = println (fact 5)""" onLoadCode True "indigo"
+        , h3 [] [ text "when as a function body" ]
+        , viewCodeBlock """let show_list (xs: [Int]): String = when xs of
+    [] -> "[]"
+    [x] -> "[" ++ (x as String) ++ "]"
+    else -> "..."
+end
+
+let main = println (show_list [9])""" onLoadCode True "indigo"
+        , h3 [] [ text "Tuple patterns" ]
+        , viewCodeBlock """let describe ((x, y): (Int, Int)): String = when (x, y) of
+    (0, 0) -> "origin"
+    (0, _) -> "on y-axis"
+    (_, 0) -> "on x-axis"
+    else -> "somewhere else"
+end
+
+let main = println (describe (0, 5))""" onLoadCode True "indigo"
+        , h3 [] [ text "Struct fields" ]
+        , p [] [ text "Match on extracted fields, or branch with if on p.x / p.y . Constructor-specific sum types are handled as separate types (see Sum Types)." ]
+        ]
+
+
+viewIOAndSequencing : (String -> msg) -> Html msg
+viewIOAndSequencing onLoadCode =
+    section [ id "io-and-sequencing" ]
+        [ h2 [] [ text "IO and sequencing" ]
+        , p [] [ text "Side-effecting computations return IO (or IO<T>). Program entry is typically main : IO<Unit>." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    println "Hello"
+    println "world"
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "IO wrapper" ]
+        , p [] [ text "The prelude defines type IO<T> = (inner: T). Many actions return that shape; .inner extracts the pure payload when you already ran the effect in a do block." ]
+        , h3 [] [ text "do sequencing" ]
+        , p [] [ text "Lines in a do block that produce IO are sequenced left-to-right." ]
+        , h3 [] [ text ">> and >>=" ]
+        , p [] [ text ">> runs two monadic actions in order (sequence). >>= passes the unwrapped result of the left action into a function (bind)." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    println "first"
+    println "second"
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "mapM and friends" ]
+        , p [] [ text "Prelude helpers such as mapM apply an IO-producing function across a list." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    mapM println, ["a", "b", "c"]
+    nop
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Pipeline into effects" ]
+        , viewCodeBlock """let main = "Hello from a pipe" |> println""" onLoadCode True "indigo"
+        , playgroundNote "Prefer do-blocks in longer programs; monadic operators are available for compact composition."
+        ]
+
+
+viewImportsAndModules : (String -> msg) -> Html msg
+viewImportsAndModules onLoadCode =
+    section [ id "imports-and-modules" ]
+        [ h2 [] [ text "Imports and modules" ]
+        , p [] [ text "Larger programs split into modules. Imports pull names from other modules into scope." ]
+        , h3 [] [ text "Module declarations" ]
+        , viewCodeBlock """module MathUtils
+
+let add (x: Int y: Int): Int = x + y""" onLoadCode False "indigo"
+        , h3 [] [ text "Unqualified imports" ]
+        , p [] [ text "import Module brings exported names into scope without a prefix. The from keyword is optional." ]
+        , viewCodeBlock """import MathUtils
+# or: import from MathUtils
+
+let main = println (add 1, 2)""" onLoadCode False "indigo"
+        , h3 [] [ text "Qualified imports" ]
+        , viewCodeBlock """import qualified MathUtils
+
+let main = println (MathUtils.add 1, 2)""" onLoadCode False "indigo"
+        , h3 [] [ text "Aliases" ]
+        , viewCodeBlock """import qualified MathUtils as M
+
+let main = println (M.add 1, 2)""" onLoadCode False "indigo"
+        , h3 [] [ text "Paths" ]
+        , p [] [ text "Module names may include dots, slashes, and @ for hierarchical or path-like references. Std modules such as File are imported by name." ]
+        , viewCodeBlock """import qualified File
+
+let main = println "see File stdlib docs"
+""" onLoadCode False "indigo"
+        , playgroundNote "Multi-file modules are not loaded by the single-buffer playground; use local indigo with multiple files for full module workflows."
+        ]
+
+
+viewFFI : (String -> msg) -> Html msg
+viewFFI onLoadCode =
+    section [ id "ffi" ]
+        [ h2 [] [ text "FFI" ]
+        , p [] [ text "Indigo can call into dynamic libraries via external blocks. Declare the library name and foreign signatures; the runtime searches the OS library path and the current directory." ]
+        , viewCodeBlock """// example.c
+void greet(char *name) {
+  printf("Hello, %s!\\n", name);
+}
+
+void printNumbers(int *numbers, int count) {
+  for (int i = 0; i < count; i++) {
+    printf("%d\\n", numbers[i]);
+  }
+}""" onLoadCode False "c"
+        , pre [] [ code [] [ text """gcc -shared -fPIC example.c -o example.so
+# macOS: gcc -dynamiclib example.c -o example.dylib""" ] ]
+        , viewCodeBlock """external "example" = do
+    greet :: String -> IO
+    printNumbers :: [Int] -> Int -> IO
+end
+
+external "__default" = do
+    puts :: [Char] -> IO
+end
+
+let main = do
+    puts ['H', 'i', '!', '\\0']
+    printNumbers [1, 2, 3, 4, 5], 5
+    greet "Rocko"
+end""" onLoadCode False "indigo"
+        , p [] [ text "Use \"__default\" for symbols resolved from the default process / libc-style linkage where supported." ]
+        , playgroundNote "FFI requires native shared libraries and is not available in the WASM playground."
+        ]
+
+
+viewPrelude : (String -> msg) -> Html msg
+viewPrelude onLoadCode =
+    section [ id "prelude" ]
+        [ h2 [] [ text "Standard library: Prelude" ]
+        , p [] [ text "share/std/prelude.in is loaded for normal programs. It defines core types, operators, list helpers, and IO utilities." ]
+        , h3 [] [ text "Core types" ]
+        , viewCodeBlock """# From prelude (already available)
+# type IO<T> = (inner: T)
+# type Unit = ()
+# trait Optional<T>
+# type Some<T> = (value: T) is Optional<T>
+# type None = () is Optional<Any>
+# trait Number
+# trait Monad<T>""" onLoadCode False "indigo"
+        , h3 [] [ text "Optional" ]
+        , viewCodeBlock """let main = do
+    let s = Some<Int>{value: 10}
+    let n = None{}
+    println s.value
+    println "none-constructed"
+end""" onLoadCode True "indigo"
+        , p [] [ text "Prelude defines trait Optional<T>, constructors Some<T> / None, and maybe default, optional helpers. Use Some and None for optional values." ]
+        , h3 [] [ text "List helpers" ]
+        , p [] [ text "map, mapM, filter, foldl, foldr, sum, head, tail, length, last, slice, !! ." ]
+        , viewCodeBlock """let main = do
+    println (map (\\x -> x * 2), [1, 2, 3])
+    println (sum [1, 2, 3, 4])
+    println (head [9, 8, 7])
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Operators as functions" ]
+        , p [] [ text "Arithmetic, comparison, boolean, modulo, and ++ are defined in the prelude as callable bindings (often via unsafe* primitives)." ]
+        , h3 [] [ text "IO helpers" ]
+        , p [] [ text "print, println, nop, return, and related helpers produce IO actions. times / timesM style helpers iterate." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    println "prelude println"
+    nop
+end""" onLoadCode True "indigo"
+        , h3 [] [ text "Struct utilities" ]
+        , p [] [ text "keys, update, mergeStructs, and !!! (string field access) work with record values when exposed by the runtime." ]
+        ]
+
+
+viewStdFile : (String -> msg) -> Html msg
+viewStdFile onLoadCode =
+    section [ id "stdlib-file" ]
+        [ h2 [] [ text "Standard library: File" ]
+        , p [] [ text "share/std/file.in provides basic file I/O as IO actions. Import the File module and call the wrappers around unsafe* FFI primitives." ]
+        , viewCodeBlock """import qualified File
+
+let main : IO<Unit> = do
+    let path = "demo.txt"
+    let fd_io = File.openFile path, "w"
+    let fd = fd_io.inner
+    File.writeFile fd, "hello\\n"
+    File.closeFile fd
+
+    let fd2_io = File.openFile path, "r"
+    let fd2 = fd2_io.inner
+    let content_io = File.readFile fd2, 1000
+    println content_io.inner
+    File.closeFile fd2
+end""" onLoadCode False "indigo"
+        , h3 [] [ text "Typical API" ]
+        , p [] [ text "openFile path mode , readFile fd size , writeFile fd content , closeFile fd — each returns IO wrapping an Int or String payload via .inner." ]
+        , h3 [] [ text "Sockets" ]
+        , p [] [ text "share/std/sockets.in similarly wraps socket, bindSocket, listen, accept, connect, send, and recv. Import qualified Sockets for network examples (native only)." ]
+        , playgroundNote "File and Sockets need the native runtime and OS facilities. They are not available in the browser playground."
+        ]
+
 
 viewProjectConfig : (String -> msg) -> Html msg
 viewProjectConfig onLoadCode =
     section [ id "project-config" ]
-        [ h2 [] [ text "Project Config" ]
-        , p [] [ text "Indigo projects can be configured with an indigo.json file in the project root. The compiler walks up the directory tree from the current file to find it." ]
-        , h3 [] [ text "indigo.json Fields" ]
+        [ h2 [] [ text "Project config" ]
+        , p [] [ text "Projects may include indigo.json. The compiler walks up from the current file looking for it and uses the first one found." ]
+        , h3 [] [ text "Fields" ]
         , viewCodeBlock """{
-  "main": "examples/main.in",
-  "sourceDirs": ["src", "lib"]
+  "main": "src/Main.in",
+  "src": ["src", "lib"]
 }""" onLoadCode False "json"
-        , p [] [ text "main — the entry point file for your project. When present, running indigo without arguments will compile and run this file." ]
-        , p [] [ text "sourceDirs — a list of directories the compiler searches when resolving imports. Defaults to an empty list if omitted." ]
-        , h3 [] [ text "Minimal Config" ]
-        , viewCodeBlock """{"main": "main.in"}""" onLoadCode False "json"
-        , p [] [ text "All fields are optional. An empty object {} is valid and uses defaults (no main entry point, no extra source directories)." ]
+        , p [] [ text "main — optional entry file. src — optional extra source directories for module resolution." ]
+        , h3 [] [ text "Minimal config" ]
+        , viewCodeBlock """{}""" onLoadCode False "json"
+        , p [] [ text "All fields are optional. {} uses defaults (no forced main, no extra source roots)." ]
         , h3 [] [ text "Discovery" ]
-        , p [] [ text "The compiler searches for indigo.json starting from the directory of the file being compiled, then checks each parent directory in turn until it reaches the filesystem root. The first indigo.json found is used." ]
+        , p [] [ text "Search starts in the directory of the file being compiled, then each parent until the filesystem root." ]
+        , h3 [] [ text "Running indigo" ]
+        , p [] [ text "With a Nix shell: cabal run indigo -- path/to/file.in runs a program. cabal run indigo starts the REPL. See the repository README for LSP and WASM build targets." ]
         ]

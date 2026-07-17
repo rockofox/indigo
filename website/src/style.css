@@ -255,6 +255,8 @@ xterm-display {
     flex-shrink: 0;
     position: sticky;
     top: 2rem;
+    max-height: calc(100vh - 4rem);
+    overflow-y: auto;
     height: fit-content;
     border-right: 1px solid var(--highlight-med);
     padding-right: 2rem;
@@ -315,6 +317,14 @@ xterm-display {
     margin-bottom: 1.5rem;
     line-height: 1.7;
     color: #c0bfd6;
+}
+
+.playground-note {
+    font-size: 0.9rem;
+    font-style: italic;
+    color: var(--subtle-color);
+    border-left: 3px solid var(--highlight-med);
+    padding-left: 1rem;
 }
 
 .docs-content pre {

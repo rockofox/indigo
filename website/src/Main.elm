@@ -79,7 +79,7 @@ end""" )
 type Cat = (name: String)
 
 trait Animal = do
-    makeNoise :: Self -> IO
+    makeNoise :: Self -> IO<Unit>
 end
 
 impl Animal for Dog = do
@@ -121,17 +121,30 @@ routeParser =
     oneOf
         [ map HomeRoute top
         , map PlaygroundRoute (s "playground")
+        , map (DocsRoute Documentation.Overview) (s "docs" </> s "overview")
         , map (DocsRoute Documentation.FunctionsAndBindings) (s "docs" </> s "functions-and-bindings")
         , map (DocsRoute Documentation.Comments) (s "docs" </> s "comments")
-        , map (DocsRoute Documentation.PatternMatching) (s "docs" </> s "pattern-matching")
+        , map (DocsRoute Documentation.LiteralsAndTypes) (s "docs" </> s "literals-and-types")
+        , map (DocsRoute Documentation.OperatorsAndPipelines) (s "docs" </> s "operators-and-pipelines")
+        , map (DocsRoute Documentation.ControlFlow) (s "docs" </> s "control-flow")
+        , map (DocsRoute Documentation.LambdasAndPartials) (s "docs" </> s "lambdas-and-partials")
+        , map (DocsRoute Documentation.Lists) (s "docs" </> s "lists")
         , map (DocsRoute Documentation.Tuples) (s "docs" </> s "tuples")
-        , map (DocsRoute Documentation.StructsAndTraits) (s "docs" </> s "structs-and-traits")
+        , map (DocsRoute Documentation.ProductTypes) (s "docs" </> s "product-types")
+        , map (DocsRoute Documentation.ProductTypes) (s "docs" </> s "structs-and-traits")
+        , map (DocsRoute Documentation.SumTypes) (s "docs" </> s "sum-types")
+        , map (DocsRoute Documentation.TraitsAndImpls) (s "docs" </> s "traits-and-impls")
+        , map (DocsRoute Documentation.Generics) (s "docs" </> s "generics")
+        , map (DocsRoute Documentation.CastingAndValueTypes) (s "docs" </> s "casting-and-value-types")
+        , map (DocsRoute Documentation.RefinementTypes) (s "docs" </> s "refinement-types")
+        , map (DocsRoute Documentation.PatternMatching) (s "docs" </> s "pattern-matching")
+        , map (DocsRoute Documentation.IOAndSequencing) (s "docs" </> s "io-and-sequencing")
         , map (DocsRoute Documentation.ImportsAndModules) (s "docs" </> s "imports-and-modules")
         , map (DocsRoute Documentation.FFI) (s "docs" </> s "ffi")
-        , map (DocsRoute Documentation.Generics) (s "docs" </> s "generics")
-        , map (DocsRoute Documentation.RefinementTypes) (s "docs" </> s "refinement-types")
+        , map (DocsRoute Documentation.Prelude) (s "docs" </> s "prelude")
+        , map (DocsRoute Documentation.StdFile) (s "docs" </> s "stdlib-file")
         , map (DocsRoute Documentation.ProjectConfig) (s "docs" </> s "project-config")
-        , map (DocsRoute Documentation.FunctionsAndBindings) (s "docs")
+        , map (DocsRoute Documentation.Overview) (s "docs")
         ]
 
 
@@ -190,40 +203,7 @@ update msg model =
             changeRouteTo (urlToRoute url) { model | url = url }
 
         ChangeDocTopic topic ->
-            let
-                path =
-                    case topic of
-                        Documentation.FunctionsAndBindings ->
-                            "/docs/functions-and-bindings"
-
-                        Documentation.Comments ->
-                            "/docs/comments"
-
-                        Documentation.PatternMatching ->
-                            "/docs/pattern-matching"
-
-                        Documentation.Tuples ->
-                            "/docs/tuples"
-
-                        Documentation.StructsAndTraits ->
-                            "/docs/structs-and-traits"
-
-                        Documentation.ImportsAndModules ->
-                            "/docs/imports-and-modules"
-
-                        Documentation.FFI ->
-                            "/docs/ffi"
-
-                        Documentation.Generics ->
-                            "/docs/generics"
-
-                        Documentation.RefinementTypes ->
-                            "/docs/refinement-types"
-
-                        Documentation.ProjectConfig ->
-                            "/docs/project-config"
-            in
-            ( model, Nav.pushUrl model.key path )
+            ( model, Nav.pushUrl model.key (Documentation.topicPath topic) )
 
         LoadAndRunCode code ->
             ( { model | code = code }, Nav.pushUrl model.key "/playground" )
