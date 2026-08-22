@@ -39,6 +39,7 @@ import System.TimeIt
 import Text.Megaparsec.Error (ParseErrorBundle)
 import Util
 import VM qualified
+import X86Compiler qualified
 
 data CmdOptions = Options
     { inputs :: [FilePath]
@@ -53,6 +54,8 @@ data CmdOptions = Options
     , showVersion :: Bool
     , noVerify :: Bool
     , noOptimize :: Bool
+    , emitAsm :: Bool
+    , compileNative :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser CmdOptions
@@ -84,6 +87,8 @@ optionsParser =
         <*> switch (long "version" <> short 'V' <> help "Show version")
         <*> switch (long "no-verify" <> short 'n' <> help "Don't verify the program")
         <*> switch (long "no-optimize" <> short 'O' <> help "Don't optimize the program")
+        <*> switch (long "emit-asm" <> short 'S' <> help "Emit x86-64 assembly")
+        <*> switch (long "compile-native" <> short 'c' <> help "Compile to native x86-64 binary")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs _) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -146,7 +151,7 @@ parseNoVerify name input compilerFlags = return $ do
 
 main :: IO ()
 main = do
-    Options inputs output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize <-
+    Options inputs output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize emitAsm compileNative <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -239,6 +244,23 @@ main = do
             Just file -> B.writeFile file $ VM.toBytecode $ V.fromList program
             Nothing -> errorWithoutStackTrace "No output file specified"
         exitSuccess
+
+    when emitAsm $ do
+        let asm = X86Compiler.compileToX86 program
+        case output of
+            Just "-" -> putStr asm
+            Just file -> writeFile file asm
+            Nothing -> putStr asm
+        exitSuccess
+
+    when compileNative $ do
+        let outFile = fromMaybe "a.out" output
+        res <- X86Compiler.compileToNative program outFile
+        case res of
+            Left err -> do
+                putStrLn err
+                exitFailure
+            Right _ -> exitSuccess
 
     when debugBytecode $ putStrLn $ VM.printAssembly (V.fromList program) False
 

@@ -35,3 +35,5 @@ examples/scratch.in
 node_modules/
 elm-stuff/
 .worktrees/
+.claude/
+.history

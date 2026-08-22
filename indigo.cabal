@@ -28,6 +28,12 @@ library
         Optimizer
         ErrorRenderer
         IndigoConfig
+        X86Compiler
+        X86.Types
+        X86.Sanitizer
+        X86.Runtime
+        X86.Compiler
+        X86.Emitter
 
     hs-source-dirs:     lib
     other-modules:
@@ -65,7 +71,9 @@ library
         filepath >=1.4,
         random,
         aeson >=2.0,
-        time >=1.12
+        time >=1.12,
+        raw-strings-qq,
+        process
 
     if flag(posix-io)
         cpp-options: -DPOSIX_IO
@@ -118,6 +126,7 @@ test-suite spec
         RegInstSpec
         OptimizerSpec
         IndigoConfigSpec
+        X86CompilerSpec
 
     default-language:   Haskell2010
     default-extensions:
@@ -143,4 +152,5 @@ test-suite spec
         filepath >=1.4,
         temporary >=1.3,
         aeson >=2.0,
-        bytestring >=0.11
+        bytestring >=0.11,
+        process
