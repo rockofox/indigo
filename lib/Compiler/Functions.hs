@@ -201,11 +201,14 @@ doBinOp compileExpr' opName x y expectedType op = do
             (Nothing, True, False) -> Call opName
             _ -> op
     case (x, y) of
-        (Parser.Placeholder _, Parser.Placeholder _) -> return [PushPf (funame $ fromJust f) 0]
-        (Parser.Placeholder _, _) -> return $ y' ++ [PushPf (funame $ fromJust f) 1]
-        (_, Parser.Placeholder _) -> return $ x' ++ [PushPf (funame $ fromJust f) 1]
+        (Parser.Placeholder _, Parser.Placeholder _) -> pushPartialOp f 0 []
+        (Parser.Placeholder _, _) -> pushPartialOp f 1 y'
+        (_, Parser.Placeholder _) -> pushPartialOp f 1 x'
         _ -> return (x' ++ LStore aName : y' ++ [LStore bName] ++ castInstrs ++ [finalOp])
   where
+    pushPartialOp :: Maybe Function -> Int -> [Instruction] -> Compiler [Instruction]
+    pushPartialOp (Just fun) n pre = return $ pre ++ [PushPf (funame fun) n]
+    pushPartialOp Nothing _ _ = cerror ("Operator function " ++ opName ++ " not found") (extractPosition x) >> return []
     compileTypeFromType :: Parser.Type -> [Instruction]
     compileTypeFromType (Parser.StructT "Int" []) = [Push $ DInt 0]
     compileTypeFromType (Parser.StructT "Float" []) = [Push $ DFloat 0.0]

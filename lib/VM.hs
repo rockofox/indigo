@@ -10,9 +10,9 @@ module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, r
 
 import Control.Exception (IOException, try)
 import Control.Monad
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS hiding (local)
 import Control.Monad.State.Lazy
-import Control.Monad.IO.Class (liftIO)
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
@@ -304,6 +304,11 @@ headOrError :: String -> [a] -> a
 headOrError err [] = error err
 headOrError _ (x : _) = x
 
+indexOrError :: Int -> [a] -> a
+indexOrError i xs
+    | i < 0 || i >= length xs = error $ "Index out of bounds: " ++ show i ++ " (length " ++ show (length xs) ++ ")"
+    | otherwise = xs !! i
+
 tryIO :: IO a -> IO (Either IOException a)
 tryIO = try
 
@@ -444,9 +449,11 @@ instance Num Data where
     signum x = error $ "Cannot take signum of " ++ show x
 
 instance Fractional Data where
+    (/) (DInt _) (DInt 0) = error "Division by zero"
     (/) (DInt x) (DInt y) = DInt $ x `div` y
     (/) (DFloat x) (DFloat y) = DFloat $ x / y
     (/) (DDouble x) (DDouble y) = DDouble $ x / y
+    (/) (DChar _) (DChar y) | Data.Char.ord y == 0 = error "Division by zero"
     (/) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x `div` Data.Char.ord y)
     (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
     fromRational = DFloat . fromRational
@@ -1066,7 +1073,7 @@ runInstruction (Concat n) =
                         )
                         l
                         (drop 1 l)
-runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ list !! index; [DInt index, DString str] -> stackPush $ DChar $ str !! index; x -> error $ "Invalid types for index: " ++ show x
+runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ indexOrError index list; [DInt index, DString str] -> stackPush $ DChar $ indexOrError index str; x -> error $ "Invalid types for index: " ++ show x
 runInstruction Slice = do
     start <- stackPop
     end <- stackPop

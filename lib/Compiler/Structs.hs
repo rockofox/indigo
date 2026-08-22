@@ -192,30 +192,32 @@ compileCast compileExpr' compileProgram' (Parser.Cast{castExpr, castType, castPo
             Just name -> find (\case Parser.Struct{name = name'} -> name' == name; _ -> False) structDecs'
             Nothing -> Nothing
     case targetStruct of
-        Just (Parser.Struct{isValueStruct = True, fields, refinement, refinementSrc}) -> do
-            when (length fields /= 1) $ cerror "value struct must have exactly one field" castPos
-            let (fieldName, fieldType) = head fields
-            fromType <- typeOf castExpr
-            if not (Parser.compareTypes fromType fieldType)
-                then do
-                    cerror ("Type mismatch: cannot cast " ++ show fromType ++ " to value struct field type " ++ show fieldType) castPos
-                    return []
-                else do
-                    let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitTypeArgs = [], structLitPos = castPos}
-                    skipCheck <- gets CS.skipRefinementCheck
-                    unless skipCheck $ do
-                        case refinement of
-                            Just rf -> do
-                                r <- runRefinement compileProgram' rf structLit
-                                case r of
-                                    Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") castPos
-                                    Just True -> return ()
-                                    Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - value contains variables without refinement guarantees") castPos
-                            Nothing -> return ()
-                    modify (\s -> s{skipRefinementCheck = True})
-                    result <- compileExpr' structLit expectedType
-                    modify (\s -> s{skipRefinementCheck = skipCheck})
-                    return result
+        Just (Parser.Struct{isValueStruct = True, fields, refinement, refinementSrc}) -> case fields of
+            [(fieldName, fieldType)] -> do
+                fromType <- typeOf castExpr
+                if not (Parser.compareTypes fromType fieldType)
+                    then do
+                        cerror ("Type mismatch: cannot cast " ++ show fromType ++ " to value struct field type " ++ show fieldType) castPos
+                        return []
+                    else do
+                        let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitTypeArgs = [], structLitPos = castPos}
+                        skipCheck <- gets CS.skipRefinementCheck
+                        unless skipCheck $ do
+                            case refinement of
+                                Just rf -> do
+                                    r <- runRefinement compileProgram' rf structLit
+                                    case r of
+                                        Just False -> cerror ("Refinement failed (" ++ refinementSrc ++ ")") castPos
+                                        Just True -> return ()
+                                        Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - value contains variables without refinement guarantees") castPos
+                                Nothing -> return ()
+                        modify (\s -> s{skipRefinementCheck = True})
+                        result <- compileExpr' structLit expectedType
+                        modify (\s -> s{skipRefinementCheck = skipCheck})
+                        return result
+            _ -> do
+                cerror "value struct must have exactly one field" castPos
+                return []
         _ -> do
             from' <- compileExpr' castExpr Parser.Unknown
             let to' = compileType castType

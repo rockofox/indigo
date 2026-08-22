@@ -49,7 +49,7 @@ spec = do
 
         it "shows hover for qualified symbols" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
             doc <- openDoc "hover_qualified.in" "indigo"
-            hover <- getHover doc (Position 2 15)
+            hover <- getHover doc (Position 2 16)
             liftIO $ case extractHoverContent hover of
                 Just (MarkupContent _ content) -> "add" `isInfixOf` content `shouldBe` True
                 Nothing -> expectationFailure "Expected hover content for qualified symbol"

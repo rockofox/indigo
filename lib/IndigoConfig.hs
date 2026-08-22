@@ -6,6 +6,7 @@ import Data.ByteString qualified as BS
 import Data.Maybe (fromMaybe)
 import System.Directory (doesFileExist)
 import System.FilePath
+import System.IO (hPutStrLn, stderr)
 
 data IndigoConfig = IndigoConfig
     { mainFile :: Maybe FilePath
@@ -31,7 +32,9 @@ loadConfig configPath = do
         else do
             content <- BS.readFile configPath
             case Aeson.eitherDecodeStrict content of
-                Left _ -> return Nothing
+                Left err -> do
+                    hPutStrLn stderr $ "Warning: ignoring invalid " ++ configPath ++ ": " ++ err
+                    return Nothing
                 Right config -> return $ Just config
 
 findConfigFile :: FilePath -> IO (Maybe FilePath)

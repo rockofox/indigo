@@ -29,6 +29,11 @@ spec = do
                         T.length (diag ^. Language.LSP.Protocol.Lens.message) `shouldSatisfy` (> 0)
                     [] -> Prelude.error "Expected diagnostics"
 
+        it "reports parse errors at end of file" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
+            _doc <- openDoc "parse_error_eof.in" "indigo"
+            diags <- waitForDiagnostics
+            liftIO $ Prelude.length diags `shouldSatisfy` (> 0)
+
         it "reports compilation errors" $ runSession lspExe fullLatestClientCaps "tests/data" $ do
             _doc <- openDoc "compile_error.in" "indigo"
             diags <- waitForDiagnostics
