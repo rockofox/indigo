@@ -45,14 +45,19 @@
             wasmGHC
             wasmCabal
             pkgs.cabal-install
+            pkgs.cacert
+            pkgs.curl
           ];
           __impure = true;
           buildPhase = ''
             export HOME=$TMPDIR
             export CABAL_DIR=$TMPDIR/.cabal
+            export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+            export NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+            export CURL_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
             mkdir -p $CABAL_DIR
             cd wasm_reactor
-            wasm32-wasi-cabal update
+            wasm32-wasi-cabal --http-transport=curl update || wasm32-wasi-cabal update
             wasm32-wasi-cabal build lib:indigo --allow-newer --project-file=cabal.project
           '';
           installPhase = ''
@@ -70,6 +75,8 @@
             wasmGHC
             wasmCabal
             pkgs.cabal-install
+            pkgs.cacert
+            pkgs.curl
           ];
           buildInputs = [
             indigoWasm
@@ -78,10 +85,13 @@
           buildPhase = ''
             export HOME=$TMPDIR
             export CABAL_DIR=$TMPDIR/.cabal
+            export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+            export NIX_SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+            export CURL_CA_BUNDLE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
             mkdir -p $CABAL_DIR
             cp -r ${indigoWasm}/dist-newstyle ./dist-newstyle || true
             cd wasm_reactor
-            wasm32-wasi-cabal update
+            wasm32-wasi-cabal --http-transport=curl update || wasm32-wasi-cabal update
             wasm32-wasi-cabal build exe:indigo-wasm-reactor --allow-newer --project-file=cabal.project
           '';
           installPhase = ''

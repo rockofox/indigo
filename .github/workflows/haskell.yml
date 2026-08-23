@@ -2,7 +2,10 @@ name: Build, Test, and Release
 
 on:
   push:
-    paths-ignore: "**.md"
+    paths-ignore:
+      - "**.md"
+      - "website/**"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 jobs:
@@ -137,7 +140,7 @@ jobs:
         run: nix flake lock --update-input ghc-wasm-meta
 
       - name: Build WASM reactor with Nix
-        run: nix build .#build-wasm-reactor --extra-experimental-features "nix-command flakes ca-derivations impure-derivations"
+        run: nix build .#build-wasm-reactor --impure --extra-experimental-features "nix-command flakes ca-derivations impure-derivations"
 
       - name: Prepare WASM release
         run: |
