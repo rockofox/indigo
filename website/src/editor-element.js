@@ -1,11 +1,50 @@
 import { LitElement, html, css } from 'lit';
-import { basicSetup, EditorView } from "codemirror"
-import { keymap } from "@codemirror/view"
-import { Compartment, EditorState } from "@codemirror/state"
-import { indentWithTab } from "@codemirror/commands"
-import { indigo } from "codemirror-lang-indigo"
-import { cpp } from "@codemirror/lang-cpp"
-import { oneDark } from "@codemirror/theme-one-dark"
+import { basicSetup, EditorView } from "codemirror";
+import { keymap } from "@codemirror/view";
+import { Compartment, EditorState } from "@codemirror/state";
+import { indentWithTab } from "@codemirror/commands";
+import { indigo } from "codemirror-lang-indigo";
+import { cpp } from "@codemirror/lang-cpp";
+import { oneDark } from "@codemirror/theme-one-dark";
+
+const editorTheme = EditorView.theme({
+    "&": {
+        height: "100%",
+        fontSize: "13.5px",
+        fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        backgroundColor: "#1f1d2e",
+        color: "#e0def4"
+    },
+    ".cm-content": {
+        fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        padding: "10px 0",
+        lineHeight: "1.55",
+        caretColor: "#ebbcba"
+    },
+    ".cm-cursor, .cm-dropCursor": {
+        borderLeftColor: "#ebbcba"
+    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+        backgroundColor: "#403d52 !important"
+    },
+    ".cm-gutters": {
+        backgroundColor: "#191724",
+        color: "#6e6a86",
+        borderRight: "1px solid #26233a",
+        paddingRight: "6px"
+    },
+    ".cm-activeLine": {
+        backgroundColor: "#26233a55"
+    },
+    ".cm-activeLineGutter": {
+        backgroundColor: "#26233a88",
+        color: "#ebbcba"
+    },
+    ".cm-scroller": {
+        overflow: "auto",
+        fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+    }
+}, { dark: true });
 
 export class CodeEditorElement extends LitElement {
     static properties = {
@@ -27,7 +66,9 @@ export class CodeEditorElement extends LitElement {
     :host {
       display: block;
       height: 100%;
+      width: 100%;
       overflow: hidden;
+      box-sizing: border-box;
     }
     :host([auto-height]) {
       height: auto;
@@ -35,9 +76,13 @@ export class CodeEditorElement extends LitElement {
     }
     .cm-editor {
       height: 100%;
+      outline: none !important;
     }
     :host([auto-height]) .cm-editor {
       height: auto;
+    }
+    :host([auto-height]) .cm-scroller {
+      overflow: visible;
     }
   `;
 
@@ -50,13 +95,28 @@ export class CodeEditorElement extends LitElement {
             langExtension = cpp();
         }
 
+        const runKeymap = keymap.of([
+            {
+                key: "Mod-Enter",
+                run: () => {
+                    this.dispatchEvent(new CustomEvent('run-code', {
+                        bubbles: true,
+                        composed: true
+                    }));
+                    return true;
+                }
+            },
+            indentWithTab
+        ]);
+
         this.editorView = new EditorView({
             doc: this.code,
             extensions: [
                 basicSetup,
-                keymap.of([indentWithTab]),
+                runKeymap,
                 languageConf.of(langExtension),
                 oneDark,
+                editorTheme,
                 EditorView.updateListener.of((update) => {
                     if (update.docChanged) {
                         this.dispatchEvent(new CustomEvent('code-changed', {
@@ -77,7 +137,7 @@ export class CodeEditorElement extends LitElement {
             const currentDoc = this.editorView.state.doc.toString();
             if (currentDoc !== this.code) {
                 this.editorView.dispatch({
-                    changes: { from: 0, to: currentDoc.length, insert: this.code }
+                    changes: { from: 0, to: currentDoc.length, insert: this.code || "" }
                 });
             }
         }
@@ -94,3 +154,4 @@ export class CodeEditorElement extends LitElement {
 }
 
 customElements.define('code-editor', CodeEditorElement);
+

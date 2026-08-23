@@ -5,91 +5,154 @@ const BUILD_TIME = import.meta.env.VITE_BUILD_TIME || Date.now();
 const ZIP_URL = `https://storage.googleapis.com/indigolang/indigo-wasm-latest.zip?v=${BUILD_TIME}`;
 
 class XTermStdio extends Fd {
-    constructor(term) {
+    constructor(termElement) {
         super();
-        this.term = term;
+        this.termElement = termElement;
     }
 
     fd_write(data) {
-        this.term.write(data);
+        if (this.termElement) {
+            this.termElement.write(data);
+        }
         return { ret: 0, nwritten: data.byteLength };
     }
 
     fd_read(len) {
-        // Don't actually read from terminal - just return 0 bytes read
-        // This prevents cursor position queries from getting garbage responses
         return { ret: 0, data: new Uint8Array(0) };
     }
 
     fd_close() {
-        return 0; // Success
+        return 0;
     }
 }
 
 export class IndigoRunner {
-    constructor(termElement) {
-        this.termElement = termElement;
-        this.zipFetched = false;
+    constructor() {
+        this.zipPromise = null;
         this.wasmBytes = null;
         this.preludeText = "";
         this.testText = "";
+        this.isRunning = false;
     }
 
-    async fetchAndUnzip() {
-        if (this.zipFetched) return;
-        const resp = await fetch(ZIP_URL);
-        const buf = new Uint8Array(await resp.arrayBuffer());
-        const files = fflate.unzipSync(buf);
-        this.wasmBytes = files["indigo-wasm-latest/indigo-init.wasm"];
-        this.preludeText = new TextDecoder("utf-8").decode(files["indigo-wasm-latest/std/prelude.in"]);
-        this.testText = new TextDecoder("utf-8").decode(files["indigo-wasm-latest/std/test.in"]);
-        this.zipFetched = true;
+    async ensureLoaded(onStatus) {
+        if (this.wasmBytes) return;
+
+        if (!this.zipPromise) {
+            this.zipPromise = (async () => {
+                if (onStatus) onStatus({ status: 'fetching', message: 'Downloading Indigo runtime...' });
+                const resp = await fetch(ZIP_URL);
+                if (!resp.ok) {
+                    throw new Error(`Failed to download runtime (${resp.status} ${resp.statusText})`);
+                }
+                const buf = new Uint8Array(await resp.arrayBuffer());
+                if (onStatus) onStatus({ status: 'extracting', message: 'Initializing runtime...' });
+                const files = fflate.unzipSync(buf);
+                this.wasmBytes = files["indigo-wasm-latest/indigo-init.wasm"];
+                this.preludeText = new TextDecoder("utf-8").decode(files["indigo-wasm-latest/std/prelude.in"]);
+                this.testText = new TextDecoder("utf-8").decode(files["indigo-wasm-latest/std/test.in"]);
+            })();
+        }
+
+        await this.zipPromise;
     }
 
-    async run(code, stdin = "") {
-        await this.fetchAndUnzip();
-        this.termElement.clear();
+    async run(code, termElement, options = {}) {
+        const { stdin = "", onStatus } = options;
+        if (this.isRunning) {
+            return;
+        }
 
-        const wasi = new WASI([], [], [
-            new XTermStdio(this.termElement),
-            new XTermStdio(this.termElement),
-            new XTermStdio(this.termElement),
-            new PreopenDirectory("/usr/local/lib/indigo/std", new Map([
-                ["prelude.in", new File(new TextEncoder("utf-8").encode(this.preludeText))],
-                ["test.in", new File(new TextEncoder("utf-8").encode(this.testText))]
-            ]))
-        ]);
+        this.isRunning = true;
+        const startTime = performance.now();
 
-        const wasiImportObj = { wasi_snapshot_preview1: wasi.wasiImport };
-        const wasm = await WebAssembly.instantiate(this.wasmBytes, wasiImportObj);
-        wasi.inst = wasm.instance;
-        const exports = wasm.instance.exports;
-        const memory = exports.memory;
+        try {
+            await this.ensureLoaded(onStatus);
 
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
+            if (termElement) {
+                termElement.clear();
+            }
 
-        const outputPtrPtr = exports.mallocPtr();
-        const progLen = code.length;
-        const progPtr = exports.mallocBytes(progLen);
-        const progArr = new Uint8Array(memory.buffer, progPtr, progLen);
-        encoder.encodeInto(code, progArr);
-        const stdinLen = stdin.length;
-        const stdinPtr = exports.mallocBytes(stdinLen);
-        const stdinArr = new Uint8Array(memory.buffer, stdinPtr, stdinLen);
-        encoder.encodeInto(stdin, stdinArr);
-        const outputLen = exports.runProgramRawBuffered(progPtr, progLen, stdinPtr, stdinLen, outputPtrPtr);
-        const outputPtrArr = new Uint32Array(memory.buffer, outputPtrPtr, 1);
-        const outputPtr = outputPtrArr[0];
-        const outputArr = new Uint8Array(memory.buffer, outputPtr, outputLen);
+            if (onStatus) onStatus({ status: 'compiling', message: 'Compiling & running...' });
 
-        let output = decoder.decode(outputArr);
+            const wasi = new WASI([], [], [
+                new XTermStdio(termElement),
+                new XTermStdio(termElement),
+                new XTermStdio(termElement),
+                new PreopenDirectory("/usr/local/lib/indigo/std", new Map([
+                    ["prelude.in", new File(new TextEncoder().encode(this.preludeText))],
+                    ["test.in", new File(new TextEncoder().encode(this.testText))]
+                ]))
+            ]);
 
-        // Strip ANSI escape codes and control characters
-        output = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); // ANSI codes
-        output = output.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, ''); // Control chars except \n, \r, \t
+            const wasiImportObj = { wasi_snapshot_preview1: wasi.wasiImport };
+            const wasm = await WebAssembly.instantiate(this.wasmBytes, wasiImportObj);
+            wasi.inst = wasm.instance;
+            const exports = wasm.instance.exports;
+            const memory = exports.memory;
 
-        this.termElement.write(output);
-        exports.free_(outputPtr);
+            const encoder = new TextEncoder();
+            const decoder = new TextDecoder();
+
+            const progBytes = encoder.encode(code);
+            const stdinBytes = encoder.encode(stdin);
+
+            const progLen = progBytes.length;
+            const progPtr = exports.mallocBytes(progLen);
+            const progArr = new Uint8Array(memory.buffer, progPtr, progLen);
+            progArr.set(progBytes);
+
+            const stdinLen = stdinBytes.length;
+            const stdinPtr = exports.mallocBytes(stdinLen);
+            const stdinArr = new Uint8Array(memory.buffer, stdinPtr, stdinLen);
+            stdinArr.set(stdinBytes);
+
+            const outputPtrPtr = exports.mallocPtr();
+            let outputPtr = null;
+
+            try {
+                const outputLen = exports.runProgramRawBuffered(progPtr, progLen, stdinPtr, stdinLen, outputPtrPtr);
+                const outputPtrArr = new Uint32Array(memory.buffer, outputPtrPtr, 1);
+                outputPtr = outputPtrArr[0];
+
+                if (outputLen > 0 && outputPtr) {
+                    const outputArr = new Uint8Array(memory.buffer, outputPtr, outputLen);
+                    const output = decoder.decode(outputArr);
+                    if (termElement) {
+                        termElement.write(output);
+                    }
+                }
+            } finally {
+                if (outputPtr) exports.free_(outputPtr);
+                if (outputPtrPtr) exports.free_(outputPtrPtr);
+                if (progPtr) exports.free_(progPtr);
+                if (stdinPtr) exports.free_(stdinPtr);
+            }
+
+            const elapsed = Math.round(performance.now() - startTime);
+            if (onStatus) onStatus({ status: 'done', message: `Executed in ${elapsed}ms`, elapsed });
+
+        } catch (e) {
+            const isProcExit = e?.message?.includes('proc_exit') ||
+                               e?.name === 'ProcExit' ||
+                               e?.message?.includes('unreachable');
+
+            const elapsed = Math.round(performance.now() - startTime);
+
+            if (!isProcExit) {
+                console.error("Playground execution error:", e);
+                if (termElement) {
+                    termElement.write(`\r\n\x1b[31mError: ${e.message || e}\x1b[0m\r\n`);
+                }
+                if (onStatus) onStatus({ status: 'error', message: `Error: ${e.message || e}`, elapsed });
+            } else {
+                if (onStatus) onStatus({ status: 'done', message: `Finished with errors in ${elapsed}ms`, elapsed });
+            }
+        } finally {
+            this.isRunning = false;
+        }
     }
 }
+
+export const runnerInstance = new IndigoRunner();
+

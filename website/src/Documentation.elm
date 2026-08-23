@@ -1,9 +1,9 @@
-module Documentation exposing (Topic(..), topicPath, view)
+module Documentation exposing (Topic(..), topicPath, topicTitle, topicCategory, view)
 
 
-import Html exposing (Html, a, button, div, h2, h3, node, p, pre, code, section, text)
+import Html exposing (Html, a, button, div, h2, h3, input, node, p, pre, code, section, span, text)
 import Html.Attributes exposing (attribute, class, href, id)
-import Html.Events exposing (onClick)
+import Html.Events exposing (onClick, onInput)
 
 
 type Topic
@@ -101,12 +101,224 @@ topicPath topic =
             "/docs/project-config"
 
 
-view : Topic -> (String -> msg) -> Html msg
-view currentTopic onLoadCode =
+topicTitle : Topic -> String
+topicTitle topic =
+    case topic of
+        Overview ->
+            "Overview"
+
+        FunctionsAndBindings ->
+            "Functions & Bindings"
+
+        Comments ->
+            "Comments"
+
+        LiteralsAndTypes ->
+            "Literals & Types"
+
+        OperatorsAndPipelines ->
+            "Operators & Pipelines"
+
+        ControlFlow ->
+            "Control Flow"
+
+        LambdasAndPartials ->
+            "Lambdas & Partials"
+
+        Lists ->
+            "Lists"
+
+        Tuples ->
+            "Tuples"
+
+        ProductTypes ->
+            "Product Types"
+
+        SumTypes ->
+            "Sum Types"
+
+        TraitsAndImpls ->
+            "Traits & Impls"
+
+        Generics ->
+            "Generics"
+
+        CastingAndValueTypes ->
+            "Casting & Value Types"
+
+        RefinementTypes ->
+            "Refinement Types"
+
+        PatternMatching ->
+            "Pattern Matching"
+
+        IOAndSequencing ->
+            "IO & Sequencing"
+
+        ImportsAndModules ->
+            "Imports & Modules"
+
+        FFI ->
+            "FFI"
+
+        Prelude ->
+            "Prelude"
+
+        StdFile ->
+            "File"
+
+        ProjectConfig ->
+            "Project Config"
+
+
+topicCategory : Topic -> String
+topicCategory topic =
+    case topic of
+        Overview ->
+            "Getting Started"
+
+        FunctionsAndBindings ->
+            "Basics"
+
+        Comments ->
+            "Basics"
+
+        LiteralsAndTypes ->
+            "Basics"
+
+        OperatorsAndPipelines ->
+            "Basics"
+
+        ControlFlow ->
+            "Basics"
+
+        LambdasAndPartials ->
+            "Basics"
+
+        Lists ->
+            "Data & Types"
+
+        Tuples ->
+            "Data & Types"
+
+        ProductTypes ->
+            "Data & Types"
+
+        SumTypes ->
+            "Data & Types"
+
+        TraitsAndImpls ->
+            "Data & Types"
+
+        Generics ->
+            "Data & Types"
+
+        CastingAndValueTypes ->
+            "Data & Types"
+
+        RefinementTypes ->
+            "Data & Types"
+
+        PatternMatching ->
+            "Expressions"
+
+        IOAndSequencing ->
+            "Expressions"
+
+        ImportsAndModules ->
+            "Modules"
+
+        FFI ->
+            "Interop"
+
+        Prelude ->
+            "Standard Library"
+
+        StdFile ->
+            "Standard Library"
+
+        ProjectConfig ->
+            "Tooling"
+
+
+topicList : List Topic
+topicList =
+    [ Overview
+    , FunctionsAndBindings
+    , Comments
+    , LiteralsAndTypes
+    , OperatorsAndPipelines
+    , ControlFlow
+    , LambdasAndPartials
+    , Lists
+    , Tuples
+    , ProductTypes
+    , SumTypes
+    , TraitsAndImpls
+    , Generics
+    , CastingAndValueTypes
+    , RefinementTypes
+    , PatternMatching
+    , IOAndSequencing
+    , ImportsAndModules
+    , FFI
+    , Prelude
+    , StdFile
+    , ProjectConfig
+    ]
+
+
+previousTopic : Topic -> Maybe Topic
+previousTopic topic =
+    let
+        findPrev prev items =
+            case items of
+                [] ->
+                    Nothing
+
+                curr :: rest ->
+                    if curr == topic then
+                        prev
+
+                    else
+                        findPrev (Just curr) rest
+    in
+    findPrev Nothing topicList
+
+
+nextTopic : Topic -> Maybe Topic
+nextTopic topic =
+    let
+        findNext items =
+            case items of
+                [] ->
+                    Nothing
+
+                curr :: rest ->
+                    if curr == topic then
+                        List.head rest
+
+                    else
+                        findNext rest
+    in
+    findNext topicList
+
+
+view : Topic -> String -> (String -> msg) -> (String -> msg) -> Html msg
+view currentTopic searchQuery onSearchChange onLoadCode =
     div [ class "docs-container" ]
-        [ viewSidebar currentTopic
+        [ viewSidebar currentTopic searchQuery onSearchChange
         , div [ class "docs-content" ]
-            [ case currentTopic of
+            [ div [ class "docs-header-bar" ]
+                [ div [ class "docs-breadcrumb" ]
+                    [ a [ href "/docs" ] [ text "Docs" ]
+                    , span [ class "breadcrumb-sep" ] [ text "/" ]
+                    , span [ class "breadcrumb-category" ] [ text (topicCategory currentTopic) ]
+                    , span [ class "breadcrumb-sep" ] [ text "/" ]
+                    , span [ class "breadcrumb-current" ] [ text (topicTitle currentTopic) ]
+                    ]
+                ]
+            , case currentTopic of
                 Overview ->
                     viewOverview onLoadCode
 
@@ -172,43 +384,63 @@ view currentTopic onLoadCode =
 
                 ProjectConfig ->
                     viewProjectConfig onLoadCode
+            , viewPagination currentTopic
             ]
         ]
 
 
-viewSidebar : Topic -> Html msg
-viewSidebar currentTopic =
+viewSidebar : Topic -> String -> (String -> msg) -> Html msg
+viewSidebar currentTopic searchQuery onSearchChange =
+    let
+        matches query topic =
+            if String.isEmpty (String.trim query) then
+                True
+
+            else
+                let
+                    q =
+                        String.toLower (String.trim query)
+
+                    title =
+                        String.toLower (topicTitle topic)
+
+                    cat =
+                        String.toLower (topicCategory topic)
+                in
+                String.contains q title || String.contains q cat
+
+        renderGroup category topics =
+            let
+                filtered =
+                    List.filter (matches searchQuery) topics
+            in
+            if List.isEmpty filtered then
+                text ""
+
+            else
+                div [ class "sidebar-group" ]
+                    [ h3 [] [ text category ]
+                    , div [ class "sidebar-links" ]
+                        (List.map (\topic -> sidebarLink currentTopic topic (topicTitle topic)) filtered)
+                    ]
+    in
     div [ class "docs-sidebar" ]
-        [ h3 [] [ text "Getting Started" ]
-        , sidebarLink currentTopic Overview "Overview"
-        , h3 [] [ text "Basics" ]
-        , sidebarLink currentTopic FunctionsAndBindings "Functions & Bindings"
-        , sidebarLink currentTopic Comments "Comments"
-        , sidebarLink currentTopic LiteralsAndTypes "Literals & Types"
-        , sidebarLink currentTopic OperatorsAndPipelines "Operators & Pipelines"
-        , sidebarLink currentTopic ControlFlow "Control Flow"
-        , sidebarLink currentTopic LambdasAndPartials "Lambdas & Partials"
-        , h3 [] [ text "Data & Types" ]
-        , sidebarLink currentTopic Lists "Lists"
-        , sidebarLink currentTopic Tuples "Tuples"
-        , sidebarLink currentTopic ProductTypes "Product Types"
-        , sidebarLink currentTopic SumTypes "Sum Types"
-        , sidebarLink currentTopic TraitsAndImpls "Traits & Impls"
-        , sidebarLink currentTopic Generics "Generics"
-        , sidebarLink currentTopic CastingAndValueTypes "Casting & Value Types"
-        , sidebarLink currentTopic RefinementTypes "Refinement Types"
-        , h3 [] [ text "Expressions" ]
-        , sidebarLink currentTopic PatternMatching "Pattern Matching"
-        , sidebarLink currentTopic IOAndSequencing "IO & Sequencing"
-        , h3 [] [ text "Modules" ]
-        , sidebarLink currentTopic ImportsAndModules "Imports & Modules"
-        , h3 [] [ text "Interop" ]
-        , sidebarLink currentTopic FFI "FFI"
-        , h3 [] [ text "Standard Library" ]
-        , sidebarLink currentTopic Prelude "Prelude"
-        , sidebarLink currentTopic StdFile "File"
-        , h3 [] [ text "Tooling" ]
-        , sidebarLink currentTopic ProjectConfig "Project Config"
+        [ div [ class "docs-search-container" ]
+            [ input
+                [ class "docs-search-input"
+                , attribute "placeholder" "Search topics..."
+                , attribute "value" searchQuery
+                , onInput onSearchChange
+                ]
+                []
+            ]
+        , renderGroup "Getting Started" [ Overview ]
+        , renderGroup "Basics" [ FunctionsAndBindings, Comments, LiteralsAndTypes, OperatorsAndPipelines, ControlFlow, LambdasAndPartials ]
+        , renderGroup "Data & Types" [ Lists, Tuples, ProductTypes, SumTypes, TraitsAndImpls, Generics, CastingAndValueTypes, RefinementTypes ]
+        , renderGroup "Expressions" [ PatternMatching, IOAndSequencing ]
+        , renderGroup "Modules & Interop" [ ImportsAndModules, FFI ]
+        , renderGroup "Standard Library" [ Prelude, StdFile ]
+        , renderGroup "Tooling" [ ProjectConfig ]
         ]
 
 
@@ -227,16 +459,49 @@ sidebarLink currentTopic linkTopic label =
         [ text label ]
 
 
+viewPagination : Topic -> Html msg
+viewPagination topic =
+    let
+        prevHtml =
+            case previousTopic topic of
+                Just prev ->
+                    a [ class "pagination-card prev-card", href (topicPath prev) ]
+                        [ span [ class "pagination-dir" ] [ text "← Previous" ]
+                        , span [ class "pagination-name" ] [ text (topicTitle prev) ]
+                        ]
+
+                Nothing ->
+                    div [ class "pagination-card-empty" ] []
+
+        nextHtml =
+            case nextTopic topic of
+                Just next ->
+                    a [ class "pagination-card next-card", href (topicPath next) ]
+                        [ span [ class "pagination-dir" ] [ text "Next →" ]
+                        , span [ class "pagination-name" ] [ text (topicTitle next) ]
+                        ]
+
+                Nothing ->
+                    div [ class "pagination-card-empty" ] []
+    in
+    div [ class "docs-pagination" ]
+        [ prevHtml
+        , nextHtml
+        ]
+
+
 viewCodeBlock : String -> (String -> msg) -> Bool -> String -> Html msg
 viewCodeBlock code onLoadCode showTryButton language =
     div [ class "code-block-container" ]
         [ if showTryButton then
-            button
-                [ class "try-button"
-                , onClick (onLoadCode code)
-                , attribute "title" "Try in Playground"
+            div [ class "code-block-actions" ]
+                [ button
+                    [ class "try-button"
+                    , onClick (onLoadCode code)
+                    , attribute "title" "Open in Playground"
+                    ]
+                    [ text "Run in playground" ]
                 ]
-                [ text "▶" ]
 
           else
             text ""
@@ -253,6 +518,7 @@ viewCodeBlock code onLoadCode showTryButton language =
 playgroundNote : String -> Html msg
 playgroundNote note =
     p [ class "playground-note" ] [ text note ]
+
 
 
 viewOverview : (String -> msg) -> Html msg
@@ -652,7 +918,7 @@ let nameRed (_: Red): String = "red"
 
 let main = println (nameGreen (Green {}))""" onLoadCode True "indigo"
         , h3 [] [ text "Traits as open sums" ]
-        , p [] [ text "For open sets of cases (possibly across modules), use a trait plus separate types with impl — see Traits & Impls." ]
+        , p [] [ text "For open sets of cases (possibly across modules), use a trait plus separate types with impl (see Traits & Impls)." ]
         ]
 
 
@@ -1116,7 +1382,7 @@ let main : IO<Unit> = do
     File.closeFile fd2
 end""" onLoadCode False "indigo"
         , h3 [] [ text "Typical API" ]
-        , p [] [ text "openFile path mode , readFile fd size , writeFile fd content , closeFile fd — each returns IO wrapping an Int or String payload via .inner." ]
+        , p [] [ text "openFile path mode, readFile fd size, writeFile fd content, closeFile fd; each returns IO wrapping an Int or String payload via .inner." ]
         , h3 [] [ text "Sockets" ]
         , p [] [ text "share/std/sockets.in similarly wraps socket, bindSocket, listen, accept, connect, send, and recv. Import qualified Sockets for network examples (native only)." ]
         , playgroundNote "File and Sockets need the native runtime and OS facilities. They are not available in the browser playground."
@@ -1133,7 +1399,7 @@ viewProjectConfig onLoadCode =
   "main": "src/Main.in",
   "src": ["src", "lib"]
 }""" onLoadCode False "json"
-        , p [] [ text "main — optional entry file. src — optional extra source directories for module resolution." ]
+        , p [] [ text "main is an optional entry file, and src specifies optional extra source directories for module resolution." ]
         , h3 [] [ text "Minimal config" ]
         , viewCodeBlock """{}""" onLoadCode False "json"
         , p [] [ text "All fields are optional. {} uses defaults (no forced main, no extra source roots)." ]
