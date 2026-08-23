@@ -43,6 +43,14 @@ const editorTheme = EditorView.theme({
     ".cm-scroller": {
         overflow: "auto",
         fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+    },
+    "@media (max-width: 600px)": {
+        "&": {
+            fontSize: "12.5px"
+        },
+        ".cm-gutters": {
+            paddingRight: "4px"
+        }
     }
 }, { dark: true });
 
@@ -67,22 +75,33 @@ export class CodeEditorElement extends LitElement {
       display: block;
       height: 100%;
       width: 100%;
+      max-width: 100%;
       overflow: hidden;
       box-sizing: border-box;
     }
     :host([auto-height]) {
       height: auto;
       overflow: visible;
+      max-width: 100%;
     }
     .cm-editor {
       height: 100%;
+      max-width: 100%;
       outline: none !important;
     }
     :host([auto-height]) .cm-editor {
       height: auto;
+      max-width: 100%;
+    }
+    .cm-scroller {
+      overflow-x: auto !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch;
     }
     :host([auto-height]) .cm-scroller {
-      overflow: visible;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      -webkit-overflow-scrolling: touch;
     }
   `;
 

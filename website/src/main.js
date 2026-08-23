@@ -129,9 +129,9 @@ if (app.ports.scrollToTop) {
     });
 }
 
-// Listen for custom editor run-code event (Ctrl+Enter)
+// Listen for custom editor run-code event (Ctrl+Enter / Cmd+Enter)
 window.addEventListener('run-code', () => {
-    const runBtn = document.querySelector('.run-button');
+    const runBtn = document.querySelector('.btn-run') || document.querySelector('.pane-quick-run');
     if (runBtn) {
         runBtn.click();
     }

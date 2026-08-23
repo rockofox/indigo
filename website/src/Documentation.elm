@@ -424,23 +424,32 @@ viewSidebar currentTopic searchQuery onSearchChange =
                         (List.map (\topic -> sidebarLink currentTopic topic (topicTitle topic)) filtered)
                     ]
     in
-    div [ class "docs-sidebar" ]
-        [ div [ class "docs-search-container" ]
-            [ input
-                [ class "docs-search-input"
-                , attribute "placeholder" "Search topics..."
-                , attribute "value" searchQuery
-                , onInput onSearchChange
+    node "details" [ class "docs-sidebar" ]
+        [ node "summary" [ class "docs-sidebar-summary" ]
+            [ div [ class "docs-summary-left" ]
+                [ span [ class "docs-summary-badge" ] [ text (topicCategory currentTopic) ]
+                , span [ class "docs-summary-title" ] [ text (topicTitle currentTopic) ]
                 ]
-                []
+            , span [ class "docs-summary-toggle" ] [ text "Browse Topics ▾" ]
             ]
-        , renderGroup "Getting Started" [ Overview ]
-        , renderGroup "Basics" [ FunctionsAndBindings, Comments, LiteralsAndTypes, OperatorsAndPipelines, ControlFlow, LambdasAndPartials ]
-        , renderGroup "Data & Types" [ Lists, Tuples, ProductTypes, SumTypes, TraitsAndImpls, Generics, CastingAndValueTypes, RefinementTypes ]
-        , renderGroup "Expressions" [ PatternMatching, IOAndSequencing ]
-        , renderGroup "Modules & Interop" [ ImportsAndModules, FFI ]
-        , renderGroup "Standard Library" [ Prelude, StdFile ]
-        , renderGroup "Tooling" [ ProjectConfig ]
+        , div [ class "docs-sidebar-content" ]
+            [ div [ class "docs-search-container" ]
+                [ input
+                    [ class "docs-search-input"
+                    , attribute "placeholder" "Search topics..."
+                    , attribute "value" searchQuery
+                    , onInput onSearchChange
+                    ]
+                    []
+                ]
+            , renderGroup "Getting Started" [ Overview ]
+            , renderGroup "Basics" [ FunctionsAndBindings, Comments, LiteralsAndTypes, OperatorsAndPipelines, ControlFlow, LambdasAndPartials ]
+            , renderGroup "Data & Types" [ Lists, Tuples, ProductTypes, SumTypes, TraitsAndImpls, Generics, CastingAndValueTypes, RefinementTypes ]
+            , renderGroup "Expressions" [ PatternMatching, IOAndSequencing ]
+            , renderGroup "Modules & Interop" [ ImportsAndModules, FFI ]
+            , renderGroup "Standard Library" [ Prelude, StdFile ]
+            , renderGroup "Tooling" [ ProjectConfig ]
+            ]
         ]
 
 
@@ -493,18 +502,21 @@ viewPagination topic =
 viewCodeBlock : String -> (String -> msg) -> Bool -> String -> Html msg
 viewCodeBlock code onLoadCode showTryButton language =
     div [ class "code-block-container" ]
-        [ if showTryButton then
-            div [ class "code-block-actions" ]
-                [ button
+        [ div [ class "code-block-header" ]
+            [ span [ class "code-block-lang" ] [ text (if language == "c" then "C / FFI" else if language == "json" then "JSON" else "indigo") ]
+            , if showTryButton then
+                button
                     [ class "try-button"
                     , onClick (onLoadCode code)
-                    , attribute "title" "Open in Playground"
+                    , attribute "title" "Open and run in Playground"
                     ]
-                    [ text "Run in playground" ]
-                ]
+                    [ span [ class "try-icon" ] [ text "▶" ]
+                    , span [ class "try-label" ] [ text "Run in playground" ]
+                    ]
 
-          else
-            text ""
+              else
+                text ""
+            ]
         , node "code-editor"
             [ attribute "code" code
             , attribute "read-only" "true"

@@ -45,6 +45,12 @@ type alias Flags =
     { initialCode : String }
 
 
+type PlaygroundView
+    = SplitView
+    | EditorViewTab
+    | OutputViewTab
+
+
 type alias Model =
     { code : String
     , status : String
@@ -53,6 +59,8 @@ type alias Model =
     , url : Url.Url
     , docsSearchQuery : String
     , activeExample : String
+    , mobileNavOpen : Bool
+    , playgroundView : PlaygroundView
     }
 
 
@@ -169,6 +177,8 @@ init flags url key =
             , url = url
             , docsSearchQuery = ""
             , activeExample = "Hello World"
+            , mobileNavOpen = False
+            , playgroundView = EditorViewTab
             }
     in
     changeRouteTo (urlToRoute url) model
@@ -218,13 +228,13 @@ changeRouteTo : Route -> Model -> ( Model, Cmd Msg )
 changeRouteTo route model =
     case route of
         HomeRoute ->
-            ( { model | page = Home }, scrollToTop () )
+            ( { model | page = Home, mobileNavOpen = False }, scrollToTop () )
 
         PlaygroundRoute ->
-            ( { model | page = Playground }, scrollToTop () )
+            ( { model | page = Playground, mobileNavOpen = False }, scrollToTop () )
 
         DocsRoute topic ->
-            ( { model | page = Documentation topic }, scrollToTop () )
+            ( { model | page = Documentation topic, mobileNavOpen = False }, scrollToTop () )
 
 
 -- UPDATE
@@ -243,19 +253,22 @@ type Msg
     | LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | LoadAndRunCode String
+    | ToggleMobileNav
+    | CloseMobileNav
+    | SetPlaygroundView PlaygroundView
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         RunCode ->
-            ( { model | status = "Running..." }, runCode model.code )
+            ( { model | status = "Running...", playgroundView = OutputViewTab }, runCode model.code )
 
         CodeChanged newCode ->
             ( { model | code = newCode }, Cmd.none )
 
         SelectExample name code ->
-            ( { model | code = code, activeExample = name, status = "Loaded " ++ name }, Cmd.none )
+            ( { model | code = code, activeExample = name, status = "Loaded " ++ name, playgroundView = EditorViewTab }, Cmd.none )
 
         CopyCode ->
             ( model, copyToClipboard model.code )
@@ -267,7 +280,7 @@ update msg model =
             ( { model | code = "", status = "Cleared editor" }, Cmd.none )
 
         ResetCode ->
-            ( { model | code = defaultCode, activeExample = "Hello World", status = "Reset to default" }, Cmd.none )
+            ( { model | code = defaultCode, activeExample = "Hello World", status = "Reset to default", playgroundView = EditorViewTab }, Cmd.none )
 
         StatusReceived newStatus ->
             ( { model | status = newStatus }, Cmd.none )
@@ -278,21 +291,30 @@ update msg model =
         LinkClicked urlRequest ->
             case urlRequest of
                 Browser.Internal url ->
-                    ( model, Nav.pushUrl model.key (Url.toString url) )
+                    ( { model | mobileNavOpen = False }, Nav.pushUrl model.key (Url.toString url) )
 
                 Browser.External href ->
-                    ( model, Nav.load href )
+                    ( { model | mobileNavOpen = False }, Nav.load href )
 
         UrlChanged url ->
-            changeRouteTo (urlToRoute url) { model | url = url }
+            changeRouteTo (urlToRoute url) { model | url = url, mobileNavOpen = False }
 
         LoadAndRunCode code ->
-            ( { model | code = code, activeExample = "Snippet", status = "Running..." }
+            ( { model | code = code, activeExample = "Snippet", status = "Running...", playgroundView = OutputViewTab, mobileNavOpen = False }
             , Cmd.batch
                 [ Nav.pushUrl model.key "/playground"
                 , runCode code
                 ]
             )
+
+        ToggleMobileNav ->
+            ( { model | mobileNavOpen = not model.mobileNavOpen }, Cmd.none )
+
+        CloseMobileNav ->
+            ( { model | mobileNavOpen = False }, Cmd.none )
+
+        SetPlaygroundView pView ->
+            ( { model | playgroundView = pView }, Cmd.none )
 
 
 -- SUBSCRIPTIONS
@@ -365,14 +387,26 @@ viewHeader model =
     in
     header [ class "site-header" ]
         [ div [ class "container header-content" ]
-            [ a [ href "/", class "logo-link" ]
-                [ span [ class "logo" ] [ text "indigo" ]
+            [ div [ class "header-brand" ]
+                [ a [ href "/", class "logo-link", onClick CloseMobileNav ]
+                    [ span [ class "logo" ] [ text "indigo" ]
+                    ]
+                , button
+                    [ class ("mobile-nav-toggle" ++ (if model.mobileNavOpen then " is-open" else ""))
+                    , onClick ToggleMobileNav
+                    , attribute "aria-label" "Toggle navigation menu"
+                    , attribute "aria-expanded" (if model.mobileNavOpen then "true" else "false")
+                    ]
+                    [ span [ class "nav-toggle-bar" ] []
+                    , span [ class "nav-toggle-bar" ] []
+                    , span [ class "nav-toggle-bar" ] []
+                    ]
                 ]
-            , nav [ class "main-nav" ]
-                [ a [ href "/", class (if isActive "/" then "active" else "") ] [ text "Home" ]
-                , a [ href "/playground", class (if isActive "/playground" then "active" else "") ] [ text "Playground" ]
-                , a [ href "/docs", class (if isActive "/docs" then "active" else "") ] [ text "Documentation" ]
-                , a [ href "https://github.com/rockofox/indigo", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "GitHub" ]
+            , nav [ class ("main-nav" ++ (if model.mobileNavOpen then " is-open" else "")) ]
+                [ a [ href "/", class (if isActive "/" then "active" else ""), onClick CloseMobileNav ] [ text "Home" ]
+                , a [ href "/playground", class (if isActive "/playground" then "active" else ""), onClick CloseMobileNav ] [ text "Playground" ]
+                , a [ href "/docs", class (if isActive "/docs" then "active" else ""), onClick CloseMobileNav ] [ text "Documentation" ]
+                , a [ href "https://github.com/rockofox/indigo", attribute "target" "_blank", attribute "rel" "noopener noreferrer", class "nav-github" ] [ text "GitHub ↗" ]
                 ]
             ]
         ]
@@ -390,14 +424,14 @@ viewHero _ =
                 , div [ class "hero-buttons" ]
                     [ a [ href "/playground", class "btn btn-primary" ] [ text "Try in Playground" ]
                     , a [ href "/docs/overview", class "btn btn-secondary" ] [ text "Read Documentation" ]
-                    , a [ href "https://github.com/rockofox/indigo", class "btn btn-secondary", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "GitHub" ]
+                    , a [ href "https://github.com/rockofox/indigo", class "btn btn-secondary", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "GitHub ↗" ]
                     ]
                 ]
             , div [ class "hero-right" ]
                 [ div [ class "hero-code-card" ]
                     [ div [ class "card-window-header" ]
                         [ span [ class "window-title" ] [ text "example.in" ]
-                        , a [ href "/playground", class "hero-card-run" ] [ text "Open in playground" ]
+                        , a [ href "/playground", class "hero-card-run" ] [ text "Open in playground ▶" ]
                         ]
                     , div [ class "card-editor-wrap" ]
                         [ Html.node "code-editor"
@@ -474,7 +508,7 @@ viewPlayground model =
     section [ id "playground", class "playground-section" ]
         [ div [ class "container playground-wrapper" ]
             [ div [ class "playground-toolbar" ]
-                [ div [ class "toolbar-left" ]
+                [ div [ class "toolbar-examples-row" ]
                     [ span [ class "toolbar-label" ] [ text "Examples:" ]
                     , div [ class "examples-pills" ]
                         (List.map
@@ -494,22 +528,59 @@ viewPlayground model =
                             examples
                         )
                     ]
-                , div [ class "toolbar-right" ]
-                    [ span [ class "status-text" ] [ text model.status ]
-                    , button [ class "btn-tool", onClick CopyCode, title "Copy code to clipboard" ]
-                        [ text "Copy" ]
-                    , button [ class "btn-tool", onClick ShareCode, title "Copy shareable link" ]
-                        [ text "Share" ]
-                    , button [ class "btn-tool", onClick ResetCode, title "Reset code" ]
-                        [ text "Reset" ]
-                    , button [ class "btn-run", onClick RunCode, title "Run (Ctrl+Enter)" ]
-                        [ text "Run" ]
+                , div [ class "toolbar-actions-row" ]
+                    [ div [ class "status-indicator" ]
+                        [ span [ class "status-dot" ] []
+                        , span [ class "status-text" ] [ text model.status ]
+                        ]
+                    , div [ class "toolbar-buttons" ]
+                        [ button [ class "btn-tool", onClick CopyCode, title "Copy code to clipboard" ]
+                            [ text "Copy" ]
+                        , button [ class "btn-tool", onClick ShareCode, title "Copy shareable link" ]
+                            [ text "Share" ]
+                        , button [ class "btn-tool", onClick ResetCode, title "Reset code" ]
+                            [ text "Reset" ]
+                        , button [ class "btn-run", onClick RunCode, title "Run (Ctrl+Enter)" ]
+                            [ text "▶ Run" ]
+                        ]
                     ]
                 ]
-            , div [ class "playground-split-view" ]
+            , div [ class "mobile-view-tabs" ]
+                [ button
+                    [ class (if model.playgroundView == EditorViewTab then "mobile-tab active" else "mobile-tab")
+                    , onClick (SetPlaygroundView EditorViewTab)
+                    ]
+                    [ text "Editor (main.in)" ]
+                , button
+                    [ class (if model.playgroundView == OutputViewTab then "mobile-tab active" else "mobile-tab")
+                    , onClick (SetPlaygroundView OutputViewTab)
+                    ]
+                    [ text "Output" ]
+                , button
+                    [ class (if model.playgroundView == SplitView then "mobile-tab active" else "mobile-tab")
+                    , onClick (SetPlaygroundView SplitView)
+                    ]
+                    [ text "Split View" ]
+                ]
+            , div
+                [ class
+                    ("playground-split-view view-"
+                        ++ (case model.playgroundView of
+                                SplitView ->
+                                    "split"
+
+                                EditorViewTab ->
+                                    "editor-only"
+
+                                OutputViewTab ->
+                                    "output-only"
+                           )
+                    )
+                ]
                 [ div [ class "pane editor-pane" ]
                     [ div [ class "pane-header" ]
                         [ span [ class "pane-tab active" ] [ text "main.in" ]
+                        , button [ class "pane-quick-run", onClick RunCode, title "Run code" ] [ text "▶ Run" ]
                         ]
                     , div [ class "pane-body editor-body" ]
                         [ Html.node "code-editor"
@@ -522,6 +593,7 @@ viewPlayground model =
                 , div [ class "pane terminal-pane" ]
                     [ div [ class "pane-header" ]
                         [ span [ class "pane-tab active" ] [ text "Output" ]
+                        , span [ class "pane-status" ] [ text model.status ]
                         ]
                     , div [ class "pane-body terminal-body" ]
                         [ Html.node "xterm-display" [] []
@@ -543,8 +615,8 @@ viewFooter =
             , div [ class "footer-right" ]
                 [ a [ href "/docs/overview" ] [ text "Documentation" ]
                 , a [ href "/playground" ] [ text "Playground" ]
-                , a [ href "https://github.com/rockofox/indigo", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "GitHub" ]
-                , a [ href "https://github.com/rockofox/indigo/issues", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "Issues" ]
+                , a [ href "https://github.com/rockofox/indigo", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "GitHub ↗" ]
+                , a [ href "https://github.com/rockofox/indigo/issues", attribute "target" "_blank", attribute "rel" "noopener noreferrer" ] [ text "Issues ↗" ]
                 ]
             ]
         ]

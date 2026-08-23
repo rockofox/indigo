@@ -11,6 +11,7 @@ export class XTermDisplayElement extends LitElement {
           display: block;
           height: 100%;
           width: 100%;
+          max-width: 100%;
           background: #191724;
           box-sizing: border-box;
           overflow: hidden;
@@ -18,14 +19,22 @@ export class XTermDisplayElement extends LitElement {
         #terminal {
           height: 100%;
           width: 100%;
+          max-width: 100%;
           padding: 8px 12px;
           box-sizing: border-box;
         }
         .xterm {
           height: 100%;
+          max-width: 100%;
         }
         .xterm-viewport {
           overflow-y: auto !important;
+          -webkit-overflow-scrolling: touch;
+        }
+        @media (max-width: 600px) {
+          #terminal {
+            padding: 6px 8px;
+          }
         }
       `
     ];
