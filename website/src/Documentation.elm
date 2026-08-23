@@ -281,19 +281,31 @@ viewFunctionsAndBindings : (String -> msg) -> Html msg
 viewFunctionsAndBindings onLoadCode =
     section [ id "functions-and-bindings" ]
         [ h2 [] [ text "Functions and bindings" ]
-        , p [] [ text "Indigo does not separate constants from functions. Both use let. A binding with parameters is a function; one without is a value." ]
+        , p [] [ text "Indigo does not separate constants from functions. Both use let. A binding with parameters is a function; one without is a value. Variable bindings can be untyped or explicitly typed with : Type." ]
         , viewCodeBlock """let name = "Rocko"
+let age: Int = 25
 
-let main = println "Hello " ++ name""" onLoadCode True "indigo"
+let main = do
+    println ("Name: " ++ name)
+    println ("Age: " ++ ^age)
+end""" onLoadCode True "indigo"
         , h3 [] [ text "Parameters and return types" ]
-        , p [] [ text "Parameter types are written in the parameter list. A return type after : is optional but recommended for public APIs." ]
-        , viewCodeBlock """let multiple_args (a: Int b: Int): Int = a + b
+        , p [] [ text "Parameters can be written curried ((a: Int) (b: Int)), grouped with commas ((a: Int, b: Int)), or untyped (a b). Return types after : or -> are optional but recommended for clarity." ]
+        , viewCodeBlock """let add_curried (a: Int) (b: Int): Int = a + b
+let add_grouped (a: Int, b: Int): Int = a + b
+let square x = x * x
+let inc (x: Int) -> Int = x + 1
 
-let main = println (multiple_args 2, 3)""" onLoadCode True "indigo"
+let main = do
+    println (add_curried 2, 3)
+    println (add_grouped 2, 3)
+    println (square 4)
+    println (inc 10)
+end""" onLoadCode True "indigo"
         , h3 [] [ text "Type signatures" ]
         , p [] [ text "You can declare a signature with :: and implement the body with one or more let / name clauses." ]
         , viewCodeBlock """add :: Int -> Int -> Int
-add x y = x + y
+let add x y = x + y
 
 let main = println (add 2, 3)""" onLoadCode True "indigo"
         , h3 [] [ text "Multiple clauses" ]

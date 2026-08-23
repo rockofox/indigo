@@ -16,7 +16,7 @@ data Expr
     | FloatLit {floatValue :: Float, floatPos :: Position}
     | DoubleLit {doubleValue :: Double, doublePos :: Position}
     | If {ifCond :: Expr, ifThen :: Expr, ifElse :: Expr, ifPos :: Position}
-    | Let {letName :: String, letValue :: Expr, letPos :: Position}
+    | Let {letName :: String, letType :: Maybe Type, letValue :: Expr, letPos :: Position}
     | FuncDef {name :: String, args :: [Expr], body :: Expr, funcDefPos :: Position}
     | FuncCall {funcName :: String, funcArgs :: [Expr], funcPos :: Position}
     | FuncDec {name :: String, types :: [Type], generics :: [GenericExpr], funcDecPos :: Position}
@@ -115,7 +115,7 @@ traverseExprChildren f (Pipeline a b p) = Pipeline <$> f a <*> f b <*> pure p
 traverseExprChildren f (Cast a b p) = Cast <$> f a <*> f b <*> pure p
 traverseExprChildren f (StructAccess a b p) = StructAccess <$> f a <*> f b <*> pure p
 traverseExprChildren f (If c t e p) = If <$> f c <*> f t <*> f e <*> pure p
-traverseExprChildren f (Let n e p) = Let n <$> f e <*> pure p
+traverseExprChildren f (Let n t e p) = Let n t <$> f e <*> pure p
 traverseExprChildren f (FuncDef n as body p) = FuncDef n as <$> f body <*> pure p
 traverseExprChildren f (FuncCall n as p) = FuncCall n <$> traverse f as <*> pure p
 traverseExprChildren f (Function defs dec p) = Function <$> traverse f defs <*> f dec <*> pure p

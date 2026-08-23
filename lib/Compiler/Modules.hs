@@ -172,8 +172,8 @@ mangleExprForImport (Parser.Var{varName, varPos}) prefix _ _ =
     Parser.Var{varName = varName, varPos = varPos}
 mangleExprForImport (Parser.StructAccess{structAccessStruct, structAccessField, structAccessPos}) prefix funcs structs =
     Parser.StructAccess{structAccessStruct = mangleExprForImport structAccessStruct prefix funcs structs, structAccessField = mangleExprForImport structAccessField prefix funcs structs, structAccessPos = structAccessPos}
-mangleExprForImport (Parser.Let{letName, letValue, letPos}) prefix funcs structs =
-    Parser.Let{letName = letName, letValue = mangleExprForImport letValue prefix funcs structs, letPos = letPos}
+mangleExprForImport (Parser.Let{letName, letType, letValue, letPos}) prefix funcs structs =
+    Parser.Let{letName = letName, letType = letType, letValue = mangleExprForImport letValue prefix funcs structs, letPos = letPos}
 mangleExprForImport (Parser.If{ifCond, ifThen, ifElse, ifPos}) prefix funcs structs =
     Parser.If{ifCond = mangleExprForImport ifCond prefix funcs structs, ifThen = mangleExprForImport ifThen prefix funcs structs, ifElse = mangleExprForImport ifElse prefix funcs structs, ifPos = ifPos}
 mangleExprForImport (Parser.DoBlock{doBlockExprs, doBlockPos}) prefix funcs structs =

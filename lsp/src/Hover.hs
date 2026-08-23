@@ -68,7 +68,6 @@ getExprPosition (AST.TupleLit{tupleLitPos}) = tupleLitPos
 getExprPosition (AST.TupleAccess{tupleAccessPos}) = tupleAccessPos
 getExprPosition _ = AST.Position (-1, -1)
 
-
 getHoverForExpr :: AST.Expr -> Text -> Maybe Hover
 getHoverForExpr expr _sourceText =
     let mkHover content = Just $ Hover (LSPTypes.InL (MarkupContent MarkupKind_Markdown content)) Nothing
@@ -84,7 +83,10 @@ getHoverForExpr expr _sourceText =
                  in mkHover $ T.pack $ "**Function:** `" ++ name ++ " :: " ++ typeStr ++ "`"
             AST.StructLit{structLitName} -> mkHover $ T.pack $ "**Struct literal:** `" ++ structLitName ++ "`"
             AST.Struct{name} -> mkHover $ T.pack $ "**Struct definition:** `" ++ name ++ "`"
-            AST.Let{letName} -> mkHover $ T.pack $ "**Let binding:** `" ++ letName ++ "`"
+            AST.Let{letName, letType} ->
+                case letType of
+                    Just t -> mkHover $ T.pack $ "**Let binding:** `" ++ letName ++ " : " ++ show t ++ "`"
+                    Nothing -> mkHover $ T.pack $ "**Let binding:** `" ++ letName ++ "`"
             AST.BoolLit{boolValue} -> mkHover $ T.pack $ "**Boolean literal:** `" ++ show boolValue ++ "` (Bool)"
             AST.IntLit{intValue} -> mkHover $ T.pack $ "**Integer literal:** `" ++ show intValue ++ "` (Int)"
             AST.StringLit{stringValue} -> mkHover $ T.pack $ "**String literal:** `" ++ show stringValue ++ "` (String)"

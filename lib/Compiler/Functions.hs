@@ -693,7 +693,7 @@ compileVar compileExpr' (Parser.Var{varName, varPos}) expectedType = do
 compileVar _ _ _ = internalError "compileVar: expected Var"
 
 compileLet :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
-compileLet compileExpr' (Parser.Let{letName, letValue}) _ = do
+compileLet compileExpr' (Parser.Let{letName, letType, letValue}) _ = do
     curCon <- gets (\s -> case contextStack s of (c : _) -> c; [] -> "__outside")
     case letValue of
         Parser.Function{def, dec} -> do
@@ -710,9 +710,19 @@ compileLet compileExpr' (Parser.Let{letName, letValue}) _ = do
             let fun = Parser.Function{def = renamedDef, dec = renamedDec, functionPos = Parser.anyPosition}
             compileExpr' fun Parser.Any
         _ -> do
-            typeOf letValue >>= \v -> modify (\s -> s{lets = Let{name = letName, vtype = v, context = curCon} : lets s})
-            value' <- typeOf letValue >>= compileExpr' letValue
-            return $ value' ++ [LStore letName]
+            valType <- typeOf letValue
+            case letType of
+                Just explicitType -> do
+                    compatible <- typeCompatible valType explicitType
+                    unless compatible $
+                        cerror ("Type mismatch in let binding `" ++ letName ++ "`: expected " ++ show explicitType ++ ", got " ++ show valType) (extractPosition letValue)
+                    modify (\s -> s{lets = Let{name = letName, vtype = explicitType, context = curCon} : lets s})
+                    value' <- compileExpr' letValue explicitType
+                    return $ value' ++ [LStore letName]
+                Nothing -> do
+                    modify (\s -> s{lets = Let{name = letName, vtype = valType, context = curCon} : lets s})
+                    value' <- compileExpr' letValue valType
+                    return $ value' ++ [LStore letName]
 compileLet _ _ _ = internalError "compileLet: expected Let"
 
 compileParenApply :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]

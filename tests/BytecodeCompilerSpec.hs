@@ -642,3 +642,71 @@ spec = do
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
                 Right _ -> return ()
+    describe "Let binding type checking and parameter styles" $ do
+        it "Should compile typed let variable when type matches" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let main : IO<Unit> = do
+                    let x: Int = 42
+                    unsafePrint x
+                end
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should error when let variable type mismatches" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let main : IO<Unit> = do
+                    let x: Int = "hello"
+                    unsafePrint x
+                end
+                |]
+            case result of
+                Left errors -> do
+                    let errorMessages = map BytecodeCompiler.errorMessage errors
+                    any ("Type mismatch in let binding" `isInfixOf`) errorMessages
+                        `shouldBe` True
+                Right _ -> expectationFailure "Expected let type mismatch error"
+        it "Should compile curried typed function" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let add (a: Int) (b: Int): Int = a + b
+                let main : IO<Unit> = unsafePrint (add 1, 2)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should compile untyped function with let" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let square x = x * x
+                let main : IO<Unit> = unsafePrint (square 4)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should compile comma-separated parenthesized parameters" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let add (a: Int, b: Int): Int = a + b
+                let main : IO<Unit> = unsafePrint (add 1, 2)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()
+        it "Should compile function with arrow return type" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                let inc (x: Int) -> Int = x + 1
+                let main : IO<Unit> = unsafePrint (inc 5)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got: " ++ show errors
+                Right _ -> return ()

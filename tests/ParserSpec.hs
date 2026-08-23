@@ -358,7 +358,7 @@ spec = do
         it "Should parse tuple type" $
             parseProgram "let x : (Int, String) = (1, \"test\")" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int" [], StructT "String" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (Tuple [StructT "Int" [], StructT "String" []]), letValue = TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse tuple access" $
             parseProgram "tuple.0" parserCompilerFlags
                 `shouldBe` Right
@@ -370,7 +370,7 @@ spec = do
         it "Should parse nested tuple types" $
             parseProgram "let x : ((Int, String), Bool) = ((1, \"test\"), True)" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = TupleLit{tupleLitExprs = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [Tuple [StructT "Int" [], StructT "String" []], StructT "Bool" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (Tuple [Tuple [StructT "Int" [], StructT "String" []], StructT "Bool" []]), letValue = TupleLit{tupleLitExprs = [TupleLit{tupleLitExprs = [IntLit{intValue = 1, intPos = anyPosition}, StringLit{stringValue = "test", stringPos = anyPosition}], tupleLitPos = anyPosition}, BoolLit{boolValue = True, boolPos = anyPosition}], tupleLitPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse single-element parentheses as parenthesized expression, not tuple" $
             parseProgram "(x)" parserCompilerFlags
                 `shouldBe` Right
@@ -387,31 +387,60 @@ spec = do
         it "Should parse single parenthesized type as the type itself" $
             parseProgram "let x : (Int) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (StructT "Int" []), letValue = IntLit{intValue = 1, intPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse function type with one argument" $
             parseProgram "let x : (Int -> String) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" []] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (AST.Fn [StructT "Int" []] (StructT "String" [])), letValue = StringLit{stringValue = "test", stringPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse thunk function type (zero arguments)" $
             parseProgram "let x : (-> String) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (AST.Fn [] (StructT "String" [])), letValue = StringLit{stringValue = "test", stringPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse function type with multiple arguments" $
             parseProgram "let x : (Int -> String -> Bool) = True" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = BoolLit{boolValue = True, boolPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" [], StructT "String" []] (StructT "Bool" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (AST.Fn [StructT "Int" [], StructT "String" []] (StructT "Bool" [])), letValue = BoolLit{boolValue = True, boolPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse nested parenthesized type" $
             parseProgram "let x : ((Int)) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (StructT "Int" []), letValue = IntLit{intValue = 1, intPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse nested function type" $
             parseProgram "let x : ((Int -> String)) = \"test\"" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = StringLit{stringValue = "test", stringPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [AST.Fn [StructT "Int" []] (StructT "String" [])], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (AST.Fn [StructT "Int" []] (StructT "String" [])), letValue = StringLit{stringValue = "test", stringPos = anyPosition}, letPos = anyPosition}] Nothing)
         it "Should parse single-element tuple type with trailing comma" $
             parseProgram "let x : (Int,) = 1" parserCompilerFlags
                 `shouldBe` Right
-                    (Program [Function{def = [FuncDef{name = "x", args = [], body = IntLit{intValue = 1, intPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "x", types = [Tuple [StructT "Int" []]], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+                    (Program [Let{letName = "x", letType = Just (Tuple [StructT "Int" []]), letValue = IntLit{intValue = 1, intPos = anyPosition}, letPos = anyPosition}] Nothing)
+    describe "Let syntax improvements" $ do
+        it "Should parse untyped curried function" $
+            parseProgram "let add a b = a + b" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}, addPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "add", types = [Any, Any, Any], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+        it "Should parse typed curried function" $
+            parseProgram "let add (a: Int) (b: Int): Int = a + b" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}, addPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "add", types = [StructT "Int" [], StructT "Int" [], StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+        it "Should parse comma-separated parenthesized parameters" $
+            parseProgram "let add (a: Int, b: Int): Int = a + b" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "add", args = [Var{varName = "a", varPos = anyPosition}, Var{varName = "b", varPos = anyPosition}], body = Add{addLhs = Var{varName = "a", varPos = anyPosition}, addRhs = Var{varName = "b", varPos = anyPosition}, addPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "add", types = [StructT "Int" [], StructT "Int" [], StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+        it "Should parse mixed typed and untyped parameters" $
+            parseProgram "let greet (p: Person) prefix = prefix" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "greet", args = [Var{varName = "p", varPos = anyPosition}, Var{varName = "prefix", varPos = anyPosition}], body = Var{varName = "prefix", varPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "greet", types = [StructT "Person" [], Any, Any], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+        it "Should parse function with arrow return type" $
+            parseProgram "let inc (x: Int) -> Int = x + 1" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Function{def = [FuncDef{name = "inc", args = [Var{varName = "x", varPos = anyPosition}], body = Add{addLhs = Var{varName = "x", varPos = anyPosition}, addRhs = IntLit{intValue = 1, intPos = anyPosition}, addPos = anyPosition}, funcDefPos = anyPosition}], dec = FuncDec{name = "inc", types = [StructT "Int" [], StructT "Int" []], generics = [], funcDecPos = anyPosition}, functionPos = anyPosition}] Nothing)
+        it "Should parse typed variable binding" $
+            parseProgram "let x: Int = 42" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Let{letName = "x", letType = Just (StructT "Int" []), letValue = IntLit{intValue = 42, intPos = anyPosition}, letPos = anyPosition}] Nothing)
+        it "Should parse untyped variable binding" $
+            parseProgram "let x = 42" parserCompilerFlags
+                `shouldBe` Right
+                    (Program [Let{letName = "x", letType = Nothing, letValue = IntLit{intValue = 42, intPos = anyPosition}, letPos = anyPosition}] Nothing)
     describe "Type variants" $ do
         it "Should parse basic type with single constructor" $ do
             let result = parseProgram "type Person = Teacher(subject: String)" parserCompilerFlags

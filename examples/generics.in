@@ -10,7 +10,7 @@ trait Number
 impl Number for Int
 impl Number for Float
 
-let kiss<T: Animal> (a: T b: T) : IO = do
+let kiss<T: Animal> (a: T b: T) : IO<Unit> = do
     println a.name
 end
 

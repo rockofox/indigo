@@ -474,18 +474,6 @@ parenApply = do
     end <- getOffset
     return $ ParenApply paren args (Position (start, end))
 
-letExpr :: Parser Expr
-letExpr = do
-    start <- getOffset
-    keyword "let"
-    name <- identifier <|> gravis <?> "variable name"
-    symbol "="
-    value <- recover expr <?> "variable value"
-    end <- getOffset
-    state <- get
-    put state{validLets = name : validLets state}
-    return $ Let name value (Position (start, end))
-
 whenExprParser :: Parser Expr
 whenExprParser = do
     start <- getOffset
@@ -548,26 +536,49 @@ generic = do
             validType
         return $ GenericExpr name constraint
 
-combinedFunc :: Parser Expr
-combinedFunc = do
+letBinding :: Parser Expr
+letBinding = do
     start <- getOffset
     keyword "let"
-    name <- identifier <|> gravis <?> "function name"
-    generics <- (fromMaybe [] <$> optional generic) <?> "function generics"
-    (args, argTypes) <- (parens argsAndTypes <|> argsAndTypes) <?> "function arguments"
-    returnType <- optional (symbol ":" >> validType <?> "return type") <?> "return type"
+    name <- identifier <|> gravis <?> "binding or function name"
+    generics <- fromMaybe [] <$> optional generic <?> "function generics"
+    paramGroups <- many paramGroup <?> "parameters"
+    let params = concat paramGroups
+    returnType <- optional ((symbol ":" <|> symbol "->") >> validType <?> "return type") <?> "return type"
     symbol "="
-    body <- recover expr <?> "function body"
+    body <- recover expr <?> "body"
     end <- getOffset
-    return $ Function [FuncDef name args body anyPosition] (FuncDec name (argTypes ++ [fromMaybe Any returnType]) generics anyPosition) (Position (start, end))
+    let pos = Position (start, end)
+    let isFunction = name == "main" || not (null params) || not (null generics)
+    if isFunction
+        then do
+            let (args, argTypes) = unzip params
+            let finalArgTypes = map (fromMaybe Any) argTypes
+            let finalReturnType = fromMaybe Any returnType
+            let dec = FuncDec name (finalArgTypes ++ [finalReturnType]) generics anyPosition
+            let def = FuncDef name args body anyPosition
+            return $ Function [def] dec pos
+        else do
+            state <- get
+            put state{validLets = name : validLets state}
+            return $ Let name returnType body pos
   where
-    argsAndTypes =
-        unzip <$> many do
-            arg <- defArg <?> "function argument"
-            symbol ":"
-            argType <- validType <?> "function argument type"
-            optional $ symbol "->"
-            return (arg, argType) <?> "function arguments"
+    paramGroup :: Parser [(Expr, Maybe Type)]
+    paramGroup = try parenthesizedParams <|> singleUntypedParam
+
+    parenthesizedParams :: Parser [(Expr, Maybe Type)]
+    parenthesizedParams = parens (sepBy1 singleParamInParens (optional (symbol ",")))
+
+    singleParamInParens :: Parser (Expr, Maybe Type)
+    singleParamInParens = do
+        arg <- defArg <?> "parameter pattern"
+        hasType <- optional (symbol ":" >> validType <?> "parameter type")
+        return (arg, hasType)
+
+    singleUntypedParam :: Parser [(Expr, Maybe Type)]
+    singleUntypedParam = do
+        arg <- defArg <?> "parameter pattern"
+        return [(arg, Nothing)]
 
 import_ :: Parser Expr
 import_ = do
@@ -756,7 +767,7 @@ parseFreeUnsafe t = case parseProgram t initCompilerFlags{needsMain = False} of
     replacePositionWithAnyPosition (DoubleLit v _) = DoubleLit v anyPosition
     replacePositionWithAnyPosition (CharLit v _) = CharLit v anyPosition
     replacePositionWithAnyPosition (If a b c _) = If (replacePositionWithAnyPosition a) (replacePositionWithAnyPosition b) (replacePositionWithAnyPosition c) anyPosition
-    replacePositionWithAnyPosition (Let n v _) = Let n (replacePositionWithAnyPosition v) anyPosition
+    replacePositionWithAnyPosition (Let n t v _) = Let n t (replacePositionWithAnyPosition v) anyPosition
     replacePositionWithAnyPosition fd@FuncDef{body} = fd{body = replacePositionWithAnyPosition body}
     replacePositionWithAnyPosition (FuncDec n types g _) = FuncDec n types g anyPosition
     replacePositionWithAnyPosition (Function d dec _) = Function (map replacePositionWithAnyPosition d) (replacePositionWithAnyPosition dec) anyPosition
@@ -1064,8 +1075,7 @@ term =
         , impl
         , Parser.trait
         , doBlock
-        , try letExpr
-        , try combinedFunc
+        , try letBinding
         , try funcDef
         , try funcDec
         , try lambda
