@@ -191,9 +191,13 @@ binary name f = InfixL $ do
 tupleOrStructAccess :: Expr -> Expr -> Position -> Expr
 tupleOrStructAccess a b pos = case b of
     IntLit{intValue} -> TupleAccess a (fromIntegral intValue) pos
-    FloatLit{floatValue}
-        | fromInteger (round floatValue) == floatValue ->
-            TupleAccess a (round floatValue) pos
+    FloatLit{floatValue} ->
+        let s = show floatValue
+            (intPart, rest) = break (== '.') s
+            fracDigits = drop 1 rest
+            firstIdx = read intPart :: Int
+            restIndices = map (\c -> read [c] :: Int) fracDigits
+         in foldl (\acc idx -> TupleAccess acc idx pos) (TupleAccess a firstIdx pos) restIndices
     _ -> StructAccess a b pos
 
 binaryAny :: (String -> Expr -> Expr -> Position -> Expr) -> Operator Parser Expr
@@ -451,6 +455,7 @@ funcDef = do
     name <- identifier <|> gravis <?> "function name"
     args <- many defArg <?> "function arguments"
     symbol "="
+    optional newline'
     body <- expr <?> "function body"
     end <- getOffset
     return $ FuncDef name args body (Position (start, end))
@@ -546,6 +551,7 @@ letBinding = do
     let params = concat paramGroups
     returnType <- optional ((symbol ":" <|> symbol "->") >> validType <?> "return type") <?> "return type"
     symbol "="
+    optional newline'
     body <- recover expr <?> "body"
     end <- getOffset
     let pos = Position (start, end)

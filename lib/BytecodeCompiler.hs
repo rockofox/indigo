@@ -92,7 +92,7 @@ dispatch (Parser.Sub{subLhs = x, subRhs = y}) t = compileBinOp compileExpr "-" x
 dispatch (Parser.Mul{mulLhs = x, mulRhs = y}) t = compileBinOp compileExpr "*" x y t Mul
 dispatch (Parser.Div{divLhs = x, divRhs = y}) t = compileBinOp compileExpr "/" x y t Div
 dispatch (Parser.Modulo{moduloLhs = x, moduloRhs = y}) t = compileBinOp compileExpr "%" x y t Mod
-dispatch (Parser.Power{powerBase = x, powerExponent = y}) t = compileBinOp compileExpr "^" x y t Pow
+dispatch (Parser.Power{powerBase = x, powerExponent = y}) t = compileBinOp compileExpr "**" x y t Pow
 dispatch (Parser.Gt{gtLhs = x, gtRhs = y}) t = compileBinOp compileExpr ">" x y t Gt
 dispatch (Parser.Lt{ltLhs = x, ltRhs = y}) t = compileBinOp compileExpr "<" x y t Lt
 dispatch (Parser.Ge{geLhs = x, geRhs = y}) t = compileBinOpSeq compileExpr ">=" x y t [Lt, Not]

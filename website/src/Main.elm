@@ -84,8 +84,8 @@ let fib (1: Int) : Int = 1
 let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
 
 let main : IO<Unit> = do
-    println ("fib 10 = " ++ fib 10 as String)
-    println ("fib 12 = " ++ fib 12 as String)
+    println ("fib 10 = " ++ (fib 10) as String)
+    println ("fib 12 = " ++ (fib 12) as String)
 end"""
       )
     , ( "Pattern Matching"
@@ -101,7 +101,7 @@ let describe (n: Int) : String =
 
 let main : IO<Unit> = do
     let nums = [10, 20, 30, 40]
-    println ("Sum of list: " ++ sumList nums as String)
+    println ("Sum of list: " ++ (sumList nums) as String)
     println ("Description of 1: " ++ describe 1)
 end"""
       )
@@ -137,7 +137,7 @@ let main : IO<Unit> = do
     println ("(5 * 2) + 10 = " ++ result as String)
 
     let items = [1, 2, 3, 4]
-    println ("Sum of [1, 2, 3, 4] = " ++ sum items as String)
+    println ("Sum of [1, 2, 3, 4] = " ++ (sum items) as String)
 end"""
       )
     , ( "99 Bottles"

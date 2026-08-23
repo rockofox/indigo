@@ -66,10 +66,13 @@ compilePatternMatch compileExpr' (Parser.ListPattern{listPatternExprs}) nextLabe
             let listThing = [Comment "List thing", Dup, Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ l' ++ [Eq, Jf nextLabel]
             return $ lengthCheck ++ concat xToY ++ listThing
         _ -> do
-            elements' <- mapM (\p -> compilePatternMatch compileExpr' p nextLabel expectedType) listPatternExprs
-            let paramsWithIndex = zip elements' [0 ..]
+            let headPatterns = init listPatternExprs
+            let tailPattern = last listPatternExprs
+            headElements' <- mapM (\p -> compilePatternMatch compileExpr' p nextLabel expectedType) headPatterns
+            tailElement' <- compilePatternMatch compileExpr' tailPattern nextLabel expectedType
+            let paramsWithIndex = zip headElements' [0 ..]
             let xToY = map (\(x, index) -> [Dup, Push $ DInt index, Index] ++ x) paramsWithIndex
-            let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ last elements'
+            let rest = [Push $ DInt (length listPatternExprs - 1), Push DNone, Slice] ++ tailElement'
             return $ lengthCheck ++ concat xToY ++ rest
 compilePatternMatch compileExpr' (Parser.TupleLit{tupleLitExprs}) nextLabel expectedType = do
     if null tupleLitExprs
@@ -123,7 +126,7 @@ compilePatternMatch compileExpr' (Parser.StructLit{structLitName, structLitField
             )
             fields''
     return $ [Dup, Push $ DTypeQuery structLitName, TypeEq, Jf nextLabel] ++ fieldMappings ++ ([Pop | null fieldChecks]) ++ fieldChecks
-compilePatternMatch _ (Parser.Placeholder _) _ _ = return []
+compilePatternMatch _ (Parser.Placeholder _) _ _ = return [Pop]
 compilePatternMatch compileExpr' x nextLabel expectedType = do
     x' <- compileExpr' x expectedType
     return $ x' ++ [Eq, Jf nextLabel]

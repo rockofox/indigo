@@ -1261,6 +1261,49 @@ spec = do
                 end
             |]
                 `shouldReturn` "1\n2\n3\n4\n"
+        it "Should work with chained nested tuple access" $ do
+            compileAndRun
+                [r|
+                let main : IO<Unit> = do
+                    let nested = ((1, 2), (3, 4))
+                    println nested.0.1
+                    println nested.1.0
+                end
+            |]
+                `shouldReturn` "2\n3\n"
+        it "Should parse and run let with body on newline" $ do
+            compileAndRun
+                [r|
+                let describe (n: Int) : String =
+                    when n of
+                        0 -> "zero"
+                        1 -> "one"
+                        _ -> "many"
+                    end
+                let main : IO<Unit> = do
+                    println (describe 1)
+                end
+            |]
+                `shouldReturn` "one\n"
+        it "Should compute power operator **" $ do
+            compileAndRun
+                [r|
+                let main : IO<Unit> = do
+                    println 2 ** 8
+                end
+            |]
+                `shouldReturn` "256\n"
+        it "Should pattern match with wildcard in tail" $ do
+            compileAndRun
+                [r|
+                let head ((x:xs): [Any]) : Any = x
+                let tail ((_:xs): [Any]) : [Any] = xs
+                let main : IO<Unit> = do
+                    println (head [10, 20, 30])
+                    println (tail [10, 20, 30])
+                end
+            |]
+                `shouldReturn` "10\n[20,30]\n"
         it "Should work with tuples in function parameters" $ do
             compileAndRun
                 [r|

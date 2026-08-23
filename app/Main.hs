@@ -14,7 +14,7 @@ import Control.Monad.State (StateT (runStateT), evalStateT)
 import Control.Monad.State.Lazy
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as B
-import Data.List (intercalate, isPrefixOf)
+import Data.List (elemIndex, intercalate, isPrefixOf)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isNothing)
 import Data.Monoid
@@ -266,7 +266,19 @@ main = do
 
     let mainPc = BytecodeCompiler.locateLabel program "main"
     let breakpoints' = fromMaybe [] $ breakpoints >>= \x -> return $ map read $ words x :: Maybe [Int]
-    potentiallyTimedOperation "VM" showTime $ VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = mainPc, VM.breakpoints = breakpoints', VM.callStack = [VM.StackFrame{returnAddress = mainPc, locals = []}]}
+    let sepIndex = elemIndex (VM.Label "__sep") program
+    let hasTopLevelLets = VM.Jmp "main" `elem` program
+    let startPc =
+            if hasTopLevelLets
+                then case sepIndex of
+                    Just sepPc -> sepPc + 1
+                    Nothing -> 0
+                else mainPc
+    let initialCallStack =
+            if hasTopLevelLets
+                then [VM.StackFrame{returnAddress = 0, locals = []}, VM.StackFrame{returnAddress = mainPc, locals = []}]
+                else [VM.StackFrame{returnAddress = mainPc, locals = []}]
+    potentiallyTimedOperation "VM" showTime $ VM.runVM $ (VM.initVM (V.fromList program)){VM.pc = startPc, VM.breakpoints = breakpoints', VM.callStack = initialCallStack}
 
 -- REPL
 data REPLState = REPLState

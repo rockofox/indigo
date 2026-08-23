@@ -541,7 +541,7 @@ viewOverview onLoadCode =
         , p [] [ text "Programs are written in .in files. A typical entry point is a main binding that returns IO." ]
         , viewCodeBlock """type Person = (name: String, age: Int)
 
-let greet (p: Person): IO = println "Hello " ++ p.name
+let greet (p: Person): IO<Unit> = println ("Hello " ++ p.name)
 
 let main: IO<Unit> = do
     let person = Person { name: "Lily", age: 22 }
@@ -595,7 +595,7 @@ let fib (n: Int) : Int = (fib ((n) - 1)) + (fib ((n) - 2))
 let main = println (fib 10)""" onLoadCode True "indigo"
         , h3 [] [ text "do blocks" ]
         , p [] [ text "Group sequential statements with do ... end. This is how multi-step IO and scoped lets are written." ]
-        , viewCodeBlock """let println (s: String): IO = do
+        , viewCodeBlock """let println (s: String): IO<Unit> = do
     print s
     print "\\n"
 end
@@ -1125,9 +1125,9 @@ let main: IO<Unit> = do
     # println (5 as EvenNumber)  # fails at compile time
 end""" onLoadCode True "indigo"
         , h3 [] [ text "String and collection constraints" ]
-        , p [] [ text "Use len(...) for strings and size(...) for collections in predicates." ]
-        , viewCodeBlock """type Username = (name: String) satisfies ((len name) > 0 && (len name) <= 20)
-type Tag = (label: String) satisfies ((len label) > 0)
+        , p [] [ text "Use length(...) for strings and collections in predicates." ]
+        , viewCodeBlock """type Username = (name: String) satisfies ((length name) > 0 && (length name) <= 20)
+type Tag = (label: String) satisfies ((length label) > 0)
 
 let main: IO<Unit> = do
     let u = Username{name: "alice"}

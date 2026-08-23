@@ -12,6 +12,7 @@ import Compiler.State
 import Control.Exception (SomeException, try)
 import Control.Monad.State (MonadIO (liftIO), gets, modify)
 import Data.Bifunctor (second)
+import Data.Char (toLower)
 import Data.Either (lefts, rights)
 import Data.List (intercalate, isSuffixOf, nub, partition)
 import Data.Map qualified as Map
@@ -108,7 +109,8 @@ compileImport compileExpr' (Parser.Import{objects = o, from = from, as = as, qua
                         Nothing -> do
                             sourcePath' <- gets sourcePath
                             let sourceDir = takeDirectory sourcePath'
-                            let fileNamesToTry = [from ++ ".in", "std/" ++ from ++ ".in"]
+                            let lowerFrom = map toLower from
+                            let fileNamesToTry = [from ++ ".in", "std/" ++ from ++ ".in", lowerFrom ++ ".in", "std/" ++ lowerFrom ++ ".in"]
                             fileResult <- liftIO $ findFirstModuleFile fileNamesToTry sourceDir
                             case fileResult of
                                 Nothing -> do
