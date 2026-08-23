@@ -23,33 +23,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: website/package-lock.json
-          
-      - name: Cache build output
-        uses: actions/cache@v4
-        with:
-          path: website/dist
-          key: website-build-${{ runner.os }}-${{ hashFiles('website/**') }}
-          restore-keys: |
-            website-build-${{ runner.os }}-
-          
+
       - name: Install dependencies
         working-directory: ./website
         run: npm ci
-        
+
       - name: Build
         working-directory: ./website
         run: npm run build
-        
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
-        
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

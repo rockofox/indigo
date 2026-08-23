@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 module AST where
 
 import Data.Binary qualified
@@ -128,7 +130,7 @@ traverseExprChildren f (Impl t ta ft ms p) = Impl t ta ft <$> traverse f ms <*> 
 traverseExprChildren f (ParenApply e as p) = ParenApply <$> f e <*> traverse f as <*> pure p
 traverseExprChildren f (Lambda as body p) = Lambda as <$> f body <*> pure p
 traverseExprChildren f (StructLit n fields typeArgs p) =
-    StructLit n <$> traverse (\(k, v) -> fmap (\v' -> (k, v')) (f v)) fields <*> pure typeArgs <*> pure p
+    StructLit n <$> traverse (\(k, v) -> (k,) <$> f v) fields <*> pure typeArgs <*> pure p
 traverseExprChildren f (Struct n fs ref refSrc is isV gs p) =
     Struct n fs <$> traverse f ref <*> pure refSrc <*> pure is <*> pure isV <*> pure gs <*> pure p
 traverseExprChildren f (Trait n ms gs reqProps ref refSrc p) =

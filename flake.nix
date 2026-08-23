@@ -9,7 +9,6 @@
     pre-commit-hooks = {
       url = "github:cachix/pre-commit-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
       inputs.flake-compat.follows = "flake-compat";
     };
     ghc-wasm-meta.url = "https://gitlab.haskell.org/ghc/ghc-wasm-meta/-/archive/master/ghc-wasm-meta-master.tar.gz";
@@ -23,9 +22,11 @@
         haskellPackages = su.haskellPackages.override {
           overrides = hse: _hsu: {
             "indigo" = hse.callCabal2nix "indigo" ./. { };
+            "indigo-lsp" = hse.callCabal2nix "indigo-lsp" ./lsp { };
           };
         };
         indigo = se.haskell.lib.justStaticExecutables se.haskellPackages.indigo;
+        indigo-lsp = se.haskell.lib.justStaticExecutables (se.haskell.lib.dontCheck se.haskellPackages.indigo-lsp);
       };
     in
     flake-utils.lib.eachDefaultSystem (system:
@@ -163,10 +164,11 @@
         packages = {
           default = pkgs.indigo;
           indigo = pkgs.indigo;
+          indigo-lsp = pkgs.indigo-lsp;
           build-wasm-reactor = build-wasm-reactor;
         };
         devShell = pkgs.haskellPackages.shellFor {
-          packages = p: [ p."indigo" ];
+          packages = p: [ p."indigo" p."indigo-lsp" ];
           buildInputs = [
             pkgs.haskellPackages.haskell-language-server
             pkgs.haskellPackages.cabal-install
