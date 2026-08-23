@@ -419,7 +419,7 @@ viewHero _ =
             [ div [ class "hero-left" ]
                 [ h1 [ class "hero-title" ] [ text "Indigo" ]
                 , p [ class "subtitle" ]
-                    [ text "An experimental functional programming language inspired by F# and Haskell. Compiles to bytecode for a custom VM, with WebAssembly support for running in the browser."
+                    [ text "An experimental functional programming language inspired by F# and Haskell. Compiles to native x86-64 binaries, bytecode for a custom VM, and WebAssembly for the browser."
                     ]
                 , div [ class "hero-buttons" ]
                     [ a [ href "/playground", class "btn btn-primary" ] [ text "Try in Playground" ]
@@ -470,7 +470,7 @@ viewFeatures =
                 , featureCard "Product and sum types" "Records and variants are declared with the type keyword, with pattern matching for destructuring."
                 , featureCard "Traits and implementations" "Define shared method signatures with trait and implement them for concrete types with impl."
                 , featureCard "Pattern matching" "Destructure constructors, lists, and tuples in multi-clause functions and when blocks."
-                , featureCard "Bytecode VM and WASM" "Compiles to bytecode for a stack-based VM, with a WebAssembly reactor for browser execution."
+                , featureCard "Native compilation and VM" "Compiles directly to native x86-64 binaries, bytecode for a custom stack VM, or WebAssembly for the browser."
                 , featureCard "Language server and tools" "Includes a full Language Server Protocol (LSP) implementation, REPL, and code formatter."
                 ]
             ]
@@ -488,7 +488,8 @@ viewQuickstart =
                     [ text """git clone https://github.com/rockofox/indigo.git
 cd indigo
 cabal run indigo -- examples/fib.in
-cabal run indigo   # Start REPL"""
+cabal run indigo -- -c examples/fib.in -o fib   # Compile native binary
+cabal run indigo                               # Start REPL"""
                     ]
                 ]
             ]
