@@ -619,7 +619,7 @@ xterm-display {
     min-height: calc(100vh - 160px);
 }
 
-.docs-sidebar {
+.docs-sidebar-desktop {
     width: 240px;
     flex-shrink: 0;
     position: sticky;
@@ -629,14 +629,11 @@ xterm-display {
     height: fit-content;
     padding-right: 1rem;
     border-right: 1px solid var(--border);
-}
-
-.docs-sidebar-summary {
-    display: none;
-}
-
-.docs-sidebar-content {
     display: block;
+}
+
+.docs-sidebar-mobile {
+    display: none;
 }
 
 .docs-search-container {
@@ -976,8 +973,13 @@ xterm-display {
         padding: 1.25rem 1rem;
     }
 
+    .docs-sidebar-desktop {
+        display: none;
+    }
+
     /* Mobile Collapsible Docs Sidebar */
-    .docs-sidebar {
+    .docs-sidebar-mobile {
+        display: block;
         width: 100%;
         position: static;
         max-height: none;
@@ -1006,7 +1008,7 @@ xterm-display {
         display: none;
     }
 
-    .docs-sidebar[open] .docs-sidebar-summary {
+    .docs-sidebar-mobile[open] .docs-sidebar-summary {
         border-bottom: 1px solid var(--border);
         border-bottom-left-radius: 0;
         border-bottom-right-radius: 0;

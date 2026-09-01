@@ -1,7 +1,7 @@
 module Documentation exposing (Topic(..), topicPath, topicTitle, topicCategory, view)
 
 
-import Html exposing (Html, a, button, div, h2, h3, input, node, p, pre, code, section, span, text)
+import Html exposing (Html, a, aside, button, div, h2, h3, input, node, p, pre, code, section, span, text)
 import Html.Attributes exposing (attribute, class, href, id)
 import Html.Events exposing (onClick, onInput)
 
@@ -307,7 +307,8 @@ nextTopic topic =
 view : Topic -> String -> (String -> msg) -> (String -> msg) -> Html msg
 view currentTopic searchQuery onSearchChange onLoadCode =
     div [ class "docs-container" ]
-        [ viewSidebar currentTopic searchQuery onSearchChange
+        [ viewSidebarDesktop currentTopic searchQuery onSearchChange
+        , viewSidebarMobile currentTopic searchQuery onSearchChange
         , div [ class "docs-content" ]
             [ div [ class "docs-header-bar" ]
                 [ div [ class "docs-breadcrumb" ]
@@ -389,8 +390,8 @@ view currentTopic searchQuery onSearchChange onLoadCode =
         ]
 
 
-viewSidebar : Topic -> String -> (String -> msg) -> Html msg
-viewSidebar currentTopic searchQuery onSearchChange =
+viewSidebarContent : Topic -> String -> (String -> msg) -> List (Html msg)
+viewSidebarContent currentTopic searchQuery onSearchChange =
     let
         matches query topic =
             if String.isEmpty (String.trim query) then
@@ -424,7 +425,34 @@ viewSidebar currentTopic searchQuery onSearchChange =
                         (List.map (\topic -> sidebarLink currentTopic topic (topicTitle topic)) filtered)
                     ]
     in
-    node "details" [ class "docs-sidebar" ]
+    [ div [ class "docs-search-container" ]
+        [ input
+            [ class "docs-search-input"
+            , attribute "placeholder" "Search topics..."
+            , attribute "value" searchQuery
+            , onInput onSearchChange
+            ]
+            []
+        ]
+    , renderGroup "Getting Started" [ Overview ]
+    , renderGroup "Basics" [ FunctionsAndBindings, Comments, LiteralsAndTypes, OperatorsAndPipelines, ControlFlow, LambdasAndPartials ]
+    , renderGroup "Data & Types" [ Lists, Tuples, ProductTypes, SumTypes, TraitsAndImpls, Generics, CastingAndValueTypes, RefinementTypes ]
+    , renderGroup "Expressions" [ PatternMatching, IOAndSequencing ]
+    , renderGroup "Modules & Interop" [ ImportsAndModules, FFI ]
+    , renderGroup "Standard Library" [ Prelude, StdFile ]
+    , renderGroup "Tooling" [ ProjectConfig ]
+    ]
+
+
+viewSidebarDesktop : Topic -> String -> (String -> msg) -> Html msg
+viewSidebarDesktop currentTopic searchQuery onSearchChange =
+    aside [ class "docs-sidebar docs-sidebar-desktop" ]
+        (viewSidebarContent currentTopic searchQuery onSearchChange)
+
+
+viewSidebarMobile : Topic -> String -> (String -> msg) -> Html msg
+viewSidebarMobile currentTopic searchQuery onSearchChange =
+    node "details" [ class "docs-sidebar docs-sidebar-mobile" ]
         [ node "summary" [ class "docs-sidebar-summary" ]
             [ div [ class "docs-summary-left" ]
                 [ span [ class "docs-summary-badge" ] [ text (topicCategory currentTopic) ]
@@ -433,23 +461,7 @@ viewSidebar currentTopic searchQuery onSearchChange =
             , span [ class "docs-summary-toggle" ] [ text "Browse Topics ▾" ]
             ]
         , div [ class "docs-sidebar-content" ]
-            [ div [ class "docs-search-container" ]
-                [ input
-                    [ class "docs-search-input"
-                    , attribute "placeholder" "Search topics..."
-                    , attribute "value" searchQuery
-                    , onInput onSearchChange
-                    ]
-                    []
-                ]
-            , renderGroup "Getting Started" [ Overview ]
-            , renderGroup "Basics" [ FunctionsAndBindings, Comments, LiteralsAndTypes, OperatorsAndPipelines, ControlFlow, LambdasAndPartials ]
-            , renderGroup "Data & Types" [ Lists, Tuples, ProductTypes, SumTypes, TraitsAndImpls, Generics, CastingAndValueTypes, RefinementTypes ]
-            , renderGroup "Expressions" [ PatternMatching, IOAndSequencing ]
-            , renderGroup "Modules & Interop" [ ImportsAndModules, FFI ]
-            , renderGroup "Standard Library" [ Prelude, StdFile ]
-            , renderGroup "Tooling" [ ProjectConfig ]
-            ]
+            (viewSidebarContent currentTopic searchQuery onSearchChange)
         ]
 
 
