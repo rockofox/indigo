@@ -12,8 +12,8 @@ import Compiler.State
     , internalError
     , structNameFromType
     )
-import Compiler.Structs (substituteGenerics, validateTypeParameters)
-import Compiler.Types (typeToString)
+import Compiler.Structs (validateTypeParameters)
+import Compiler.Types (substituteGenerics, typeToString)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.State (gets, modify)
 import Data.Bifunctor (second)

@@ -1688,3 +1688,52 @@ end
                     )
                 ]
                 `shouldReturn` "12 is the total\n"
+    describe "Value types" $ do
+        it "Unwraps value type automatically when printing cast value" $ do
+            compileAndRun
+                [r|
+                value type Positive = (x: Int) satisfies (x > 0)
+
+                let main : IO<Unit> = println (5 as Positive)
+            |]
+                `shouldReturn` "5\n"
+        it "Unwraps value type without refinement" $ do
+            compileAndRun
+                [r|
+                value type Meters = (n: Float)
+
+                let main : IO<Unit> = println (3.0 as Meters)
+            |]
+                `shouldReturn` "3.0\n"
+        it "Unwraps value type constructed via struct literal" $ do
+            compileAndRun
+                [r|
+                value type Positive = (x: Int) satisfies (x > 0)
+
+                let main : IO<Unit> = println (Positive{x: 42})
+            |]
+                `shouldReturn` "42\n"
+        it "Allows field access on unwrapped value type" $ do
+            compileAndRun
+                [r|
+                value type Positive = (x: Int) satisfies (x > 0)
+
+                let main : IO<Unit> = do
+                    let p = 10 as Positive
+                    println p.x
+                end
+            |]
+                `shouldReturn` "10\n"
+        it "Passes value type to function expecting underlying type" $ do
+            compileAndRun
+                [r|
+                value type Positive = (x: Int) satisfies (x > 0)
+
+                let double (n: Int) : Int = n * 2
+
+                let main : IO<Unit> = do
+                    let p = 7 as Positive
+                    println (double p)
+                end
+            |]
+                `shouldReturn` "14\n"

@@ -135,6 +135,11 @@ spec = do
         it "Can define value struct with is clause" $ do
             parseProgram "value type PositiveInt = (num: Int) is Printable" parserCompilerFlags
                 `shouldBe` Right (Program [Struct{name = "PositiveInt", fields = [("num", StructT "Int" [])], refinement = Nothing, refinementSrc = "", is = [StructT "Printable" []], isValueStruct = True, generics = [], structPos = anyPosition}] Nothing)
+        it "Fails to parse value struct with multiple fields" $ do
+            let result = parseProgram "value type Invalid = (a: Int, b: Int)" parserCompilerFlags
+            case result of
+                Left _ -> return ()
+                Right _ -> expectationFailure "Should fail to parse value struct with multiple fields"
     describe "Traits" $ do
         it "Should parse generic trait" $ do
             parseProgram "trait Monad<T> = do\n  bind :: Self -> (Any -> Self) -> Self\nend" parserCompilerFlags

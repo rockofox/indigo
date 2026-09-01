@@ -6,12 +6,9 @@ import Compiler.State
     ( Compiler
     , CompilerError
     , CompilerState (..)
-    , Function (..)
-    , Let (..)
-    , allocId
     , internalError
     )
-import Control.Monad.State (MonadIO (liftIO), evalStateT, get, gets)
+import Control.Monad.State (MonadIO (liftIO), evalStateT, get)
 import Data.List (elemIndex, find, nub)
 import Data.Map qualified as Map
 import Data.Maybe (maybeToList)
@@ -26,48 +23,51 @@ locateLabelIn program label =
         Just x -> x
         Nothing -> internalError $ "Label not found: " ++ label
 
-transformRefinementExpr :: Parser.Expr -> [(String, Parser.Type)] -> Parser.Expr
-transformRefinementExpr expr fieldNames = case expr of
+transformRefinementExpr :: Bool -> Parser.Expr -> [(String, Parser.Type)] -> Parser.Expr
+transformRefinementExpr isValStruct expr fieldNames = case expr of
     Parser.Var{varName}
         | varName `elem` map fst fieldNames ->
-            Parser.StructAccess
-                (Parser.Var "it" zeroPosition)
-                (Parser.Var varName zeroPosition)
-                anyPosition
+            if isValStruct
+                then Parser.Var "it" zeroPosition
+                else
+                    Parser.StructAccess
+                        (Parser.Var "it" zeroPosition)
+                        (Parser.Var varName zeroPosition)
+                        anyPosition
     Parser.Add{addLhs = x, addRhs = y, addPos} ->
-        Parser.Add (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) addPos
+        Parser.Add (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) addPos
     Parser.Sub{subLhs = x, subRhs = y, subPos} ->
-        Parser.Sub (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) subPos
+        Parser.Sub (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) subPos
     Parser.Mul{mulLhs = x, mulRhs = y, mulPos} ->
-        Parser.Mul (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) mulPos
+        Parser.Mul (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) mulPos
     Parser.Div{divLhs = x, divRhs = y, divPos} ->
-        Parser.Div (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) divPos
+        Parser.Div (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) divPos
     Parser.Modulo{moduloLhs = x, moduloRhs = y, moduloPos} ->
-        Parser.Modulo (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) moduloPos
+        Parser.Modulo (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) moduloPos
     Parser.Gt{gtLhs = x, gtRhs = y, gtPos} ->
-        Parser.Gt (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) gtPos
+        Parser.Gt (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) gtPos
     Parser.Lt{ltLhs = x, ltRhs = y, ltPos} ->
-        Parser.Lt (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) ltPos
+        Parser.Lt (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) ltPos
     Parser.Ge{geLhs = x, geRhs = y, gePos} ->
-        Parser.Ge (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) gePos
+        Parser.Ge (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) gePos
     Parser.Le{leLhs = x, leRhs = y, lePos} ->
-        Parser.Le (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) lePos
+        Parser.Le (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) lePos
     Parser.Eq{eqLhs = x, eqRhs = y, eqPos} ->
-        Parser.Eq (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) eqPos
+        Parser.Eq (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) eqPos
     Parser.Neq{neqLhs = x, neqRhs = y, neqPos} ->
-        Parser.Neq (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) neqPos
+        Parser.Neq (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) neqPos
     Parser.And{andLhs = x, andRhs = y, andPos} ->
-        Parser.And (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) andPos
+        Parser.And (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) andPos
     Parser.Or{orLhs = x, orRhs = y, orPos} ->
-        Parser.Or (transformRefinementExpr x fieldNames) (transformRefinementExpr y fieldNames) orPos
+        Parser.Or (transformRefinementExpr isValStruct x fieldNames) (transformRefinementExpr isValStruct y fieldNames) orPos
     Parser.Not{notExpr = x, notPos} ->
-        Parser.Not (transformRefinementExpr x fieldNames) notPos
+        Parser.Not (transformRefinementExpr isValStruct x fieldNames) notPos
     Parser.UnaryMinus{unaryMinusExpr = x, unaryMinusPos} ->
-        Parser.UnaryMinus (transformRefinementExpr x fieldNames) unaryMinusPos
+        Parser.UnaryMinus (transformRefinementExpr isValStruct x fieldNames) unaryMinusPos
     Parser.StructAccess{structAccessStruct = s, structAccessField = f, structAccessPos} ->
-        Parser.StructAccess (transformRefinementExpr s fieldNames) f structAccessPos
+        Parser.StructAccess (transformRefinementExpr isValStruct s fieldNames) f structAccessPos
     Parser.FuncCall{funcName, funcArgs, funcPos} ->
-        Parser.FuncCall funcName (map (`transformRefinementExpr` fieldNames) funcArgs) funcPos
+        Parser.FuncCall funcName (map (\arg -> transformRefinementExpr isValStruct arg fieldNames) funcArgs) funcPos
     _ -> expr
 
 extractVariables :: Parser.Expr -> [String]
@@ -144,7 +144,10 @@ runRefinement compileProgram' refinement value = do
     let fieldNames = case structDef of
             Just (Parser.Struct{fields}) -> fields
             _ -> []
-    let transformedRefinement = if null fieldNames then refinement else transformRefinementExpr refinement fieldNames
+    let isValStruct = case structDef of
+            Just Parser.Struct{isValueStruct = ivs} -> ivs
+            _ -> False
+    let transformedRefinement = if null fieldNames then refinement else transformRefinementExpr isValStruct refinement fieldNames
     let currentProgramExprs = Parser.exprs currentState.program
     let allFunctionDefs = extractFunctions currentProgramExprs
     let functionDefs = filter (\case Parser.FuncDec{name} -> name /= "main"; Parser.FuncDef{name} -> name /= "main"; Parser.Function{dec = Parser.FuncDec{name}} -> name /= "main"; _ -> True) allFunctionDefs

@@ -662,8 +662,7 @@ typeDef = do
 valueType :: Parser Expr
 valueType = do
     start <- getOffset
-    _ <- lexeme $ try (string "value" *> notFollowedBy alphaNumChar)
-    keyword "type"
+    _ <- try (lexeme (string "value" *> notFollowedBy alphaNumChar) *> keyword "type")
     name <- extra <?> "value type name"
     generics <- fromMaybe [] <$> optional generic <?> "value type generics"
     symbol "="
@@ -1075,7 +1074,7 @@ term =
             end <- getOffset
             return $ BoolLit False (Position (start, end))
         , external
-        , try valueType
+        , valueType
         , try typeDef
         , import_
         , impl

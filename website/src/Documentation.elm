@@ -1082,18 +1082,18 @@ viewCastingAndValueTypes onLoadCode =
     println (42 as String)
 end""" onLoadCode True "indigo"
         , h3 [] [ text "Value types" ]
-        , p [] [ text "A value type wraps exactly one field and can be constructed via cast as well as the usual struct form." ]
+        , p [] [ text "A value type wraps exactly one field and is unwrapped automatically. It can be constructed via cast as well as the usual struct form." ]
         , viewCodeBlock """value type Meters = (n: Float)
 
 let main = do
     let m = 3.0 as Meters
-    println m.n
+    println m
 end""" onLoadCode True "indigo"
         , h3 [] [ text "With refinements" ]
-        , p [] [ text "Casts into refined value types are checked (SMT on native builds; limited checks in WASM). See Refinement Types for unchecked." ]
+        , p [] [ text "Casts into refined value types are checked at compile time." ]
         , viewCodeBlock """value type Positive = (x: Int) satisfies (x > 0)
 
-let main = println ((5 as Positive).x)""" onLoadCode True "indigo"
+let main = println (5 as Positive)""" onLoadCode True "indigo"
         ]
 
 

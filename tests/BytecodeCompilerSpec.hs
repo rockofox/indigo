@@ -149,6 +149,27 @@ spec = do
             case result of
                 Left errors -> not (null errors) `shouldBe` True
                 Right _ -> expectationFailure "Should fail with type mismatch error"
+        it "Fails when accessing invalid field on value struct" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                value type PositiveInt = (num: Int)
+                let main : IO<Unit> = do
+                    let p = 42 as PositiveInt
+                    unsafePrint p.invalidField
+                end
+            |]
+            case result of
+                Left errors -> not (null errors) `shouldBe` True
+                Right _ -> expectationFailure "Should fail with unknown field error"
+        it "Compiles value struct cast as direct unwrapped value without PackMap" $ do
+            instrs <-
+                compile
+                    [r|
+                value type PositiveInt = (num: Int)
+                let main : IO<Unit> = unsafePrint (42 as PositiveInt)
+            |]
+            any (\case PackMap _ -> True; _ -> False) instrs `shouldBe` False
     describe "Struct field type checking" $ do
         it "Fails when field type doesn't match" $ do
             result <-

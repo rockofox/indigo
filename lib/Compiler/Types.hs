@@ -23,6 +23,16 @@ typeToString (Parser.StructT x typeArgs)
     | otherwise = x ++ "<" ++ intercalate ", " (map typeToString typeArgs) ++ ">"
 typeToString x = show x
 
+substituteGenerics :: Parser.Type -> [(String, Parser.Type)] -> Parser.Type
+substituteGenerics (Parser.StructT name typeArgs) substitutions =
+    case lookup name substitutions of
+        Just subType -> subType
+        Nothing -> Parser.StructT name (map (`substituteGenerics` substitutions) typeArgs)
+substituteGenerics (Parser.List t) substitutions = Parser.List (substituteGenerics t substitutions)
+substituteGenerics (Parser.Tuple ts) substitutions = Parser.Tuple (map (`substituteGenerics` substitutions) ts)
+substituteGenerics (Parser.Fn args ret) substitutions = Parser.Fn (map (`substituteGenerics` substitutions) args) (substituteGenerics ret substitutions)
+substituteGenerics t _ = t
+
 typeToData :: Parser.Type -> VM.Data
 typeToData (Parser.StructT "Int" []) = VM.DInt 0
 typeToData (Parser.StructT "Float" []) = VM.DFloat 0
@@ -84,7 +94,11 @@ typeCompatible x y = do
                     valueStructOk <- case yValueStruct of
                         Just (Parser.Struct{fields = [(_, fieldType)]}) -> typeCompatible x fieldType
                         _ -> return False
-                    return $ valueStructOk || y' `elem` impls
+                    let xValueStruct = find (\case Parser.Struct{name, isValueStruct = True} -> name == x'; _ -> False) structDecs'
+                    xValueStructOk <- case xValueStruct of
+                        Just (Parser.Struct{fields = [(_, fieldType)]}) -> typeCompatible fieldType y
+                        _ -> return False
+                    return $ valueStructOk || xValueStructOk || y' `elem` impls
 
 compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> Compiler Bool
 compareTypes' (Parser.List Parser.Any) (Parser.List _) _ = return True
@@ -186,7 +200,21 @@ typeOf (Parser.Modulo x _ _) = typeOf x
 typeOf (Parser.Target{}) = internalError "Cannot infer type of target"
 typeOf (Parser.ListConcat x _ _) = typeOf x
 typeOf (Parser.ListPattern _ _) = return $ Parser.List Parser.Any
-typeOf (Parser.StructAccess _ s _) = typeOf s
+typeOf (Parser.StructAccess structExpr fieldExpr _) = do
+    structType <- typeOf structExpr
+    case structType of
+        Parser.StructT structName typeArgs -> do
+            structDecs' <- gets CS.structDecs
+            case find (\case Parser.Struct{name = n} -> n == structName; _ -> False) structDecs' of
+                Just Parser.Struct{fields, generics} -> case fieldExpr of
+                    Parser.Var{varName = field} -> case lookup field fields of
+                        Just t -> do
+                            let substitutions = zip (map (\(Parser.GenericExpr n _) -> n) generics) typeArgs
+                            return $ substituteGenerics t substitutions
+                        Nothing -> return Parser.Unknown
+                    _ -> return Parser.Unknown
+                _ -> return Parser.Unknown
+        _ -> return Parser.Unknown
 typeOf (Parser.Pipeline a (Parser.Var b pos) _) = typeOf (Parser.FuncCall b [a] pos)
 typeOf (Parser.Pipeline a (Parser.FuncCall f args pos) _) = typeOf (Parser.FuncCall f (a : args) pos)
 typeOf (Parser.Pipeline _ (Parser.Lambda _ body _) _) = typeOf body
