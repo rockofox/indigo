@@ -127,6 +127,7 @@ test-suite spec
         OptimizerSpec
         IndigoConfigSpec
         X86CompilerSpec
+        VMSpec
 
     default-language:   Haskell2010
     default-extensions:

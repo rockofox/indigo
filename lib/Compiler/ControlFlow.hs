@@ -190,8 +190,8 @@ compileWhen compileExpr' expr branches else_ expectedType = do
             )
             branchPairs
     elseInstrs <- case else_ of
-        Just elseExpr -> compileExpr' elseExpr expectedType
-        Nothing -> return []
+        Just elseExpr -> (Pop :) <$> compileExpr' elseExpr expectedType
+        Nothing -> return [Pop]
     let branchCode =
             concat $
                 zipWith
@@ -219,7 +219,8 @@ compilePipeline compileExpr' a rhs expectedType = case rhs of
         compileExpr' (Parser.FuncCall{funcName = f, funcArgs = a : funcArgs, funcPos = anyPosition}) expectedType
     Parser.Then{thenLhs = b, thenRhs = c} ->
         compileThen compileExpr' (Parser.Pipeline{pipelineLhs = a, pipelineRhs = b, pipelinePos = anyPosition}) c expectedType
-    _ -> internalError $ "compilePipeline: unexpected rhs " ++ show rhs
+    _ ->
+        compileExpr' (Parser.ParenApply{parenApplyExpr = rhs, parenApplyArgs = [a], parenApplyPos = anyPosition}) expectedType
 
 compileThen :: CompileExpr -> Parser.Expr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileThen compileExpr' a b expectedType = do

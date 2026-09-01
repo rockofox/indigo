@@ -13,6 +13,7 @@ import Compiler.State
     )
 import Control.Monad.State (MonadIO (liftIO), evalStateT, get, gets)
 import Data.List (elemIndex, find, nub)
+import Data.Map qualified as Map
 import Data.Maybe (maybeToList)
 import Data.Vector qualified as V
 import VM (Data (..), Instruction (..), StackFrame (..), VM (..), initVM, runVMVM)
@@ -195,6 +196,7 @@ runRefinement compileProgram' refinement value = do
                         , modules = currentState.modules
                         , currentModule = Nothing
                         , currentSourceFile = currentState.currentSourceFile
+                        , nextFunctionLabels = Map.empty
                         }
             compiled <- liftIO $ evalStateT (compileProgram' prog) freshState
             case compiled of

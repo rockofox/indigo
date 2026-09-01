@@ -67,6 +67,7 @@ data CompilerState a = CompilerState
     , modules :: Map.Map String (Parser.Program, FilePath)
     , currentModule :: Maybe String
     , currentSourceFile :: String
+    , nextFunctionLabels :: Map.Map String String
     }
 
 currentContext :: CompilerState a -> String
@@ -82,8 +83,8 @@ pushContext ctx s = s{contextStack = ctx : contextStack s}
 
 popContext :: CompilerState a -> CompilerState a
 popContext s = case contextStack s of
-    [] -> s -- already at outermost; nothing to pop
-    [_] -> s -- don't pop the last entry (maintain non-empty invariant)
+    [] -> s
+    [_] -> s
     (_ : rest) -> s{contextStack = rest}
 
 initCompilerState :: Parser.Program -> CompilerState a
@@ -107,6 +108,7 @@ initCompilerState prog =
         , modules = Map.empty
         , currentModule = Nothing
         , currentSourceFile = "no file"
+        , nextFunctionLabels = Map.empty
         }
 
 initCompilerStateWithFile :: Parser.Program -> String -> CompilerState a
@@ -130,6 +132,7 @@ initCompilerStateWithFile prog sourcePath' =
         , modules = Map.empty
         , currentModule = Nothing
         , currentSourceFile = sourcePath'
+        , nextFunctionLabels = Map.empty
         }
 
 initCompilerStateWithModules :: Map.Map String (Parser.Program, FilePath) -> Parser.Program -> String -> CompilerState a
@@ -153,6 +156,7 @@ initCompilerStateWithModules modules' prog sourcePath' =
         , modules = modules'
         , currentModule = Parser.moduleName prog
         , currentSourceFile = sourcePath'
+        , nextFunctionLabels = Map.empty
         }
 
 cerror :: String -> AST.Position -> Compiler ()
@@ -187,4 +191,30 @@ concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
 
 internalFunctions :: [String]
-internalFunctions = ["unsafePrint", "unsafeGetLine", "unsafeGetChar", "unsafeRandom", "abs", "root", "sqrt"]
+internalFunctions =
+    [ "unsafePrint"
+    , "unsafeGetLine"
+    , "unsafeGetChar"
+    , "unsafeRandom"
+    , "unsafeOpenFile"
+    , "unsafeReadFile"
+    , "unsafeWriteFile"
+    , "unsafeCloseFile"
+    , "unsafeSocket"
+    , "unsafeBind"
+    , "unsafeListen"
+    , "unsafeAccept"
+    , "unsafeConnect"
+    , "unsafeSend"
+    , "unsafeRecv"
+    , "unsafeCloseSocket"
+    , "unsafeListAdd"
+    , "unsafeListLength"
+    , "unsafeListSlice"
+    , "unsafeKeys"
+    , "unsafeUpdate"
+    , "unsafeExit"
+    , "abs"
+    , "root"
+    , "sqrt"
+    ]

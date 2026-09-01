@@ -37,6 +37,7 @@ import Data.Bifunctor (second)
 import Data.List (find, inits, intercalate, isInfixOf)
 import Data.List.Split qualified
 import Data.Map qualified
+import Data.Map qualified as Map
 import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe)
 import Data.String (fromString)
 import Data.Text (isPrefixOf, splitOn)
@@ -252,6 +253,18 @@ compileUnsafeBuiltin compileExpr' funcName funcArgs expectedType =
             ("unsafeGetLine", []) -> Just $ return [Builtin GetLine]
             ("unsafeGetChar", []) -> Just $ return [Builtin GetChar]
             ("unsafeRandom", []) -> Just $ return [Builtin Random]
+            ("unsafeOpenFile", [path, mode]) -> Just $ bin path mode [Builtin OpenFile]
+            ("unsafeReadFile", [fd, size]) -> Just $ bin fd size [Builtin ReadFile]
+            ("unsafeWriteFile", [fd, content]) -> Just $ bin fd content [Builtin WriteFile]
+            ("unsafeCloseFile", [fd]) -> Just $ un fd [Builtin CloseFile]
+            ("unsafeSocket", [d, t, p]) -> Just $ tri d t p [Builtin Socket]
+            ("unsafeBind", [fd, host, port]) -> Just $ tri fd host port [Builtin Bind]
+            ("unsafeListen", [fd, backlog]) -> Just $ bin fd backlog [Builtin Listen]
+            ("unsafeAccept", [fd]) -> Just $ un fd [Builtin Accept]
+            ("unsafeConnect", [fd, host, port]) -> Just $ tri fd host port [Builtin Connect]
+            ("unsafeSend", [fd, dat, flags]) -> Just $ tri fd dat flags [Builtin Send]
+            ("unsafeRecv", [fd, size, flags]) -> Just $ tri fd size flags [Builtin Recv]
+            ("unsafeCloseSocket", [fd]) -> Just $ un fd [Builtin CloseSocket]
             ("unsafeListAdd", [y, x]) -> Just $ do
                 x' <- compileExpr' x expectedType
                 y' <- compileExpr' y expectedType
@@ -573,21 +586,36 @@ compileFuncDec _ _ _ = internalError "compileFuncDec: expected FuncDec"
 compileFuncDef :: CompileExpr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) expectedType = do
     curCon <- gets (\s -> case contextStack s of (c : _) -> c; [] -> "__outside")
-    funs <- gets functions
     let previousContext = curCon
     let previousContextPath = if curCon == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" curCon
     let name =
             if "." `isInfixOf` origName || curCon == "__outside"
                 then origName
                 else curCon ++ "@" ++ origName
-    let origName' = name
-    let isFirst = isNothing $ find (\x -> x.baseName == origName') funs
+    let isFailablePattern (Parser.Var{}) = False
+        isFailablePattern (Parser.Placeholder _) = False
+        isFailablePattern _ = True
+
+    let hasFailablePatterns = any isFailablePattern args
+    existingNextLabel <- gets (Map.lookup name . nextFunctionLabels)
+    let isFirst = isNothing existingNextLabel
     let newContextPath = if curCon == "__outside" then [origName] else previousContextPath ++ [origName]
     modify (\s -> s{contextStack = newContextPath})
     funcDecs' <- gets funcDecs
     when (isNothing $ find (\case Parser.FuncDec{name = name'} -> name' == name; _ -> False) funcDecs') $ modify (\s -> s{funcDecs = Parser.FuncDec name (replicate (length args + 1) expectedType) [] anyPosition : funcDecs s})
 
-    funame' <- if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
+    funame' <- case existingNextLabel of
+        Just lbl -> return lbl
+        Nothing -> if name /= "main" then ((name ++ "#") ++) . show <$> allocId else return "main"
+
+    nextFunName <-
+        if hasFailablePatterns || not isFirst
+            then do
+                nextFunId <- allocId
+                let nextName = name ++ "#" ++ show nextFunId
+                modify (\s -> s{nextFunctionLabels = Map.insert name nextName (nextFunctionLabels s)})
+                return nextName
+            else return ""
     modify (\s -> s{functions = Function name funame' [] [] curCon : functions s})
     modify (\s -> s{funcDefs = fd : funcDefs s})
     funcDecs'' <- gets funcDecs
@@ -634,17 +662,15 @@ compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) exp
             unless compatible $
                 cerror ("Return type mismatch in function `" ++ origName ++ "`: expected " ++ show expectedReturnType ++ ", got " ++ show bodyType) (extractPosition body)
 
-    nextFunId <- gets lastLabel
-    args' <- concatMapM (`compileParameter` (name, funame', nextFunId)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))
+    args' <- concatMapM (`compileParameter` (name, funame', nextFunName)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))
     let function = Label funame' : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ [Ret | name /= "main"]
     modify (\s -> s{functions = Function name funame' function funcDec.types curCon : functions s})
     let restoredContextPath = if previousContext == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" previousContext
     modify (\s -> s{contextStack = restoredContextPath})
-    return [] -- Function definitions get appended at the last stage of compilation
+    return []
   where
-    compileParameter :: Parser.Expr -> (String, String, Int) -> Compiler [Instruction]
-    compileParameter pat (funcName, _currentFuname, nextFunId) = do
-        let nextFunName = funcName ++ "#" ++ show nextFunId
+    compileParameter :: Parser.Expr -> (String, String, String) -> Compiler [Instruction]
+    compileParameter pat (_funcName, _currentFuname, nextFunName) = do
         compilePatternMatch compileExpr' pat nextFunName expectedType
 compileFuncDef _ _ _ = internalError "compileFuncDef: expected FuncDef"
 

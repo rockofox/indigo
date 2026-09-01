@@ -216,6 +216,8 @@ compareTypes Self Self = True
 compareTypes Self (StructT _ _) = True
 compareTypes (StructT _ _) Self = True
 compareTypes (StructT x xArgs) (StructT y yArgs) = x == y && length xArgs == length yArgs && all (uncurry compareTypes) (zip xArgs yArgs)
+compareTypes (List Any) (List _) = True
+compareTypes (List _) (List Any) = True
 compareTypes (List x) (List y) = compareTypes x y
 compareTypes (Tuple xs) (Tuple ys) = length xs == length ys && all (uncurry compareTypes) (zip xs ys)
 compareTypes Unknown _ = True
@@ -270,6 +272,9 @@ typeOf (Target{}) = error "Cannot infer type of target"
 typeOf (ListConcat x _ _) = typeOf x
 typeOf (ListPattern _ _) = List Any
 typeOf (StructAccess _ s _) = typeOf s
+typeOf (Pipeline a (Var b pos) _) = typeOf (FuncCall b [a] pos)
+typeOf (Pipeline a (FuncCall f args pos) _) = typeOf (FuncCall f (a : args) pos)
+typeOf (Pipeline _ (Lambda _ body _) _) = typeOf body
 typeOf (Pipeline _ b _) = typeOf b
 typeOf (Lambda{}) = Fn [] Any
 typeOf (Cast _ (Var to _) _) = StructT to []

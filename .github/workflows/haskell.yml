@@ -72,16 +72,18 @@ jobs:
         continue-on-error: true
 
       - name: Build and test Indigo compiler
-        run: nix build .#indigo
+        run: nix build .#indigo --out-link result-indigo
 
       - name: Build Indigo LSP
-        run: nix build .#indigo-lsp
+        run: nix build .#indigo-lsp --out-link result-lsp
 
       - name: Prepare native release package
         run: |
           mkdir -p indigo-latest
-          cp result/bin/indigo indigo-latest/
+          cp result-indigo/bin/indigo indigo-latest/
           chmod +x indigo-latest/indigo
+          cp result-lsp/bin/indigo-lsp indigo-latest/
+          chmod +x indigo-latest/indigo-lsp
           cp -r share/std indigo-latest/
           zip -r indigo-release-latest.zip indigo-latest
 

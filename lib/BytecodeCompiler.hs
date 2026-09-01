@@ -48,7 +48,7 @@ import Data.Text qualified as T
 import ErrorRenderer (SourceError (..), parseErrorBundleToSourceErrors, renderErrors)
 import Parser (parseProgram)
 import Parser qualified
-import VM (Data (..), Instruction (..))
+import VM (Action (..), Data (..), Instruction (..))
 
 compileBinOpSeq
     :: CompileExpr
@@ -149,6 +149,17 @@ dispatch (Parser.ExternDec{}) _ = return []
 dispatch (Parser.ListPattern{}) _ = return []
 dispatch x _ = error $ show x ++ " is not implemented"
 
+getFallbacks :: Compiler [Instruction]
+getFallbacks = do
+    nextLabels <- gets nextFunctionLabels
+    return
+        [ instr
+        | (name, lbl) <- Map.toList nextLabels
+        , name /= "main"
+        , not (null lbl)
+        , instr <- [Label lbl, Push $ DString $ "\npanic: No matching pattern in function " ++ name ++ "\n", Builtin Print, Exit]
+        ]
+
 compileProgram :: CompileProgram
 compileProgram (Parser.Program expr _) = do
     prelude <- liftIO preludeExpr
@@ -157,22 +168,25 @@ compileProgram (Parser.Program expr _) = do
     createVirtualFunctions
     funcs <- gets functions
     let functions' = concatMap function (reverse funcs)
+    fallbacks <- getFallbacks
     errors' <- gets errors
     let hasTopLevelLets = any (\case Parser.Let{} -> True; _ -> False) expr
     if null errors'
         then
-            return $ Left $ prelude' ++ freePart ++ ([Jmp "main" | hasTopLevelLets]) ++ functions' ++ [Push $ DInt 0, Exit]
+            return $ Left $ prelude' ++ freePart ++ ([Jmp "main" | hasTopLevelLets]) ++ functions' ++ [Push $ DInt 0, Exit] ++ fallbacks
         else
             return $ Right errors'
 
 compileProgramBare :: CompileProgram
 compileProgramBare (Parser.Program expr _) = do
     freePart <- concatMapM (`compileExpr` Parser.Any) expr
+    createVirtualFunctions
     functions' <- gets functions >>= \x -> return $ concatMap function (reverse x)
+    fallbacks <- getFallbacks
     errors' <- gets errors
     if null errors'
         then
-            return $ Left $ functions' ++ freePart ++ [Push $ DInt 0, Exit]
+            return $ Left $ functions' ++ freePart ++ [Push $ DInt 0, Exit] ++ fallbacks
         else
             return $ Right errors'
 

@@ -10,7 +10,6 @@ module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, r
 
 import Control.Exception (IOException, try)
 import Control.Monad
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS hiding (local)
 import Control.Monad.State.Lazy
 import Data.Binary (Binary, decode, encode)
@@ -19,12 +18,12 @@ import Data.Function ((&))
 import Data.List.Split (chunksOf)
 import Data.Map qualified
 import Data.Map qualified as Data
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe)
 import Data.Text qualified
 import Data.Vector qualified as V
-import Debug.Trace
 import GHC.Generics (Generic)
 import System.Random (randomIO)
+import Text.Read (readMaybe)
 #ifdef FFI
 import Ffi
 import Foreign.LibFFI.Base (newStorableStructArgRet, sizeAndAlignmentOfCType)
@@ -37,7 +36,7 @@ import Data.Binary qualified (get, put)
 import Data.ByteString.Char8 (pack, unpack)
 import Data.Char (chr, ord)
 import Data.List qualified
-import Data.Map ((!), (!?))
+import Data.Map ((!?))
 import Data.Map.Strict qualified as Map
 import Foreign.C (CDouble, newCString)
 import Foreign.C.String (castCharToCChar)
@@ -49,126 +48,70 @@ import GHC.IO (unsafePerformIO)
 import GHC.IORef
 import GHC.Int qualified as Ghc.Int
 #ifdef POSIX_IO
-import Network.Socket (AddrInfo (..), AddrInfoFlag (..), Family (..), ProtocolNumber (..), SockAddr, Socket, SocketType (..), addrAddress, defaultHints, getAddrInfo)
+import Network.Socket (AddrInfo (..), AddrInfoFlag (..), Family (..), ProtocolNumber, Socket, SocketType (..), addrAddress, defaultHints, getAddrInfo)
 import Network.Socket qualified as NS
 import Network.Socket.ByteString qualified as NSB
 import System.IO qualified as SIO
-import Unsafe.Coerce (unsafeCoerce)
 #endif
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import Util (showSanitized)
 
 data Instruction
-    = -- | Push a value onto the stack
-      Push Data
-    | -- | Pop two values off the stack, add them, and push the result
-      Add
-    | -- | Pop two values off the stack, subtract them, and push the result
-      Sub
-    | -- | Pop two values off the stack, multiply them, and push the result
-      Mul
-    | -- | Pop two values off the stack, divide them, and push the result
-      Div
-    | -- | Pop two values off the stack, divide them, and push the remainder
-      Mod
-    | -- | Pop two values off the stack, calculate the power, and push the result
-      Pow
-    | -- | Absolute value
-      Abs
-    | -- | Pop two values off the stack, push T if the first is greater than the second, F otherwise
-      Gt
-    | -- | Pop two values off the stack, push T if the first is less than the second, F otherwise
-      Lt
-    | -- | Pop a value off the stack, push T if it is falsy, F otherwise
-      Not
-    | -- | Pop two values off the stack, push T if they are equal, F otherwise
-      Eq
-    | -- | Pop two values off the stack, push T if they are not equal, F otherwise
-      Neq
-    | -- | Pop two values off the stack and push T if they are both truthy, F otherwise
-      And
-    | -- | Pop two values off the stack and push T if either is truthy, F otherwise
-      Or
-    | -- | Perform a builtin action
-      Builtin Action -- TODO: Seperate IO?
-    | -- | Jump to a label
-      Jmp String
-    | -- | Jump to a label if the top value of the stack is truthy
-      Jt String
-    | -- | Jump to a label if the top value of the stack is falsy
-      Jf String
-    | -- | Call a function
-      Call String
-    | -- | Call a function and keep locals
-      CallLocal String
-    | -- | Call a function from the stack
-      CallS
-    | -- | Push a partial function onto the stack
-      PushPf String Int
-    | -- | Pop a value off the stack
-      Pop
-    | -- | Duplicate the top value of the stack
-      Dup
-    | -- | Swap the top two values of the stack
-      Swp
-    | -- | A label
-      Label String
-    | -- | Pop a value off the stack and store it in the data memory
-      Store Int
-    | -- | Push a value from the data memory onto the stack
-      Load Int
-    | -- | Return to the caller
-      Ret
-    | -- | Pop a value off the stack and store it in a named register with the given name
-      LStore String
-    | -- | Push the value of a named register with the given name onto the stack
-      LLoad String
-    | -- | Store the stack
-      StoreSideStack
-    | -- | Load the stack
-      LoadSideStack
-    | -- Clear the sidestack
-      ClearSideStack
-    | -- | Pop n values off the stack, concatenate them, and push the result
-      Concat Int
-    | -- | Pop a value off the stack, add it to the list at the top of the stack, and push the result
-      ListAdd Int
-    | -- | Construct a list from the top n values of the stack
-      PackList Int
-    | -- | Push the contents of the list at the top of the stack onto the stack
-      UnpackList
-    | -- | Index into a list
-      Index
-    | -- | Slice a list
-      Slice
-    | -- | Length of a list
-      Length
-    | -- | Casts a to the type of b
-      Cast
-    | -- | Get the type of a
-      TypeOf
-    | -- | Comment, does nothing
-      Comment String
-    | -- | Similar to a comment, adds additional information for tools like compilers to use during compilation and other stages
-      Meta String
-    | -- | Access a field
-      Access String
-    | -- | Access a field TODO: Remove!
-      AAccess
-    | -- | Get all keys of a struct
-      Keys
-    | -- | Update a field
-      Update
-    | -- | Pack map
-      PackMap Int
-    | -- | Compares two types and pushes T if they are compatible, F otherwise
-      TypeEq
-    | -- | mov
-      Mov Int Data
-    | -- | Call FFI
-      CallFFI String String Int
-    | -- | Exit the program
-      Exit
+    = Push Data
+    | Add
+    | Sub
+    | Mul
+    | Div
+    | Mod
+    | Pow
+    | Abs
+    | Gt
+    | Lt
+    | Not
+    | Eq
+    | Neq
+    | And
+    | Or
+    | Builtin Action
+    | Jmp String
+    | Jt String
+    | Jf String
+    | Call String
+    | CallLocal String
+    | CallS
+    | PushPf String Int
+    | Pop
+    | Dup
+    | Swp
+    | Label String
+    | Store Int
+    | Load Int
+    | Ret
+    | LStore String
+    | LLoad String
+    | StoreSideStack
+    | LoadSideStack
+    | ClearSideStack
+    | Concat Int
+    | ListAdd Int
+    | PackList Int
+    | UnpackList
+    | Index
+    | Slice
+    | Length
+    | Cast
+    | TypeOf
+    | Comment String
+    | Meta String
+    | Access String
+    | AAccess
+    | Keys
+    | Update
+    | PackMap Int
+    | TypeEq
+    | Mov Int Data
+    | CallFFI String String Int
+    | Exit
     deriving (Show, Eq, Generic)
 
 #ifdef POSIX_IO
@@ -212,28 +155,50 @@ instance Show Data where
     show (DChar x) = show x
     show (DFuncRef x args _) = "<" ++ x ++ "(" ++ show args ++ ")>"
     show (DMap x) =
-        if isNothing $ x !? "__name" then show x else showStruct (DMap x)
-      where
-        showStruct :: Data -> String
-        showStruct (DMap m) =
-            case m ! "__name" of
-                DString name -> name ++ "{" ++ Data.List.intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) $ Data.Map.toList $ Data.Map.delete "__name" m) ++ "}"
-                _ -> error "showStruct: __name is not a String"
-        showStruct _ = error "showStruct called with non-map"
+        case x !? "__name" of
+            Just (DString name) ->
+                name ++ "{" ++ Data.List.intercalate ", " (map (\(k, v) -> k ++ ": " ++ show v) $ Data.Map.toList $ Data.Map.delete "__name" x) ++ "}"
+            _ -> show x
     show (DTypeQuery x) = "TypeQuery " ++ x
     show (DCPtr x) = "CPtr " ++ show x
     show (DDouble x) = show x
 
 instance Ord Data where
-    (DInt x) `compare` (DInt y) = x `compare` y
-    (DFloat x) `compare` (DFloat y) = x `compare` y
-    (DString x) `compare` (DString y) = x `compare` y
-    (DBool x) `compare` (DBool y) = x `compare` y
-    (DList x) `compare` (DList y) = x `compare` y
-    (DString x) `compare` (DList y) = x `compare` show y
-    (DList x) `compare` (DString y) = show x `compare` y
-    (DChar x) `compare` (DChar y) = x `compare` y
-    x `compare` y = error $ "Cannot compare " ++ show x ++ " and " ++ show y
+    compare (DInt x) (DInt y) = x `compare` y
+    compare (DFloat x) (DFloat y) = x `compare` y
+    compare (DDouble x) (DDouble y) = x `compare` y
+    compare (DString x) (DString y) = x `compare` y
+    compare (DBool x) (DBool y) = x `compare` y
+    compare (DChar x) (DChar y) = x `compare` y
+    compare (DList x) (DList y) = x `compare` y
+    compare DNone DNone = EQ
+    compare (DTypeQuery x) (DTypeQuery y) = x `compare` y
+    compare (DCPtr x) (DCPtr y) = x `compare` y
+    compare (DFuncRef n1 a1 _) (DFuncRef n2 a2 _) = (n1, a1) `compare` (n2, a2)
+    compare (DMap m1) (DMap m2) = Data.Map.toList m1 `compare` Data.Map.toList m2
+    compare (DInt x) (DFloat y) = fromIntegral x `compare` y
+    compare (DFloat x) (DInt y) = x `compare` fromIntegral y
+    compare (DInt x) (DDouble y) = fromIntegral x `compare` y
+    compare (DDouble x) (DInt y) = x `compare` fromIntegral y
+    compare (DFloat x) (DDouble y) = realToFrac x `compare` y
+    compare (DDouble x) (DFloat y) = x `compare` realToFrac y
+    compare (DString x) (DList y) = x `compare` show y
+    compare (DList x) (DString y) = show x `compare` y
+    compare x y = dataTag x `compare` dataTag y
+      where
+        dataTag :: Data -> Int
+        dataTag DNone = 0
+        dataTag (DBool _) = 1
+        dataTag (DInt _) = 2
+        dataTag (DFloat _) = 3
+        dataTag (DDouble _) = 4
+        dataTag (DChar _) = 5
+        dataTag (DString _) = 6
+        dataTag (DList _) = 7
+        dataTag (DMap _) = 8
+        dataTag (DFuncRef{}) = 9
+        dataTag (DTypeQuery _) = 10
+        dataTag (DCPtr _) = 11
 
 data StackFrame = StackFrame
     { returnAddress :: Int
@@ -255,6 +220,7 @@ data VM = VM
     , ioBuffer :: IOBuffer
     , sideStack :: [Data]
     , shouldExit :: Bool
+    , vmError :: Maybe String
     , sockets :: Map.Map Int Socket
     , nextSocketId :: Int
     , fileHandles :: Map.Map Int SIO.Handle
@@ -275,6 +241,7 @@ data VM = VM
     , ioBuffer :: IOBuffer
     , sideStack :: [Data]
     , shouldExit :: Bool
+    , vmError :: Maybe String
     }
     deriving (Show)
 #endif
@@ -285,208 +252,331 @@ data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
 initVM :: Program -> VM
 #ifdef POSIX_IO
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
+initVM prog = VM{program = prog, stack = [], pc = 0, running = True, labels = locateLabels prog, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
 #else
-initVM program = VM{program = program, stack = [], pc = 0, running = True, labels = [], memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True}
+initVM prog = VM{program = prog, stack = [], pc = 0, running = True, labels = locateLabels prog, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing}
 #endif
 
 type Program = V.Vector Instruction
 
-safeHead :: [a] -> a
-safeHead [] = error "Empty list"
-safeHead (x : _) = x
+safeChr :: Int -> Char
+safeChr n
+    | n < 0 = '\0'
+    | n > 0x10FFFF = '\x10FFFF'
+    | n >= 0xD800 && n <= 0xDFFF = '\xFFFD'
+    | otherwise = chr n
 
-tailOrNothing :: [a] -> Maybe [a]
-tailOrNothing [] = Nothing
-tailOrNothing (_ : xs) = Just xs
-
-headOrError :: String -> [a] -> a
-headOrError err [] = error err
-headOrError _ (x : _) = x
-
-indexOrError :: Int -> [a] -> a
-indexOrError i xs
-    | i < 0 || i >= length xs = error $ "Index out of bounds: " ++ show i ++ " (length " ++ show (length xs) ++ ")"
-    | otherwise = xs !! i
+isTruthy :: Data -> Bool
+isTruthy (DBool b) = b
+isTruthy (DInt i) = i /= 0
+isTruthy (DFloat f) = f /= 0
+isTruthy (DDouble d) = d /= 0
+isTruthy (DString s) = not (null s)
+isTruthy (DList l) = not (null l)
+isTruthy DNone = False
+isTruthy _ = True
 
 tryIO :: IO a -> IO (Either IOException a)
 tryIO = try
 
+setVMError :: String -> StateT VM IO ()
+setVMError err = modify $ \vm -> vm{running = False, vmError = Just err}
+
 stackPush :: Data -> StateT VM IO ()
-stackPush d = do
-    vm <- get
-    put $ vm{stack = d : stack vm}
+stackPush d = modify $ \vm -> vm{stack = d : stack vm}
+
+stackPushN :: [Data] -> StateT VM IO ()
+stackPushN ds = modify $ \vm -> vm{stack = ds ++ stack vm}
 
 stackPop :: StateT VM IO Data
 stackPop = do
     vm <- get
-    put $ vm{stack = fromMaybe (error "Empty stack") (tailOrNothing $ stack vm)}
-    return $ safeHead $ stack vm
+    case stack vm of
+        [] -> do
+            setVMError "Stack underflow: pop from empty stack"
+            return DNone
+        (x : xs) -> do
+            put $ vm{stack = xs}
+            return x
 
 stackPopN :: Int -> StateT VM IO [Data]
-stackPopN n = do
-    vm <- get
-    put $ vm{stack = drop n $ stack vm}
-    return $ take n $ stack vm
-
-stackPushN :: [Data] -> StateT VM IO ()
-stackPushN ds = do
-    vm <- get
-    put $ vm{stack = ds ++ stack vm}
+stackPopN n
+    | n <= 0 = return []
+    | otherwise = do
+        vm <- get
+        let st = stack vm
+        if length st < n
+            then do
+                setVMError $ "Stack underflow: expected " ++ show n ++ " values, got " ++ show (length st)
+                put $ vm{stack = []}
+                return st
+            else do
+                put $ vm{stack = drop n st}
+                return (take n st)
 
 stackPeek :: StateT VM IO Data
-stackPeek = safeHead . stack <$> get
+stackPeek = do
+    st <- gets stack
+    case st of
+        (x : _) -> return x
+        [] -> return DNone
 
 stackLen :: StateT VM IO Int
 stackLen = length . stack <$> get
 
+storeMemory :: Int -> Data -> [Data] -> [Data]
+storeMemory idx val mem
+    | idx < 0 = mem
+    | idx < length mem = take idx mem ++ [val] ++ drop (idx + 1) mem
+    | otherwise = mem ++ replicate (idx - length mem) DNone ++ [val]
+
+loadMemory :: Int -> [Data] -> Data
+loadMemory idx mem
+    | idx < 0 || idx >= length mem = DNone
+    | otherwise = mem !! idx
+
 run :: Program -> IO ()
-run program = do
-    let vm = initVM program
-    evalStateT (run' program) vm
+run prog = do
+    let vm = initVM prog
+    evalStateT (run' prog) vm
 
 runPc :: Program -> Int -> IO ()
-runPc program pc = do
-    let vm = initVM program
-    evalStateT (run' program) vm{pc = pc}
+runPc prog startPc = do
+    let vm = initVM prog
+    evalStateT (run' prog) vm{pc = startPc}
 
 runVM :: VM -> IO ()
-runVM vm = evalStateT (run' (program vm)) vm
+runVM vm = do
+    finalVM <- execStateT (run' (program vm)) vm
+    case vmError finalVM of
+        Just err -> putStrLn ("Runtime error: " ++ err)
+        Nothing -> return ()
 
--- FIXME: This is a mess
 runVMVM :: VM -> IO VM
 runVMVM vm = execStateT (run' (program vm)) vm
 
 locateLabels :: Program -> [(String, Int)]
-locateLabels program = [(x, n) | (Label x, n) <- zip (V.toList program) [0 ..]] -- TODO: Might be inefficient
+locateLabels prog = [(x, n) | (Label x, n) <- zip (V.toList prog) [0 ..]]
 
 showDebugInfo :: StateT VM IO String
 showDebugInfo = do
     vm <- get
-    -- Show the current instruction, two values from the stack, and the result
-    let inst = program vm V.! pc vm
-    let layers = length (callStack vm) - 1
-    return $ replicate layers ' ' ++ show (pc vm) ++ " " ++ show inst ++ " <- " ++ showSanitized (stack vm)
-
-debugShowData :: Data -> String
-debugShowData (DInt x) = "DInt " ++ show x
-debugShowData (DFloat x) = "DFloat " ++ show x
-debugShowData (DDouble x) = "DDouble " ++ show x
-debugShowData (DString x) = "DString " ++ show x
-debugShowData (DBool x) = "DBool " ++ show x
-debugShowData (DList x) = "DList " ++ concatMap (\y -> debugShowData y ++ ",") x
-debugShowData DNone = "DNone"
-debugShowData (DChar x) = "DChar " ++ show x
-debugShowData (DFuncRef x args locals) = "DFuncRef " ++ x ++ " " ++ show args ++ " " ++ show locals
-debugShowData (DMap x) = "DMap " ++ show x
-debugShowData (DTypeQuery x) = "DTypeQuery " ++ x
-debugShowData (DCPtr x) = "DCPtr " ++ show x
+    let currentPc = pc vm
+    let inst = program vm V.!? currentPc
+    let instStr = maybe "<out of bounds>" show inst
+    let layers = max 0 (length (callStack vm) - 1)
+    return $ replicate layers ' ' ++ show currentPc ++ " " ++ instStr ++ " <- " ++ showSanitized (stack vm)
 
 run' :: Program -> StateT VM IO ()
-run' program = do
-    pc <- gets pc
-    breakpoints <- gets breakpoints
-    let inst = program V.! pc
-    modify $ \vm -> vm{program = program, labels = locateLabels program}
-    -- when (not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints) $ showDebugInfo >>= traceM
-    let atBreakpoint = not (null breakpoints) && pc `elem` breakpoints || -1 `elem` breakpoints
-     in when atBreakpoint do
-            showDebugInfo >>= liftIO . putStrLn
-    runInstruction inst
-    modify $ \vm -> vm{pc = vm.pc + 1}
-    gets running >>= flip when (run' program)
+run' prog = do
+    vm <- get
+    when (running vm) $ do
+        let currentPc = pc vm
+        if currentPc < 0 || currentPc >= V.length prog
+            then modify $ \v -> v{running = False}
+            else do
+                let inst = prog V.! currentPc
+                let breakpoints' = breakpoints vm
+                let atBreakpoint = not (null breakpoints') && (currentPc `elem` breakpoints' || -1 `elem` breakpoints')
+                when atBreakpoint $ do
+                    info <- showDebugInfo
+                    liftIO $ putStrLn info
+                runInstruction inst
+                modify $ \v -> v{pc = pc v + 1}
+                gets running >>= flip when (run' prog)
 
 instance Real Data where
     toRational (DInt x) = toRational x
     toRational (DFloat x) = toRational x
     toRational (DDouble x) = toRational x
-    toRational x = error $ "Cannot convert " ++ show x ++ " to Rational"
+    toRational (DBool x) = if x then 1 else 0
+    toRational (DChar x) = toRational (ord x)
+    toRational _ = 0
 
 instance Enum Data where
     toEnum = DInt
     fromEnum (DInt x) = x
     fromEnum (DFloat x) = round x
     fromEnum (DDouble x) = round x
-    fromEnum x = error $ "Cannot convert " ++ show x ++ " to Int"
+    fromEnum (DBool x) = if x then 1 else 0
+    fromEnum (DChar x) = ord x
+    fromEnum _ = 0
 
 instance Integral Data where
-    quot (DInt x) (DInt y) = DInt $ quot x y
-    quot _ _ = undefined
-    rem (DInt x) (DInt y) = DInt $ rem x y
-    rem _ _ = undefined
-    quotRem (DInt x) (DInt y) = (DInt $ quot x y, DInt $ rem x y)
-    quotRem _ _ = undefined
+    quot (DInt x) (DInt y) = if y == 0 then DInt 0 else DInt $ quot x y
+    quot (DFloat x) (DFloat y) = if y == 0 then DFloat 0 else DFloat $ fromInteger $ quot (round x) (round y)
+    quot (DDouble x) (DDouble y) = if y == 0 then DDouble 0 else DDouble $ fromInteger $ quot (round x) (round y)
+    quot a b = quot (DInt $ fromEnum a) (DInt $ fromEnum b)
+
+    rem (DInt x) (DInt y) = if y == 0 then DInt 0 else DInt $ rem x y
+    rem (DFloat x) (DFloat y) = if y == 0 then DFloat 0 else DFloat $ fromInteger $ rem (round x) (round y)
+    rem (DDouble x) (DDouble y) = if y == 0 then DDouble 0 else DDouble $ fromInteger $ rem (round x) (round y)
+    rem a b = rem (DInt $ fromEnum a) (DInt $ fromEnum b)
+
+    quotRem (DInt x) (DInt y) = if y == 0 then (DInt 0, DInt 0) else (DInt $ quot x y, DInt $ rem x y)
+    quotRem a b = (quot a b, rem a b)
+
     toInteger (DInt x) = toInteger x
     toInteger (DFloat x) = round x
     toInteger (DDouble x) = round x
-    toInteger x = error $ "Cannot convert " ++ show x ++ " to Integer"
+    toInteger (DBool x) = if x then 1 else 0
+    toInteger (DChar x) = toInteger (ord x)
+    toInteger _ = 0
 
 instance Num Data where
     (+) (DInt x) (DInt y) = DInt $ x + y
     (+) (DFloat x) (DFloat y) = DFloat $ x + y
     (+) (DDouble x) (DDouble y) = DDouble $ x + y
+    (+) (DInt x) (DFloat y) = DFloat $ fromIntegral x + y
+    (+) (DFloat x) (DInt y) = DFloat $ x + fromIntegral y
+    (+) (DInt x) (DDouble y) = DDouble $ fromIntegral x + y
+    (+) (DDouble x) (DInt y) = DDouble $ x + fromIntegral y
+    (+) (DFloat x) (DDouble y) = DDouble $ realToFrac x + y
+    (+) (DDouble x) (DFloat y) = DDouble $ x + realToFrac y
     (+) (DString x) (DString y) = DString $ x ++ y
-    (+) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x + Data.Char.ord y)
-    (+) x y = error $ "Cannot add " ++ show x ++ " and " ++ show y
+    (+) (DChar x) (DChar y) = DChar $ safeChr (ord x + ord y)
+    (+) (DList x) (DList y) = DList $ x ++ y
+    (+) x _ = x
+
     (-) (DInt x) (DInt y) = DInt $ x - y
     (-) (DFloat x) (DFloat y) = DFloat $ x - y
     (-) (DDouble x) (DDouble y) = DDouble $ x - y
+    (-) (DInt x) (DFloat y) = DFloat $ fromIntegral x - y
+    (-) (DFloat x) (DInt y) = DFloat $ x - fromIntegral y
+    (-) (DInt x) (DDouble y) = DDouble $ fromIntegral x - y
+    (-) (DDouble x) (DInt y) = DDouble $ x - fromIntegral y
+    (-) (DFloat x) (DDouble y) = DDouble $ realToFrac x - y
+    (-) (DDouble x) (DFloat y) = DDouble $ x - realToFrac y
     (-) (DList x) (DList y) = DList $ filter (`notElem` y) x
-    (-) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x - Data.Char.ord y)
-    (-) x y = error $ "Cannot subtract " ++ show x ++ " and " ++ show y
+    (-) (DChar x) (DChar y) = DChar $ safeChr (ord x - ord y)
+    (-) x _ = x
+
     (*) (DInt x) (DInt y) = DInt $ x * y
     (*) (DFloat x) (DFloat y) = DFloat $ x * y
-    (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x -- TODO
-    (*) (DDouble x) (DDouble y) = DDouble $ x * y -- TODO: make generic
-    (*) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x * Data.Char.ord y)
-    (*) x y = error $ "Cannot multiply " ++ show x ++ " and " ++ show y
+    (*) (DDouble x) (DDouble y) = DDouble $ x * y
+    (*) (DInt x) (DFloat y) = DFloat $ fromIntegral x * y
+    (*) (DFloat x) (DInt y) = DFloat $ x * fromIntegral y
+    (*) (DInt x) (DDouble y) = DDouble $ fromIntegral x * y
+    (*) (DDouble x) (DInt y) = DDouble $ x * fromIntegral y
+    (*) (DFloat x) (DDouble y) = DDouble $ realToFrac x * y
+    (*) (DDouble x) (DFloat y) = DDouble $ x * realToFrac y
+    (*) (DList x) (DFloat y) = DList $ map (* DFloat y) x
+    (*) (DChar x) (DChar y) = DChar $ safeChr (ord x * ord y)
+    (*) x _ = x
+
     fromInteger = DInt . fromInteger
+
     abs (DInt x) = DInt $ abs x
     abs (DFloat x) = DFloat $ abs x
-    abs x = error $ "Cannot take absolute value of " ++ show x
+    abs (DDouble x) = DDouble $ abs x
+    abs x = x
+
     signum (DInt x) = DInt $ signum x
     signum (DFloat x) = DFloat $ signum x
-    signum x = error $ "Cannot take signum of " ++ show x
+    signum (DDouble x) = DDouble $ signum x
+    signum _ = DInt 0
 
 instance Fractional Data where
-    (/) (DInt _) (DInt 0) = error "Division by zero"
+    (/) (DInt _) (DInt 0) = DInt 0
     (/) (DInt x) (DInt y) = DInt $ x `div` y
-    (/) (DFloat x) (DFloat y) = DFloat $ x / y
-    (/) (DDouble x) (DDouble y) = DDouble $ x / y
-    (/) (DChar _) (DChar y) | Data.Char.ord y == 0 = error "Division by zero"
-    (/) (DChar x) (DChar y) = DChar $ Data.Char.chr (Data.Char.ord x `div` Data.Char.ord y)
-    (/) x y = error $ "Cannot divide " ++ show x ++ " and " ++ show y
+    (/) (DFloat x) (DFloat y) = DFloat $ if y == 0 then 0 else x / y
+    (/) (DDouble x) (DDouble y) = DDouble $ if y == 0 then 0 else x / y
+    (/) (DInt x) (DFloat y) = DFloat $ if y == 0 then 0 else fromIntegral x / y
+    (/) (DFloat x) (DInt y) = DFloat $ if y == 0 then 0 else x / fromIntegral y
+    (/) (DInt x) (DDouble y) = DDouble $ if y == 0 then 0 else fromIntegral x / y
+    (/) (DDouble x) (DInt y) = DDouble $ if y == 0 then 0 else x / fromIntegral y
+    (/) (DFloat x) (DDouble y) = DDouble $ if y == 0 then 0 else realToFrac x / y
+    (/) (DDouble x) (DFloat y) = DDouble $ if y == 0 then 0 else x / realToFrac y
+    (/) (DChar _) (DChar y) | ord y == 0 = DChar '\0'
+    (/) (DChar x) (DChar y) = DChar $ safeChr (ord x `div` ord y)
+    (/) x _ = x
+
     fromRational = DFloat . fromRational
 
 instance Floating Data where
-    (**) (DInt x) (DInt y) = DInt $ x ^ y
+    (**) (DInt x) (DInt y)
+        | y < 0 = if x == 0 then DFloat 0 else DFloat $ fromIntegral x ** fromIntegral y
+        | otherwise = DInt $ x ^ y
     (**) (DFloat x) (DFloat y) = DFloat $ x ** y
     (**) (DDouble x) (DDouble y) = DDouble $ x ** y
-    (**) x y = error $ "Cannot raise " ++ show x ++ " to the power of " ++ show y
-    pi = DFloat pi
-    exp = error "exp not implemented"
-    log = error "log not implemented"
-    sin = error "sin not implemented"
-    cos = error "cos not implemented"
-    asin = error "asin not implemented"
-    acos = error "acos not implemented"
-    atan = error "atan not implemented"
-    sinh = error "sinh not implemented"
-    cosh = error "cosh not implemented"
-    asinh = error "asinh not implemented"
-    acosh = error "acosh not implemented"
-    atanh = error "atanh not implemented"
+    (**) (DInt x) (DFloat y) = DFloat $ fromIntegral x ** y
+    (**) (DFloat x) (DInt y) = DFloat $ x ** fromIntegral y
+    (**) (DInt x) (DDouble y) = DDouble $ fromIntegral x ** y
+    (**) (DDouble x) (DInt y) = DDouble $ x ** fromIntegral y
+    (**) (DFloat x) (DDouble y) = DDouble $ realToFrac x ** y
+    (**) (DDouble x) (DFloat y) = DDouble $ x ** realToFrac y
+    (**) x _ = x
 
-findLabelFuzzy :: String -> StateT VM IO (String, Int)
+    pi = DFloat pi
+    exp (DFloat x) = DFloat (exp x)
+    exp (DDouble x) = DDouble (exp x)
+    exp (DInt x) = DFloat (exp (fromIntegral x))
+    exp x = x
+
+    log (DFloat x) = DFloat (log x)
+    log (DDouble x) = DDouble (log x)
+    log (DInt x) = DFloat (log (fromIntegral x))
+    log x = x
+
+    sin (DFloat x) = DFloat (sin x)
+    sin (DDouble x) = DDouble (sin x)
+    sin (DInt x) = DFloat (sin (fromIntegral x))
+    sin x = x
+
+    cos (DFloat x) = DFloat (cos x)
+    cos (DDouble x) = DDouble (cos x)
+    cos (DInt x) = DFloat (cos (fromIntegral x))
+    cos x = x
+
+    asin (DFloat x) = DFloat (asin x)
+    asin (DDouble x) = DDouble (asin x)
+    asin (DInt x) = DFloat (asin (fromIntegral x))
+    asin x = x
+
+    acos (DFloat x) = DFloat (acos x)
+    acos (DDouble x) = DDouble (acos x)
+    acos (DInt x) = DFloat (acos (fromIntegral x))
+    acos x = x
+
+    atan (DFloat x) = DFloat (atan x)
+    atan (DDouble x) = DDouble (atan x)
+    atan (DInt x) = DFloat (atan (fromIntegral x))
+    atan x = x
+
+    sinh (DFloat x) = DFloat (sinh x)
+    sinh (DDouble x) = DDouble (sinh x)
+    sinh (DInt x) = DFloat (sinh (fromIntegral x))
+    sinh x = x
+
+    cosh (DFloat x) = DFloat (cosh x)
+    cosh (DDouble x) = DDouble (cosh x)
+    cosh (DInt x) = DFloat (cosh (fromIntegral x))
+    cosh x = x
+
+    asinh (DFloat x) = DFloat (asinh x)
+    asinh (DDouble x) = DDouble (asinh x)
+    asinh (DInt x) = DFloat (asinh (fromIntegral x))
+    asinh x = x
+
+    acosh (DFloat x) = DFloat (acosh x)
+    acosh (DDouble x) = DDouble (acosh x)
+    acosh (DInt x) = DFloat (acosh (fromIntegral x))
+    acosh x = x
+
+    atanh (DFloat x) = DFloat (atanh x)
+    atanh (DDouble x) = DDouble (atanh x)
+    atanh (DInt x) = DFloat (atanh (fromIntegral x))
+    atanh x = x
+
+findLabelFuzzy :: String -> StateT VM IO (Maybe (String, Int))
 findLabelFuzzy x = do
-    labels <- gets labels
-    case lookup x labels of
-        Just (n :: Int) -> return (x, n)
+    lbls <- gets labels
+    case lookup x lbls of
+        Just n -> return (Just (x, n))
         Nothing ->
-            -- Look for fuzzy matches (without #)
-            case filter (\(y, _) -> x == takeWhile (/= '#') y) labels of
-                [] -> error $ "Label not found: " ++ x
-                ((n, l) : _) -> return (n, l)
+            case filter (\(y, _) -> x == takeWhile (/= '#') y) lbls of
+                [] -> return Nothing
+                ((n, l) : _) -> return (Just (n, l))
 
 class IntoData a where
     intoData :: a -> Data
@@ -534,56 +624,46 @@ instance IntoData (Ptr ()) where
 clearMap :: Data.Map String Data -> Data.Map String Data
 clearMap = Data.Map.delete "__name" . Data.Map.delete "__traits"
 
-
 globalStructType :: IORef [Ptr CType]
 {-# NOINLINE globalStructType #-}
 globalStructType = unsafePerformIO $ newIORef []
 
--- Only used for structs. I really don't like this
 instance Storable Data where
-  sizeOf _ = 4
-  alignment _ = 4
-  peek ptr = do
-    types <- readIORef globalStructType
-    sizesAndAlignments <- mapM sizeAndAlignmentOfCType types
-    let typesAndOffsets = zip types (scanl (\(o,_) (s,a) -> (o+s,a)) (0,0) sizesAndAlignments)
-    b <- mapM mapData typesAndOffsets
-    return $ DList b
-    where
-      mapData :: (Ptr CType, (Int, Int)) -> IO Data
-      mapData tsa = do
-        let (t,(o,_)) = tsa
-        case () of _
-                    | t == ffi_type_float -> do
-                      return $ DFloat (realToFrac (unsafePerformIO $ peekByteOff ptr o :: CFloat))
-                    | t == ffi_type_sint32 -> do
-                      return $ DInt (fromIntegral (unsafePerformIO $ peekByteOff ptr o :: CInt))
-                    | t == ffi_type_double -> do
-                      return $ DDouble (realToFrac (unsafePerformIO $ peekByteOff ptr o :: CDouble))
-                    | t == ffi_type_pointer -> do
-                      return $ DCPtr (unsafePerformIO $ peekByteOff ptr o :: WordPtr)
-                    | t == ffi_type_uchar -> do
-                      return $ DChar (toEnum (fromEnum (unsafePerformIO $ peekByteOff ptr o :: CUChar)))
-                    | t == ffi_type_void -> do
-                      return DNone
-                    | otherwise -> error $ "mapData: Invalid type " ++ show t
+    sizeOf _ = 4
+    alignment _ = 4
+    peek ptr = do
+        types <- readIORef globalStructType
+        sizesAndAlignments <- mapM sizeAndAlignmentOfCType types
+        let typesAndOffsets = zip types (scanl (\(o, _) (s, a) -> (o + s, a)) (0, 0) sizesAndAlignments)
+        b <- mapM mapData typesAndOffsets
+        return $ DList b
+      where
+        mapData :: (Ptr CType, (Int, Int)) -> IO Data
+        mapData (t, (o, _))
+            | t == ffi_type_float = DFloat . realToFrac <$> (peekByteOff ptr o :: IO CFloat)
+            | t == ffi_type_sint32 = DInt . fromIntegral <$> (peekByteOff ptr o :: IO CInt)
+            | t == ffi_type_double = DDouble . realToFrac <$> (peekByteOff ptr o :: IO CDouble)
+            | t == ffi_type_pointer = DCPtr <$> (peekByteOff ptr o :: IO WordPtr)
+            | t == ffi_type_uchar = DChar . toEnum . fromEnum <$> (peekByteOff ptr o :: IO CUChar)
+            | t == ffi_type_void = return DNone
+            | otherwise = return DNone
 
-
-  poke ptr (DInt x) = poke (castPtr ptr) x
-  poke ptr (DFloat x) = poke (castPtr ptr) x
-  poke ptr (DString x) = poke (castPtr ptr) (unsafePerformIO $ newCString x)
-  poke ptr (DChar x) = poke (castPtr ptr) x
-  poke ptr (DMap x) = do
-    let values = reverse $ Data.Map.elems (clearMap x)
-    let sizes = map sizeOfC values
-    mapM_ (\(i, v) -> pokeByteOff ptr (sum $ take i sizes) v) (zip [0..] values)
-  poke _ x = error $ "unsupported poke " ++ show x
+    poke ptr (DInt x) = poke (castPtr ptr) x
+    poke ptr (DFloat x) = poke (castPtr ptr) x
+    poke ptr (DString x) = newCString x >>= poke (castPtr ptr)
+    poke ptr (DChar x) = poke (castPtr ptr) x
+    poke ptr (DMap x) = do
+        let values = reverse $ Data.Map.elems (clearMap x)
+        let sizes = map sizeOfC values
+        mapM_ (\(i, v) -> pokeByteOff ptr (sum $ take i sizes) v) (zip [0 ..] values)
+    poke _ _ = return ()
 
 sizeOfC :: Data -> Int
 sizeOfC (DChar _) = 1
 sizeOfC (DDouble _) = 8
 sizeOfC _ = 4
 
+dataCType :: Data -> Ptr CType
 dataCType (DInt _) = ffi_type_sint32
 dataCType (DFloat _) = ffi_type_float
 dataCType (DString _) = ffi_type_pointer
@@ -594,64 +674,73 @@ dataCType (DDouble _) = ffi_type_double
 dataCType (DMap _) = ffi_type_pointer
 dataCType (DCPtr _) = ffi_type_pointer
 dataCType DNone = ffi_type_void
-dataCType _ = error "dataCType: Invalid type"
+dataCType _ = ffi_type_pointer
 
 type ArgP = (Arg, Maybe (IO ()))
 
 arg :: Data -> IO ArgP
 arg (DInt x) = return (argInt32 (fromIntegral x), Nothing)
-arg (DFloat x) =  return (argCFloat (realToFrac x), Nothing)
+arg (DFloat x) = return (argCFloat (realToFrac x), Nothing)
 arg (DString x) = return (argString x, Nothing)
-arg (DBool x) =  return (argCInt (if x then 1 else 0), Nothing)
-arg (DChar x) =  return (argCChar (fromIntegral $ Data.Char.ord x), Nothing)
+arg (DBool x) = return (argCInt (if x then 1 else 0), Nothing)
+arg (DChar x) = return (argCChar (fromIntegral $ Data.Char.ord x), Nothing)
 arg (DList x@(DInt _ : _)) = do
-  withArray (map (\case DInt i -> fromIntegral i :: CInt; _ -> error "Non-int in int list") x) $ \ptr -> do
-    return (argPtr ptr, Nothing)
-arg (DList x@(DChar _ : _)) = do -- TODO: make generic
-  withArray (map (\case DChar c -> castCharToCChar c; _ -> error "Non-char in char list") x) $ \ptr -> do
-    return (argPtr ptr, Nothing)
+    withArray [fromIntegral i :: CInt | DInt i <- x] $ \ptr ->
+        return (argPtr ptr, Nothing)
+arg (DList x@(DChar _ : _)) = do
+    withArray [castCharToCChar c | DChar c <- x] $ \ptr ->
+        return (argPtr ptr, Nothing)
 arg (DDouble x) = return (argCDouble $ realToFrac x, Nothing)
 arg d@(DMap x) = do
-  let types = map dataCType (Data.Map.elems (clearMap x))
-  (argT, _, freeTType) <- newStorableStructArgRet types
-  return (argT d, Just freeTType)
-arg x = error $ "Cannot convert " ++ show x ++ " to FFI arg"
+    let types = map dataCType (Data.Map.elems (clearMap x))
+    (argT, _, freeTType) <- newStorableStructArgRet types
+    return (argT d, Just freeTType)
+arg _ = return (argInt32 0, Nothing)
 
 class FfiRet a b where
-  ret :: b -> RetType a
+    ret :: b -> RetType a
 
 instance FfiRet Ghc.Int.Int32 Data where
-  ret (DInt _) = retInt32
-  ret _ = error "Invalid return type"
+    ret _ = retInt32
 
 instance FfiRet CFloat Data where
-  ret (DFloat _) = retCFloat
-  ret _ = error "Invalid return type"
+    ret _ = retCFloat
 
 instance FfiRet CDouble Data where
-  ret (DDouble _) = retCDouble
-  ret _ = error "Invalid return type"
+    ret _ = retCDouble
 
 instance FfiRet String Data where
-  ret (DString _) = retString
-  ret _ = error "Invalid return type"
+    ret _ = retString
 
 instance FfiRet CChar Data where
-  ret (DChar _) = retCChar
-  ret _ = error "Invalid return type"
+    ret _ = retCChar
 
 instance FfiRet (Ptr ()) Data where
-  ret (DCPtr _) = retPtr retVoid
-  ret _ = error "Invalid return type"
+    ret _ = retPtr retVoid
 
 instance FfiRet () Data where
-  ret DNone = retVoid
-  ret _ = error "Invalid return type"
+    ret _ = retVoid
 
 stackPushA :: IntoData a => a -> StateT VM IO ()
 stackPushA = stackPush . intoData
+#endif
+
+#ifdef POSIX_IO
+safeFamily :: Int -> Family
+safeFamily 1 = AF_UNIX
+safeFamily 2 = AF_INET
+safeFamily 10 = AF_INET6
+safeFamily _ = AF_INET
+
+safeSocketType :: Int -> SocketType
+safeSocketType 1 = Stream
+safeSocketType 2 = Datagram
+safeSocketType 3 = Raw
+safeSocketType _ = Stream
+#endif
 
 runInstruction :: Instruction -> StateT VM IO ()
+#ifdef FFI
 runInstruction (CallFFI name from numArgs) = do
     dl <- if from /= "__default" then liftIO $ dynLibOpen (from ++ "." ++ dllext) else liftIO $ dynLibOpen crtPath
     fun <- liftIO $ dynLibSym dl name
@@ -661,72 +750,93 @@ runInstruction (CallFFI name from numArgs) = do
     let ffiArgs' = map fst ffiArgs
     let frees = map snd ffiArgs
     case retT of
-      DInt{} -> do
-        let retType = ret retT :: RetType Ghc.Int.Int32
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DFloat{} -> do
-        let retType = ret retT :: RetType CFloat
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DString{} -> do
-        let retType = ret retT :: RetType String
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DChar{} -> do
-        let retType = ret retT :: RetType CChar
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DCPtr{} -> do
-        let retType = ret retT :: RetType (Ptr ())
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DDouble{} -> do
-        let retType = ret retT :: RetType CDouble
-        result <- liftIO $ callFFI fun retType ffiArgs'
-        stackPushA result
-      DNone -> do
-        let retType = ret retT :: RetType ()
-        _ <- liftIO $ callFFI fun retType ffiArgs'
-        return ()
-      DMap x -> do
-        let keys = reverse (Data.Map.keys (clearMap x))
-        let types = map dataCType (Data.Map.elems (clearMap x))
-        liftIO $ writeIORef globalStructType types
-        (_,retType,_) <- liftIO (newStorableStructArgRet types :: IO (Data -> Arg, RetType Data, IO ()))
-        (DList values) <- liftIO $ callFFI fun retType ffiArgs'
-        let result = DMap $ Data.Map.fromList $ zip keys values
-        stackPushA result
-      _ -> error $ "Invalid return type: " ++ show retT
+        DInt{} -> do
+            let retType = ret retT :: RetType Ghc.Int.Int32
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DFloat{} -> do
+            let retType = ret retT :: RetType CFloat
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DString{} -> do
+            let retType = ret retT :: RetType String
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DChar{} -> do
+            let retType = ret retT :: RetType CChar
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DCPtr{} -> do
+            let retType = ret retT :: RetType (Ptr ())
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DDouble{} -> do
+            let retType = ret retT :: RetType CDouble
+            result <- liftIO $ callFFI fun retType ffiArgs'
+            stackPushA result
+        DNone -> do
+            let retType = ret retT :: RetType ()
+            _ <- liftIO $ callFFI fun retType ffiArgs'
+            return ()
+        DMap x -> do
+            let keys = reverse (Data.Map.keys (clearMap x))
+            let types = map dataCType (Data.Map.elems (clearMap x))
+            liftIO $ writeIORef globalStructType types
+            (_, retType, _) <- liftIO (newStorableStructArgRet types :: IO (Data -> Arg, RetType Data, IO ()))
+            (DList values) <- liftIO $ callFFI fun retType ffiArgs'
+            let result = DMap $ Data.Map.fromList $ zip keys values
+            stackPushA result
+        _ -> setVMError $ "Invalid return type: " ++ show retT
     liftIO $ mapM_ (\case Just x -> x; Nothing -> return ()) frees
 #else
-runInstruction CallFFI{} = error "Tried to call FFI function, but FFI is not enabled in this build/not supported on this platform"
+runInstruction CallFFI{} = setVMError "FFI is not enabled in this build/not supported on this platform"
 #endif
--- Basic stack operations
+
 runInstruction (Push d) = stackPush d
 runInstruction (PushPf name nArgs) = do
-    (label, _) <- findLabelFuzzy name
-    locals <- gets (locals . safeHead . callStack)
-    stackPopN nArgs >>= \args -> stackPush $ DFuncRef label args locals
+    lblRes <- findLabelFuzzy name
+    let labelName = maybe name fst lblRes
+    cStack <- gets callStack
+    let currentLocals = case cStack of
+            (frame : _) -> locals frame
+            [] -> []
+    args <- stackPopN nArgs
+    stackPush $ DFuncRef labelName args currentLocals
 runInstruction Pop = void stackPop
--- Arithmetic
-runInstruction Add = stackPopN 2 >>= \case [y, x] -> stackPush $ x + y; _ -> error "Add: expected 2 values"
-runInstruction Sub = stackPopN 2 >>= \case [y, x] -> stackPush $ x - y; _ -> error "Sub: expected 2 values"
-runInstruction Mul = stackPopN 2 >>= \case [y, x] -> stackPush $ x * y; _ -> error "Mul: expected 2 values"
-runInstruction Div = stackPopN 2 >>= \case [y, x] -> stackPush $ x / y; _ -> error "Div: expected 2 values"
-runInstruction Pow = stackPopN 2 >>= \case [y, x] -> stackPush $ x ** y; _ -> error "Pow: expected 2 values"
-runInstruction Abs =
-    stackPop >>= \x -> stackPush $ case x of
-        DInt num -> DInt $ abs num
-        DFloat num -> DFloat $ abs num
-        _ -> error $ "Cannot take absolute value of " ++ show x
+runInstruction Add =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ x + y
+        _ -> setVMError "Add: expected 2 values on stack"
+runInstruction Sub =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ x - y
+        _ -> setVMError "Sub: expected 2 values on stack"
+runInstruction Mul =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ x * y
+        _ -> setVMError "Mul: expected 2 values on stack"
+runInstruction Div =
+    stackPopN 2 >>= \case
+        [y, x] -> case (x, y) of
+            (DInt _, DInt 0) -> setVMError "Division by zero"
+            (DInt a, DInt b) -> stackPush $ DInt (a `div` b)
+            (DChar _, DChar b) | ord b == 0 -> setVMError "Division by zero"
+            (DChar a, DChar b) -> stackPush $ DChar $ safeChr (ord a `div` ord b)
+            _ -> stackPush $ x / y
+        _ -> setVMError "Div: expected 2 values on stack"
+runInstruction Pow =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ x ** y
+        _ -> setVMError "Pow: expected 2 values on stack"
+runInstruction Abs = stackPop >>= stackPush . abs
 runInstruction Mod =
     stackPopN 2 >>= \case
         [y, x] -> case (x, y) of
-            (DInt a, DInt b) -> stackPush $ DInt $ a `mod` b
-            _ -> error $ "Mod: expected two integers, got " ++ show x ++ " and " ++ show y
-        _ -> error "Mod: expected 2 values"
--- IO
+            (DInt a, DInt b) -> stackPush $ DInt $ if b == 0 then 0 else a `mod` b
+            (DInt a, DFloat b) -> stackPush $ DFloat $ if b == 0 then 0 else fromIntegral a - b * fromIntegral (floor (fromIntegral a / b) :: Int)
+            (DFloat a, DFloat b) -> stackPush $ DFloat $ if b == 0 then 0 else a - b * fromIntegral (floor (a / b) :: Int)
+            _ -> stackPush $ DInt 0
+        _ -> setVMError "Mod: expected 2 values on stack"
 runInstruction (Builtin Print) = do
     vm <- get
     case ioMode vm of
@@ -737,84 +847,91 @@ runInstruction (Builtin GetLine) = do
     case ioMode vm of
         HostDirect -> liftIO getLine >>= stackPush . DString
         VMBuffer -> do
-            let input = (ioBuffer vm).input
-            let (line, rest) = break (== '\n') input
-            modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
+            let inp = (ioBuffer vm).input
+            let (line, rest) = break (== '\n') inp
+            let nextInput = case rest of ('\n' : r) -> r; _ -> rest
+            modify $ \v -> v{ioBuffer = (ioBuffer vm){input = nextInput}}
             stackPush $ DString line
 runInstruction (Builtin GetChar) = do
     vm <- get
     case ioMode vm of
         HostDirect -> liftIO getChar >>= stackPush . DChar
         VMBuffer -> do
-            let input = (ioBuffer vm).input
-            case input of
+            let inp = (ioBuffer vm).input
+            case inp of
                 (char : rest) -> do
                     modify $ \v -> v{ioBuffer = (ioBuffer vm){input = rest}}
                     stackPush $ DChar char
-                [] -> error "Empty input buffer"
+                [] -> stackPush $ DChar '\0'
 runInstruction (Builtin Random) = do
     num <- liftIO (randomIO :: IO Float)
     stackPush $ DFloat num
+
 #ifdef POSIX_IO
--- File operations
 runInstruction (Builtin OpenFile) = do
-    [mode, path] <- stackPopN 2
-    case (path, mode) of
-        (DString p, DString m) -> do
-            let iomode = case m of
-                    "r" -> SIO.ReadMode
-                    "w" -> SIO.WriteMode
-                    "a" -> SIO.AppendMode
-                    "r+" -> SIO.ReadWriteMode
-                    "w+" -> SIO.ReadWriteMode
-                    "a+" -> SIO.ReadWriteMode
-                    _ -> SIO.ReadMode
-            result <- liftIO $ tryIO $ SIO.openFile p iomode
-            case result of
-                Right handle -> do
-                    vm <- get
-                    let handleId = nextHandleId vm
-                    modify $ \v -> v{fileHandles = Map.insert handleId handle (fileHandles v), nextHandleId = handleId + 1}
-                    stackPush $ DInt handleId
-                Left _ -> stackPush $ DInt (-1)
-        _ -> error "OpenFile: expected String path and String mode"
+    popped <- stackPopN 2
+    case popped of
+        [mode, path] -> case (path, mode) of
+            (DString p, DString m) -> do
+                let iomode = case m of
+                        "r" -> SIO.ReadMode
+                        "w" -> SIO.WriteMode
+                        "a" -> SIO.AppendMode
+                        "r+" -> SIO.ReadWriteMode
+                        "w+" -> SIO.ReadWriteMode
+                        "a+" -> SIO.ReadWriteMode
+                        _ -> SIO.ReadMode
+                result <- liftIO $ tryIO $ SIO.openFile p iomode
+                case result of
+                    Right handle -> do
+                        vm <- get
+                        let handleId = nextHandleId vm
+                        modify $ \v -> v{fileHandles = Map.insert handleId handle (fileHandles v), nextHandleId = handleId + 1}
+                        stackPush $ DInt handleId
+                    Left _ -> stackPush $ DInt (-1)
+            _ -> stackPush $ DInt (-1)
+        _ -> setVMError "OpenFile: expected String path and String mode"
 runInstruction (Builtin ReadFile) = do
-    [fd, size] <- stackPopN 2
-    case (fd, size) of
-        (DInt f, DInt s) -> do
-            vm <- get
-            case Map.lookup f (fileHandles vm) of
-                Just handle -> do
-                    result <- liftIO $ tryIO $ do
-                        let readChars :: Int -> [Char] -> IO String
-                            readChars n acc
-                                | n <= 0 = return $ reverse acc
-                                | otherwise = do
-                                    eof <- SIO.hIsEOF handle
-                                    if eof
-                                        then return $ reverse acc
-                                        else do
-                                            char <- SIO.hGetChar handle
-                                            readChars (n - 1) (char : acc)
-                        readChars (fromIntegral s) []
-                    case result of
-                        Right contents -> stackPush $ DString contents
-                        Left _ -> stackPush $ DString ""
-                Nothing -> error "File handle not found"
-        _ -> error "ReadFile: expected Int fd and Int size"
+    popped <- stackPopN 2
+    case popped of
+        [size, fd] -> case (fd, size) of
+            (DInt f, DInt s) -> do
+                vm <- get
+                case Map.lookup f (fileHandles vm) of
+                    Just handle -> do
+                        result <- liftIO $ tryIO $ do
+                            let readChars :: Int -> [Char] -> IO String
+                                readChars n acc
+                                    | n <= 0 = return $ reverse acc
+                                    | otherwise = do
+                                        eof <- SIO.hIsEOF handle
+                                        if eof
+                                            then return $ reverse acc
+                                            else do
+                                                char <- SIO.hGetChar handle
+                                                readChars (n - 1) (char : acc)
+                            readChars (fromIntegral s) []
+                        case result of
+                            Right contents -> stackPush $ DString contents
+                            Left _ -> stackPush $ DString ""
+                    Nothing -> stackPush $ DString ""
+            _ -> stackPush $ DString ""
+        _ -> setVMError "ReadFile: expected Int fd and Int size"
 runInstruction (Builtin WriteFile) = do
-    [fd, content] <- stackPopN 2
-    case (fd, content) of
-        (DInt f, DString c) -> do
-            vm <- get
-            case Map.lookup f (fileHandles vm) of
-                Just handle -> do
-                    result <- liftIO $ tryIO $ SIO.hPutStr handle c
-                    case result of
-                        Right _ -> stackPush $ DInt $ length c
-                        Left _ -> stackPush $ DInt (-1)
-                Nothing -> error "File handle not found"
-        _ -> error "WriteFile: expected Int fd and String content"
+    popped <- stackPopN 2
+    case popped of
+        [content, fd] -> case (fd, content) of
+            (DInt f, DString c) -> do
+                vm <- get
+                case Map.lookup f (fileHandles vm) of
+                    Just handle -> do
+                        result <- liftIO $ tryIO $ SIO.hPutStr handle c
+                        case result of
+                            Right _ -> stackPush $ DInt $ length c
+                            Left _ -> stackPush $ DInt (-1)
+                    Nothing -> stackPush $ DInt (-1)
+            _ -> stackPush $ DInt (-1)
+        _ -> setVMError "WriteFile: expected Int fd and String content"
 runInstruction (Builtin CloseFile) = do
     fd <- stackPop
     case fd of
@@ -824,55 +941,59 @@ runInstruction (Builtin CloseFile) = do
                 Just handle -> do
                     _ <- liftIO $ tryIO $ SIO.hClose handle
                     modify $ \v -> v{fileHandles = Map.delete f (fileHandles v)}
-                    return ()
-                Nothing -> error "File handle not found"
-        _ -> error "CloseFile: expected Int fd"
--- Socket operations
+                Nothing -> return ()
+        _ -> return ()
 runInstruction (Builtin Socket) = do
-    [domain, socktype, protocol] <- stackPopN 3
-    case (domain, socktype, protocol) of
-        (DInt d, DInt t, DInt p) -> do
-            result <- liftIO $ tryIO $ NS.socket (unsafeCoerce (fromIntegral d :: CInt) :: Family) (unsafeCoerce (fromIntegral t :: CInt) :: SocketType) (unsafeCoerce (fromIntegral p :: CInt) :: ProtocolNumber)
-            case result of
-                Right sock -> do
-                    vm <- get
-                    let sockId = nextSocketId vm
-                    modify $ \v -> v{sockets = Map.insert sockId sock (sockets v), nextSocketId = sockId + 1}
-                    stackPush $ DInt sockId
-                Left _ -> stackPush $ DInt (-1)
-        _ -> error "Socket: expected Int domain, Int type, Int protocol"
+    popped <- stackPopN 3
+    case popped of
+        [protocol, socktype, domain] -> case (domain, socktype, protocol) of
+            (DInt d, DInt t, DInt p) -> do
+                result <- liftIO $ tryIO $ NS.socket (safeFamily d) (safeSocketType t) (fromIntegral p :: ProtocolNumber)
+                case result of
+                    Right sock -> do
+                        vm <- get
+                        let sockId = nextSocketId vm
+                        modify $ \v -> v{sockets = Map.insert sockId sock (sockets v), nextSocketId = sockId + 1}
+                        stackPush $ DInt sockId
+                    Left _ -> stackPush $ DInt (-1)
+            _ -> stackPush $ DInt (-1)
+        _ -> setVMError "Socket: expected Int domain, Int type, Int protocol"
 runInstruction (Builtin Bind) = do
-    [fd, host, port] <- stackPopN 3
-    case (fd, host, port) of
-        (DInt f, DString h, DInt p) -> do
-            vm <- get
-            case Map.lookup f (sockets vm) of
-                Just sock -> do
-                    let host' = if h == "" || h == "0.0.0.0" then Nothing else Just h
-                    let hints = defaultHints{addrFlags = [AI_PASSIVE], addrFamily = AF_INET}
-                    addrs <- liftIO $ getAddrInfo (Just hints) host' (Just $ show p)
-                    case addrs of
-                        (addr : _) -> do
-                            result <- liftIO $ tryIO $ NS.bind sock (addrAddress addr)
-                            case result of
-                                Right _ -> return ()
-                                Left e -> error $ "Bind failed: " ++ show e
-                        [] -> error "No address found"
-                Nothing -> error "Socket not found"
-        _ -> error "Bind: expected Int fd, String host, Int port"
+    popped <- stackPopN 3
+    case popped of
+        [port, host, fd] -> case (fd, host, port) of
+            (DInt f, DString h, DInt p) -> do
+                vm <- get
+                case Map.lookup f (sockets vm) of
+                    Just sock -> do
+                        let host' = if h == "" || h == "0.0.0.0" then Nothing else Just h
+                        let hints = defaultHints{addrFlags = [AI_PASSIVE], addrFamily = AF_INET}
+                        addrsResult <- liftIO $ tryIO $ getAddrInfo (Just hints) host' (Just $ show p)
+                        case addrsResult of
+                            Right (addr : _) -> do
+                                result <- liftIO $ tryIO $ NS.bind sock (addrAddress addr)
+                                case result of
+                                    Right _ -> return ()
+                                    Left _ -> setVMError "Bind failed"
+                            _ -> setVMError "No address found for bind"
+                    Nothing -> setVMError "Socket not found"
+            _ -> setVMError "Bind: expected Int fd, String host, Int port"
+        _ -> setVMError "Bind: expected 3 values on stack"
 runInstruction (Builtin Listen) = do
-    [fd, backlog] <- stackPopN 2
-    case (fd, backlog) of
-        (DInt f, DInt b) -> do
-            vm <- get
-            case Map.lookup f (sockets vm) of
-                Just sock -> do
-                    result <- liftIO $ tryIO $ NS.listen sock (fromIntegral b)
-                    case result of
-                        Right _ -> return ()
-                        Left _ -> error "Listen failed"
-                Nothing -> error "Socket not found"
-        _ -> error "Listen: expected Int fd and Int backlog"
+    popped <- stackPopN 2
+    case popped of
+        [backlog, fd] -> case (fd, backlog) of
+            (DInt f, DInt b) -> do
+                vm <- get
+                case Map.lookup f (sockets vm) of
+                    Just sock -> do
+                        result <- liftIO $ tryIO $ NS.listen sock (fromIntegral b)
+                        case result of
+                            Right _ -> return ()
+                            Left _ -> setVMError "Listen failed"
+                    Nothing -> setVMError "Socket not found"
+            _ -> setVMError "Listen: expected Int fd and Int backlog"
+        _ -> setVMError "Listen: expected 2 values on stack"
 runInstruction (Builtin Accept) = do
     fd <- stackPop
     case fd of
@@ -887,51 +1008,57 @@ runInstruction (Builtin Accept) = do
                             modify $ \v -> v{sockets = Map.insert sockId clientSock (sockets v), nextSocketId = sockId + 1}
                             stackPush $ DInt sockId
                         Left _ -> stackPush $ DInt (-1)
-                Nothing -> error "Socket not found"
-        _ -> error "Accept: expected Int fd"
+                Nothing -> stackPush $ DInt (-1)
+        _ -> stackPush $ DInt (-1)
 runInstruction (Builtin Connect) = do
-    [fd, host, port] <- stackPopN 3
-    case (fd, host, port) of
-        (DInt f, DString h, DInt p) -> do
-            vm <- get
-            case Map.lookup f (sockets vm) of
-                Just sock -> do
-                    addrs <- liftIO $ getAddrInfo Nothing (Just h) (Just $ show p)
-                    case addrs of
-                        (addr : _) -> do
-                            result <- liftIO $ tryIO $ NS.connect sock (addrAddress addr)
-                            case result of
-                                Right _ -> return ()
-                                Left _ -> error "Connect failed"
-                        [] -> error "No address found"
-                Nothing -> error "Socket not found"
-        _ -> error "Connect: expected Int fd, String host, Int port"
+    popped <- stackPopN 3
+    case popped of
+        [port, host, fd] -> case (fd, host, port) of
+            (DInt f, DString h, DInt p) -> do
+                vm <- get
+                case Map.lookup f (sockets vm) of
+                    Just sock -> do
+                        addrsResult <- liftIO $ tryIO $ getAddrInfo Nothing (Just h) (Just $ show p)
+                        case addrsResult of
+                            Right (addr : _) -> do
+                                result <- liftIO $ tryIO $ NS.connect sock (addrAddress addr)
+                                case result of
+                                    Right _ -> return ()
+                                    Left _ -> setVMError "Connect failed"
+                            _ -> setVMError "No address found for connect"
+                    Nothing -> setVMError "Socket not found"
+            _ -> setVMError "Connect: expected Int fd, String host, Int port"
+        _ -> setVMError "Connect: expected 3 values on stack"
 runInstruction (Builtin Send) = do
-    [fd, data', flags] <- stackPopN 3
-    case (fd, data', flags) of
-        (DInt f, DString d, DInt fl) -> do
-            vm <- get
-            case Map.lookup f (sockets vm) of
-                Just sock -> do
-                    result <- liftIO $ tryIO $ NSB.send sock (pack d)
-                    case result of
-                        Right bytes -> stackPush $ DInt $ fromIntegral bytes
-                        Left _ -> stackPush $ DInt (-1)
-                Nothing -> error "Socket not found"
-        _ -> error "Send: expected Int fd, String data, Int flags"
+    popped <- stackPopN 3
+    case popped of
+        [flags, data', fd] -> case (fd, data', flags) of
+            (DInt f, DString d, DInt _) -> do
+                vm <- get
+                case Map.lookup f (sockets vm) of
+                    Just sock -> do
+                        result <- liftIO $ tryIO $ NSB.send sock (pack d)
+                        case result of
+                            Right bytes -> stackPush $ DInt $ fromIntegral bytes
+                            Left _ -> stackPush $ DInt (-1)
+                    Nothing -> stackPush $ DInt (-1)
+            _ -> stackPush $ DInt (-1)
+        _ -> setVMError "Send: expected Int fd, String data, Int flags"
 runInstruction (Builtin Recv) = do
-    [fd, size, flags] <- stackPopN 3
-    case (fd, size, flags) of
-        (DInt f, DInt s, DInt fl) -> do
-            vm <- get
-            case Map.lookup f (sockets vm) of
-                Just sock -> do
-                    result <- liftIO $ tryIO $ NSB.recv sock (fromIntegral s)
-                    case result of
-                        Right bytes -> stackPush $ DString $ unpack bytes
-                        Left _ -> stackPush $ DString ""
-                Nothing -> error "Socket not found"
-        _ -> error "Recv: expected Int fd, Int size, Int flags"
+    popped <- stackPopN 3
+    case popped of
+        [flags, size, fd] -> case (fd, size, flags) of
+            (DInt f, DInt s, DInt _) -> do
+                vm <- get
+                case Map.lookup f (sockets vm) of
+                    Just sock -> do
+                        result <- liftIO $ tryIO $ NSB.recv sock (fromIntegral s)
+                        case result of
+                            Right bytes -> stackPush $ DString $ unpack bytes
+                            Left _ -> stackPush $ DString ""
+                    Nothing -> stackPush $ DString ""
+            _ -> stackPush $ DString ""
+        _ -> setVMError "Recv: expected Int fd, Int size, Int flags"
 runInstruction (Builtin CloseSocket) = do
     fd <- stackPop
     case fd of
@@ -941,278 +1068,316 @@ runInstruction (Builtin CloseSocket) = do
                 Just sock -> do
                     _ <- liftIO $ tryIO $ NS.close sock
                     modify $ \v -> v{sockets = Map.delete f (sockets v)}
-                    return ()
-                Nothing -> error "Socket not found"
-        _ -> error "CloseSocket: expected Int fd"
+                Nothing -> return ()
+        _ -> return ()
 #endif
+
 runInstruction Exit = do
     modify $ \vm -> vm{running = False}
     actuallyExit <- gets shouldExit
-    when actuallyExit do
-        stackPop >>= \case DInt 0 -> liftIO exitSuccess; DInt x -> liftIO $ exitWith (ExitFailure x); _ -> error "Exit called with non-integer"
-    unless actuallyExit $ do
-        _ <- stackPop
-        modify $ \vm -> vm{running = False}
--- Control flow
+    when actuallyExit $ do
+        st <- gets stack
+        case st of
+            (DInt 0 : _) -> liftIO exitSuccess
+            (DInt code : _) -> liftIO $ exitWith (ExitFailure code)
+            _ -> liftIO exitSuccess
+    unless actuallyExit $ void stackPop
 runInstruction (Call x) = do
-    nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
+    p <- gets program
+    currPc <- gets pc
+    let nextInstruction = p V.!? (currPc + 1)
     case nextInstruction of
-        Ret -> tailCall
+        Just Ret -> runInstruction (Jmp x)
         _ -> do
-            vm <- get
-            let target = lookup x $ labels vm
-            modify $ \vm' -> vm'{pc = fromMaybe (error $ "Label not found: " ++ x) target, callStack = StackFrame{returnAddress = pc vm', locals = []} : callStack vm'}
-  where
-    tailCall = do
-        runInstruction $ Jmp x
+            lblRes <- findLabelFuzzy x
+            case lblRes of
+                Just (_, target) ->
+                    modify $ \vm' -> vm'{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack vm'}
+                Nothing -> setVMError $ "Label not found: " ++ x
 runInstruction (CallLocal x) = do
-    nextInstruction <- gets pc >>= \n -> gets program >>= \p -> return $ p V.! (n + 1)
+    p <- gets program
+    currPc <- gets pc
+    let nextInstruction = p V.!? (currPc + 1)
     case nextInstruction of
-        Ret -> tailCall
+        Just Ret -> runInstruction (Jmp x)
         _ -> do
             vm <- get
             case callStack vm of
                 (frame : _) -> do
-                    let target = lookup x $ labels vm
-                    modify $ \v -> v{pc = fromMaybe (error $ "Label not found: " ++ x) target, callStack = StackFrame{returnAddress = pc v, locals = frame.locals} : callStack v}
-                [] -> error "Empty call stack"
-  where
-    tailCall = do
-        traceM "Tail call"
-        runInstruction $ Jmp x
+                    lblRes <- findLabelFuzzy x
+                    case lblRes of
+                        Just (_, target) ->
+                            modify $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = frame.locals} : callStack v}
+                        Nothing -> setVMError $ "Label not found: " ++ x
+                [] -> do
+                    lblRes <- findLabelFuzzy x
+                    case lblRes of
+                        Just (_, target) ->
+                            modify $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack v}
+                        Nothing -> setVMError $ "Label not found: " ++ x
 runInstruction CallS =
-    stackPop >>= \d -> case d of
-        DFuncRef x args locals -> do
+    stackPop >>= \case
+        DFuncRef x args fnLocals -> do
             stackPushN args
             runInstruction $ Call x
-            forM_ locals $ \(name, value) -> runInstruction (Push value) >> runInstruction (LStore name)
-        _ -> error $ "Cannot call " ++ show d
+            forM_ fnLocals $ \(name, value) -> do
+                stackPush value
+                runInstruction (LStore name)
+        d -> setVMError $ "Cannot call " ++ show d
 runInstruction (Jmp x) = do
-    (_, n) <- findLabelFuzzy x
-    modify $ \vm -> vm{pc = n}
-runInstruction (Jt x) = stackPop >>= \d -> when (d == DBool True) $ runInstruction (Jmp x)
-runInstruction (Jf x) = stackPop >>= \d -> when (d == DBool False) $ runInstruction (Jmp x)
+    lblRes <- findLabelFuzzy x
+    case lblRes of
+        Just (_, target) -> modify $ \vm -> vm{pc = target}
+        Nothing -> setVMError $ "Label not found: " ++ x
+runInstruction (Jt x) = do
+    d <- stackPop
+    when (isTruthy d) $ runInstruction (Jmp x)
+runInstruction (Jf x) = do
+    d <- stackPop
+    unless (isTruthy d) $ runInstruction (Jmp x)
 runInstruction Ret = do
-    -- Might be helpful to do something like:
-    -- stackLen >>= \l -> when (l > 1) (error $ "Stack contains more than one item before return. Items: " ++ l)
-    -- get >>= \vm -> traceM $ show (stack vm)
-    modify $ \vm -> case callStack vm of
-        (_ : rest) -> vm{pc = returnAddress $ headOrError "Tried to return, but callstack was empty" (callStack vm), callStack = rest}
-        [] -> error "Tried to return, but callstack was empty"
--- Comparison
+    vm <- get
+    case callStack vm of
+        (frame : rest) -> modify $ \v -> v{pc = returnAddress frame, callStack = rest}
+        [] -> modify $ \v -> v{running = False}
 runInstruction Eq =
     stackPopN 2 >>= \case
         [y, x] -> do
             let result = case (x, y) of
-                    (DString s, DList l) -> s == map (\case DChar c -> c; _ -> error "Non-char in list") l && all (\case DChar _ -> True; _ -> False) l
-                    (DList l, DString s) -> map (\case DChar c -> c; _ -> error "Non-char in list") l == s && all (\case DChar _ -> True; _ -> False) l
+                    (DString s, DList l) -> case extractStringFromList l of
+                        Just lstr -> s == lstr
+                        Nothing -> False
+                    (DList l, DString s) -> case extractStringFromList l of
+                        Just lstr -> lstr == s
+                        Nothing -> False
                     _ -> x == y
             stackPush $ DBool result
-        _ -> error "Eq: expected 2 values on stack"
-runInstruction Neq = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x /= y; _ -> error "Neq: expected 2 values"
-runInstruction Lt = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x < y; _ -> error "Lt: expected 2 values"
-runInstruction Gt = stackPopN 2 >>= \case (y : x : _) -> stackPush $ DBool $ x > y; _ -> error "Gt: expected 2 values"
-runInstruction Not = stackPop >>= \d -> stackPush $ DBool $ not $ case d of DBool x -> x; _ -> error "Not a boolean"
+        _ -> setVMError "Eq: expected 2 values on stack"
+  where
+    extractStringFromList l =
+        let chars = [c | DChar c <- l]
+         in if length chars == length l then Just chars else Nothing
+runInstruction Neq =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ DBool $ x /= y
+        _ -> setVMError "Neq: expected 2 values on stack"
+runInstruction Lt =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ DBool $ x < y
+        _ -> setVMError "Lt: expected 2 values on stack"
+runInstruction Gt =
+    stackPopN 2 >>= \case
+        [y, x] -> stackPush $ DBool $ x > y
+        _ -> setVMError "Gt: expected 2 values on stack"
+runInstruction Not = do
+    d <- stackPop
+    stackPush $ DBool $ not (isTruthy d)
 runInstruction And =
     stackPopN 2 >>= \case
-        (y : x : _) -> stackPush $ DBool $ case (x, y) of
-            (DBool a, DBool b) -> a && b
-            _ -> error "Not a boolean"
-        _ -> error "And: expected 2 values"
+        [y, x] -> stackPush $ DBool $ isTruthy x && isTruthy y
+        _ -> setVMError "And: expected 2 values on stack"
 runInstruction Or =
     stackPopN 2 >>= \case
-        (y : x : _) -> stackPush $ DBool $ case (x, y) of
-            (DBool a, DBool b) -> a || b
-            _ -> error "Not a boolean"
-        _ -> error "Or: expected 2 values"
--- Label
+        [y, x] -> stackPush $ DBool $ isTruthy x || isTruthy y
+        _ -> setVMError "Or: expected 2 values on stack"
 runInstruction (Label _) = return ()
--- Stack
-runInstruction Swp = stackPopN 2 >>= \case (x : y : _) -> stackPushN [y, x]; _ -> error "Swp: expected 2 values"
-runInstruction Dup = stackLen >>= \sl -> when (sl > 0) $ stackPeek >>= stackPush
--- Memory
-runInstruction (Load x) = get >>= \vm -> stackPush $ memory vm !! x
-runInstruction (Store x) = stackPop >>= \d -> modify $ \vm -> vm{memory = take x (memory vm) ++ [d] ++ drop (x + 1) (memory vm)}
--- Locals
+runInstruction Swp =
+    stackPopN 2 >>= \case
+        [x, y] -> stackPushN [y, x]
+        _ -> setVMError "Swp: expected 2 values on stack"
+runInstruction Dup = do
+    sl <- stackLen
+    when (sl > 0) $ stackPeek >>= stackPush
+runInstruction (Load x) = do
+    mem <- gets memory
+    stackPush $ loadMemory x mem
+runInstruction (Store x) = do
+    d <- stackPop
+    modify $ \vm -> vm{memory = storeMemory x d (memory vm)}
 runInstruction (LStore name) = do
-    localsc <- fmap (locals . safeHead) (gets callStack)
-    let local = lookup name localsc
-    case local of
-        Just _ -> do
-            d <- stackPop
-            modify $ \vm -> case callStack vm of
-                (frame : rest) -> vm{callStack = frame{locals = (name, d) : filter ((/= name) . fst) localsc} : rest}
-                [] -> error "Empty call stack"
-        Nothing -> do
-            d <- stackPop
-            modify $ \vm -> case callStack vm of
-                (frame : rest) -> vm{callStack = frame{locals = (name, d) : localsc} : rest}
-                [] -> error "Empty call stack"
+    d <- stackPop
+    modify $ \vm -> case callStack vm of
+        (frame : rest) ->
+            let updatedLocals = (name, d) : filter ((/= name) . fst) (locals frame)
+             in vm{callStack = frame{locals = updatedLocals} : rest}
+        [] ->
+            vm{callStack = [StackFrame{returnAddress = pc vm, locals = [(name, d)]}]}
 runInstruction (LLoad name) = do
     vm <- get
-    let localsc = locals $ safeHead $ callStack vm
-    let local = Data.List.find ((== name) . fst) localsc
-    case local of
-        Just (_, x) -> stackPush x
-        Nothing -> error $ "Local not found: " ++ name
--- List
+    case callStack vm of
+        (frame : _) ->
+            case lookup name (locals frame) of
+                Just x -> stackPush x
+                Nothing -> stackPush DNone
+        [] -> stackPush DNone
 runInstruction (Concat 0) = stackPush $ DList []
-runInstruction (Concat n) =
-    -- TODO: make this more efficient, it's yucky
-    -- Do what : does in Haskell
-    stackPopN n >>= \l -> do
-        stackPush $
-            DList $
-                concat $
-                    zipWith
-                        ( \x y ->
-                            ( case (x, y) of
-                                (a, DList b) -> a : b
-                                _ -> error "Invalid types for concat"
-                            )
-                        )
-                        l
-                        (drop 1 l)
-runInstruction Index = stackPopN 2 >>= \case [DInt index, DList list] -> stackPush $ indexOrError index list; [DInt index, DString str] -> stackPush $ DChar $ indexOrError index str; x -> error $ "Invalid types for index: " ++ show x
+runInstruction (Concat n) = do
+    elems <- stackPopN n
+    let combined = concatMap (\case DList xs -> xs; DString s -> map DChar s; x -> [x]) elems
+    stackPush $ DList combined
+runInstruction Index =
+    stackPopN 2 >>= \case
+        [DInt idx, DList list] ->
+            if idx < 0 || idx >= length list
+                then setVMError $ "Index out of bounds: " ++ show idx ++ " (length " ++ show (length list) ++ ")"
+                else stackPush (list !! idx)
+        [DInt idx, DString str] ->
+            if idx < 0 || idx >= length str
+                then setVMError $ "Index out of bounds: " ++ show idx ++ " (length " ++ show (length str) ++ ")"
+                else stackPush (DChar (str !! idx))
+        _ -> setVMError "Invalid types for index"
 runInstruction Slice = do
-    start <- stackPop
     end <- stackPop
-    wasString <- stackPeek >>= \case DString _ -> return True; _ -> return False
-    list <- stackPop >>= \case DList l -> return l; DString s -> return $ map DChar s; _ -> error "Invalid type for slice"
-    stackPush $ case (end, start) of
-        (DInt start', DInt end') -> DList $ slice start' (Just end') list
-        (DInt start', DNone) -> DList $ slice start' Nothing list
-        (DNone, DInt end') -> DList $ slice 0 (Just end') list
-        (DNone, DNone) -> DList $ slice 0 Nothing list
-        _ -> error "Invalid slice"
-    when wasString $ stackPop >>= \case DList x -> stackPush $ DString $ map (\case DChar char -> char; _ -> error "Non-char in list") x; _ -> error "Expected DList"
+    start <- stackPop
+    target <- stackPop
+    case target of
+        DString s -> do
+            let res = sliceHelper start end s
+            stackPush $ DString res
+        DList l -> do
+            let res = sliceHelper start end l
+            stackPush $ DList res
+        _ -> stackPush DNone
   where
-    slice :: Int -> Maybe Int -> [a] -> [a]
-    slice start maybeEnd xs
-        | start' >= end' = []
-        | otherwise = take (end' - start') $ drop start' xs
-      where
-        len = length xs
-        start' = if start >= 0 then min start len else max 0 (len + start)
-        end' = case maybeEnd of
-            Just end -> if end > 0 then min end len else max 0 (len + end)
-            Nothing -> len
-runInstruction Length =
-    stackLen >>= \case
-        0 -> stackPush $ DInt (-1)
-        _ -> stackPop >>= \case DList l -> stackPush $ DInt $ length l; DString s -> stackPush $ DInt $ length s; x -> error $ "Invalid type for length (" ++ debugShowData x ++ ")"
--- Type
+    sliceHelper sVal eVal xs =
+        let len = length xs
+            s = case sVal of
+                DInt start' -> if start' >= 0 then min start' len else max 0 (len + start')
+                _ -> 0
+            e = case eVal of
+                DInt end' -> if end' >= 0 then min end' len else max 0 (len + end')
+                _ -> len
+         in if s >= e then [] else take (e - s) (drop s xs)
+runInstruction Length = do
+    st <- gets stack
+    if null st
+        then stackPush $ DInt (-1)
+        else do
+            d <- stackPop
+            stackPush $ DInt $ case d of
+                DList l -> length l
+                DString s -> length s
+                DMap m -> Map.size m
+                _ -> 0
 runInstruction Cast = do
     to <- stackPop
-    stackPop >>= \case
-        (DInt x) -> stackPush $ case to of
-            DInt _ -> DInt x
-            DFloat _ -> DFloat $ fromIntegral x
-            DDouble _ -> DDouble $ fromIntegral x
-            DString _ -> DString $ show x
-            DBool _ -> DBool $ x /= 0
-            DList _ -> DList [DInt x]
-            DNone -> DNone
-            DChar _ -> DChar $ toEnum x
-            DCPtr _ -> DCPtr $ fromIntegral x
-            type' -> error $ "Cast to Int for type not implemented: " ++ debugShowData type'
-        (DFloat x) -> stackPush $ case to of
-            DInt _ -> DInt $ round x
-            DFloat _ -> DFloat x
-            DDouble _ -> DDouble $ realToFrac x
-            DString _ -> DString $ show x
-            DBool _ -> DBool $ x /= 0
-            DList _ -> DList [DFloat x]
-            DNone -> DNone
-            DChar _ -> DChar $ toEnum $ round x
-            type' -> error $ "Cast to Float for type not implemented: " ++ debugShowData type'
-        (DDouble x) -> stackPush $ case to of
-            DInt _ -> DInt $ round x
-            DFloat _ -> DFloat $ realToFrac x
-            DDouble _ -> DDouble x
-            DString _ -> DString $ show x
-            DBool _ -> DBool $ x /= 0
-            DList _ -> DList [DDouble x]
-            DNone -> DNone
-            DChar _ -> DChar $ toEnum $ round x
-            type' -> error $ "Cast to Double for type not implemented: " ++ debugShowData type'
-        (DString x) -> stackPush $ case to of
-            DInt _ -> DInt $ read x
-            DFloat _ -> DFloat $ read x
-            DDouble _ -> DDouble $ read x
-            DString _ -> DString x
-            DBool _ -> DBool $ x /= ""
-            DList _ -> DList [DString x]
-            DNone -> DNone
-            DChar _ -> case x of
-                (c : _) -> DChar c
-                [] -> error "Empty string in cast"
-            type' -> error $ "Cast to String for type not implemented: " ++ debugShowData type'
-        (DList []) -> stackPush $ case to of
-            DList _ -> DList []
-            type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
-        (DList x) -> stackPush $ case to of
-            DList _ -> DList x
-            DString _ -> if all (\case DChar{} -> True; _ -> False) x then DString $ map (\case DChar c -> c; _ -> error "Non-char in list") x else DString $ show x
-            DNone -> DNone
-            type' -> error $ "Cast to List for type not implemented: " ++ debugShowData type'
-        x -> do
-            if x == to || x == DNone
-                then stackPush x
-                else error $ "Cast not implemented: " ++ debugShowData x ++ " to " ++ debugShowData to
+    val <- stackPop
+    stackPush $ case (val, to) of
+        (DInt x, DInt _) -> DInt x
+        (DInt x, DFloat _) -> DFloat (fromIntegral x)
+        (DInt x, DDouble _) -> DDouble (fromIntegral x)
+        (DInt x, DString _) -> DString (show x)
+        (DInt x, DBool _) -> DBool (x /= 0)
+        (DInt x, DList _) -> DList [DInt x]
+        (DInt x, DChar _) -> DChar (safeChr x)
+        (DInt x, DCPtr _) -> DCPtr (fromIntegral x)
+        (DFloat x, DInt _) -> DInt (round x)
+        (DFloat x, DFloat _) -> DFloat x
+        (DFloat x, DDouble _) -> DDouble (realToFrac x)
+        (DFloat x, DString _) -> DString (show x)
+        (DFloat x, DBool _) -> DBool (x /= 0)
+        (DFloat x, DList _) -> DList [DFloat x]
+        (DFloat x, DChar _) -> DChar (safeChr (round x))
+        (DDouble x, DInt _) -> DInt (round x)
+        (DDouble x, DFloat _) -> DFloat (realToFrac x)
+        (DDouble x, DDouble _) -> DDouble x
+        (DDouble x, DString _) -> DString (show x)
+        (DDouble x, DBool _) -> DBool (x /= 0)
+        (DDouble x, DList _) -> DList [DDouble x]
+        (DDouble x, DChar _) -> DChar (safeChr (round x))
+        (DString x, DInt _) -> DInt (fromMaybe 0 (readMaybe x))
+        (DString x, DFloat _) -> DFloat (fromMaybe 0 (readMaybe x))
+        (DString x, DDouble _) -> DDouble (fromMaybe 0 (readMaybe x))
+        (DString x, DString _) -> DString x
+        (DString x, DBool _) -> DBool (not (null x))
+        (DString x, DList _) -> DList (map DChar x)
+        (DString x, DChar _) -> case x of (c : _) -> DChar c; [] -> DChar '\0'
+        (DChar x, DInt _) -> DInt (ord x)
+        (DChar x, DFloat _) -> DFloat (fromIntegral (ord x))
+        (DChar x, DDouble _) -> DDouble (fromIntegral (ord x))
+        (DChar x, DString _) -> DString [x]
+        (DChar x, DBool _) -> DBool (ord x /= 0)
+        (DChar x, DChar _) -> DChar x
+        (DBool x, DInt _) -> DInt (if x then 1 else 0)
+        (DBool x, DFloat _) -> DFloat (if x then 1 else 0)
+        (DBool x, DDouble _) -> DDouble (if x then 1 else 0)
+        (DBool x, DString _) -> DString (show x)
+        (DBool x, DBool _) -> DBool x
+        (DList [], DList _) -> DList []
+        (DList x, DList _) -> DList x
+        (DList x, DString _) ->
+            let chars = [c | DChar c <- x]
+             in if length chars == length x then DString chars else DString (show x)
+        (x, _) | x == to || to == DNone -> x
+        (x, _) -> x
 runInstruction (Meta _) = return ()
 runInstruction (Comment _) = return ()
 runInstruction (Access x) =
     stackPop >>= \case
-        DMap m -> case Data.Map.lookup x m of
-            Just value -> stackPush value
-            Nothing -> error $ "Field '" ++ x ++ "' not found in struct. Available fields: " ++ show (Data.Map.keys m)
-        m -> error $ "Invalid type for access. Tried to access field '" ++ x ++ "' on " ++ show m
-runInstruction AAccess = stackPopN 2 >>= \case (DString x : DMap m : _) -> stackPush $ fromMaybe DNone $ Data.Map.lookup x m; _ -> error "AAccess: expected String and Map"
-runInstruction Keys = stackPop >>= \case DMap m -> stackPush $ DList $ map DString $ Data.Map.keys m; _ -> error "Invalid type for keys"
-runInstruction Update = stackPopN 3 >>= \case (value : DString key : DMap m : _) -> stackPush $ DMap $ Data.Map.insert key value m; _ -> error "Update: expected value, String key, and Map"
+        DMap m -> stackPush $ fromMaybe DNone (Map.lookup x m)
+        _ -> stackPush DNone
+runInstruction AAccess =
+    stackPopN 2 >>= \case
+        [DString x, DMap m] -> stackPush $ fromMaybe DNone (Map.lookup x m)
+        _ -> stackPush DNone
+runInstruction Keys =
+    stackPop >>= \case
+        DMap m -> stackPush $ DList $ map DString (Map.keys m)
+        _ -> stackPush $ DList []
+runInstruction Update =
+    stackPopN 3 >>= \case
+        [value, DString key, DMap m] -> stackPush $ DMap $ Map.insert key value m
+        [value, DString key, _] -> stackPush $ DMap $ Map.singleton key value
+        _ -> return ()
 runInstruction (PackMap n) = do
     elems <- stackPopN n
-    stackPush $ DMap $ Data.Map.fromList $ map (\case [DString x, y] -> (x, y); x -> error $ "Invalid type for map: " ++ show x) $ chunksOf 2 elems
+    let pairs = concatMap (\case [DString k, v] -> [(k, v)]; [k, v] -> [(show k, v)]; _ -> []) $ chunksOf 2 elems
+    stackPush $ DMap $ Map.fromList pairs
 runInstruction TypeOf =
     stackPop >>= \case
         DInt _ -> stackPush $ DString "Int"
         DFloat _ -> stackPush $ DString "Float"
+        DDouble _ -> stackPush $ DString "Double"
         DString _ -> stackPush $ DString "String"
         DBool _ -> stackPush $ DString "Bool"
         DList _ -> stackPush $ DString "List"
         DNone -> stackPush $ DString "None"
         DChar _ -> stackPush $ DString "Char"
         DFuncRef{} -> stackPush $ DString "FuncRef"
-        DMap m -> do
-            case Data.Map.lookup "__name" m of
-                Just (DString name) -> stackPush $ DString name
-                _ -> stackPush $ DString "Map"
+        DMap m -> case Map.lookup "__name" m of
+            Just (DString name) -> stackPush $ DString name
+            _ -> stackPush $ DString "Map"
         DTypeQuery s -> stackPush $ DString $ "TypeQuery{" ++ s ++ "}"
         DCPtr _ -> stackPush $ DString "CPtr"
-        DDouble _ -> stackPush $ DString "Double"
 runInstruction TypeEq = do
     popped <- stackPopN 2
     case popped of
         [y, x] -> stackPush $ DBool $ case (x, y) of
             (DInt _, DInt _) -> True
             (DFloat _, DFloat _) -> True
+            (DDouble _, DDouble _) -> True
             (DString _, DString _) -> True
             (DBool _, DBool _) -> True
             (DList _, DList _) -> True
             (DNone, DNone) -> True
             (DChar _, DChar _) -> True
             (DFuncRef{}, DFuncRef{}) -> True
-            (DMap a, DMap b) -> do
-                not (isJust (Data.Map.lookup "__name" a) && isJust (Data.Map.lookup "__name" b)) || (Data.Map.lookup "__name" a == Data.Map.lookup "__name" b)
-            (DMap m, DTypeQuery tq) -> do
-                let name = Data.Map.lookup "__name" m
-                let traits = Data.Map.lookup "__traits" m
-                case (name, traits) of
-                    (Just (DString n), Just (DList ts)) -> n == tq || DString tq `elem` ts
-                    _ -> False
+            (DMap a, DMap b) ->
+                let aName = Map.lookup "__name" a
+                    bName = Map.lookup "__name" b
+                 in case (aName, bName) of
+                        (Just an, Just bn) -> an == bn
+                        _ -> True
+            (DMap m, DTypeQuery tq) ->
+                let name = Map.lookup "__name" m
+                    traits = Map.lookup "__traits" m
+                 in case (name, traits) of
+                        (Just (DString n), Just (DList ts)) -> n == tq || DString tq `elem` ts
+                        (Just (DString n), _) -> n == tq
+                        _ -> False
             (DInt _, DTypeQuery s) -> s == "Int"
             (DFloat _, DTypeQuery s) -> s == "Float"
+            (DDouble _, DTypeQuery s) -> s == "Double"
             (DString _, DTypeQuery s) -> s == "String"
             (DBool _, DTypeQuery s) -> s == "Bool"
             (DList _, DTypeQuery s) -> s == "List"
@@ -1220,27 +1385,31 @@ runInstruction TypeEq = do
             (DChar _, DTypeQuery s) -> s == "Char"
             (DFuncRef{}, DTypeQuery s) -> s == "FuncRef"
             _ -> False
-        _ -> do
-            stackPush $ DBool False
+        _ -> stackPush $ DBool False
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList . reverse
-runInstruction UnpackList = stackPop >>= \case DList l -> stackPushN l; x -> error $ "Invalid type for unpack list: " ++ show x
-runInstruction (Mov n dat) = do
-    -- Move data into register %n
-    vm <- get
-    put $ vm{memory = take n (memory vm) ++ [dat] ++ drop (n + 1) (memory vm)}
+runInstruction UnpackList =
+    stackPop >>= \case
+        DList l -> stackPushN l
+        DString s -> stackPushN (map DChar s)
+        x -> stackPush x
+runInstruction (Mov n dat) =
+    modify $ \vm -> vm{memory = storeMemory n dat (memory vm)}
 runInstruction StoreSideStack = modify $ \vm -> vm{sideStack = stack vm}
 runInstruction LoadSideStack = modify $ \vm -> vm{stack = if null $ sideStack vm then stack vm else sideStack vm}
 runInstruction ClearSideStack = modify $ \vm -> vm{sideStack = []}
 runInstruction (ListAdd n) = do
-    stackPopN n >>= \x -> do
-        stackPush $ DList $ concatMap (\case DList elements -> elements; DString string -> map DChar string; el -> [el]) x
-        stackPeek >>= \case DList elements -> when (all (\case DChar _ -> True; _ -> False) elements) (stackPop >> stackPush (DString $ map (\case DChar char -> char; _ -> error "Non-char in list") elements)); _ -> return ()
+    elems <- stackPopN n
+    let combined = concatMap (\case DList xs -> xs; DString s -> map DChar s; el -> [el]) elems
+    let isAllChar = not (null combined) && all (\case DChar _ -> True; _ -> False) combined
+    if isAllChar
+        then stackPush $ DString [c | DChar c <- combined]
+        else stackPush $ DList combined
 
 printAssembly :: Program -> Bool -> String
-printAssembly program showLineNumbers =
+printAssembly prog showLineNumbers =
     if not showLineNumbers
-        then concatMap printAssembly' program
-        else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] (V.toList program)
+        then concatMap printAssembly' prog
+        else concatMap (\(n, i) -> "\ESC[1;30m" ++ show n ++ "\ESC[0m       " ++ printAssembly' i) $ zip [0 :: Integer ..] (V.toList prog)
   where
     printAssembly' :: Instruction -> String
     printAssembly' (Label name) = "\ESC[0;32m" <> name <> "\ESC[0m " ++ ":\n"
@@ -1259,7 +1428,6 @@ printAssembly program showLineNumbers =
       where
         a' = Data.Text.pack a
         a'' = Data.Text.replace "\n" "\\n" a'
-        -- lowercase the first word
         a''' =
             Data.Text.split (== ' ') a'' & \case
                 [] -> ""

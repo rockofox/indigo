@@ -37,7 +37,7 @@ import VM
     , IOMode (VMBuffer)
     , Instruction (Label)
     , StackFrame (StackFrame, locals, returnAddress)
-    , VM (breakpoints, callStack, ioBuffer, ioMode, pc)
+    , VM (breakpoints, callStack, ioBuffer, ioMode, pc, vmError)
     , initVM
     , printAssembly
     , runVMVM
@@ -66,7 +66,9 @@ compileAndRun prog = do
                                 Nothing -> 0
                         else mainLabel
             vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
-            pure $ output $ ioBuffer vm
+            case vmError vm of
+                Just err -> error err
+                Nothing -> pure $ output $ ioBuffer vm
 
 compileAndRunForced :: String -> IO String
 compileAndRunForced prog = do
@@ -115,7 +117,9 @@ compileAndRunModules modules = do
                                             Nothing -> 0
                                     else mainLabel
                         vm <- runVMVM $ (initVM (V.fromList optimizedProgram)){pc = startPc, breakpoints = [], callStack = [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainLabel, locals = []}], ioMode = VMBuffer, shouldExit = False}
-                        pure $ output $ ioBuffer vm
+                        case vmError vm of
+                            Just err -> error err
+                            Nothing -> pure $ output $ ioBuffer vm
 
 spec = do
     describe "Hello World" $ do
@@ -1304,6 +1308,32 @@ spec = do
                 end
             |]
                 `shouldReturn` "10\n[20,30]\n"
+        it "Should open, write, read and close files with File module" $ do
+            withSystemTempDirectory "file-test" $ \tmpDir -> do
+                let testFilePath = tmpDir </> "test.txt"
+                compileAndRun
+                    ( [r|
+                    import qualified File
+
+                    let main : IO<Unit> = do
+                        let path = "|]
+                        ++ testFilePath
+                        ++ [r|"
+                        let fd_io = File.openFile path, "w"
+                        let fd = fd_io.inner
+                        File.writeFile fd, "hello indigo\n"
+                        File.closeFile fd
+
+                        let fd2_io = File.openFile path, "r"
+                        let fd2 = fd2_io.inner
+                        let content_io = File.readFile fd2, 1000
+                        println content_io.inner
+                        File.closeFile fd2
+                        nop
+                    end
+                |]
+                    )
+                    `shouldReturn` "hello indigo\n\n"
         it "Should work with tuples in function parameters" $ do
             compileAndRun
                 [r|

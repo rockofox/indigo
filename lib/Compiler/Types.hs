@@ -62,6 +62,8 @@ allTheSame xs = all (compareSame $ head xs) (tail xs)
     compareSame x y = x == y
 
 typeCompatible :: Parser.Type -> Parser.Type -> Compiler Bool
+typeCompatible (Parser.List Parser.Any) (Parser.List _) = return True
+typeCompatible (Parser.List _) (Parser.List Parser.Any) = return True
 typeCompatible x y = do
     let x' = typeToString x
     let y' = typeToString y
@@ -85,6 +87,8 @@ typeCompatible x y = do
                     return $ valueStructOk || y' `elem` impls
 
 compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> Compiler Bool
+compareTypes' (Parser.List Parser.Any) (Parser.List _) _ = return True
+compareTypes' (Parser.List _) (Parser.List Parser.Any) _ = return True
 compareTypes' (Parser.List x) (Parser.List y) generics = compareTypes' x y generics
 compareTypes' (Parser.List Parser.Any) (Parser.StructT "String" []) _ = return True
 compareTypes' (Parser.List (Parser.StructT "Char" [])) (Parser.StructT "String" []) _ = return True
@@ -183,6 +187,9 @@ typeOf (Parser.Target{}) = internalError "Cannot infer type of target"
 typeOf (Parser.ListConcat x _ _) = typeOf x
 typeOf (Parser.ListPattern _ _) = return $ Parser.List Parser.Any
 typeOf (Parser.StructAccess _ s _) = typeOf s
+typeOf (Parser.Pipeline a (Parser.Var b pos) _) = typeOf (Parser.FuncCall b [a] pos)
+typeOf (Parser.Pipeline a (Parser.FuncCall f args pos) _) = typeOf (Parser.FuncCall f (a : args) pos)
+typeOf (Parser.Pipeline _ (Parser.Lambda _ body _) _) = typeOf body
 typeOf (Parser.Pipeline _ b _) = typeOf b
 typeOf (Parser.Lambda{lambdaArgs, lambdaBody}) = do
     returnType <- typeOf lambdaBody

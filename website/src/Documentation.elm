@@ -1147,7 +1147,7 @@ end""" onLoadCode True "indigo"
         , viewCodeBlock """type Age = (value: Int) satisfies (value >= 0)
 
 let main: IO<Unit> = do
-    let raw = unsafeGetLine
+    let raw = $getLine
     let n   = raw as Int
     let age = unchecked Age{value: n}
     println age.value
@@ -1392,6 +1392,7 @@ let main : IO<Unit> = do
     let content_io = File.readFile fd2, 1000
     println content_io.inner
     File.closeFile fd2
+    nop
 end""" onLoadCode False "indigo"
         , h3 [] [ text "Typical API" ]
         , p [] [ text "openFile path mode, readFile fd size, writeFile fd content, closeFile fd; each returns IO wrapping an Int or String payload via .inner." ]

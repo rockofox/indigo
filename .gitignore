@@ -26,7 +26,7 @@ cabal.project.local~
 .vscode
 *.wat
 *.wasm
-result
+result*
 *.tix
 examples/scratch.in
 .pre-commit-config.yaml

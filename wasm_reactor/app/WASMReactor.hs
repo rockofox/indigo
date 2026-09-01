@@ -12,7 +12,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.ByteString.Unsafe qualified as BU
 import Data.Char (ord)
-import Data.IORef (readIORef)
+import Data.List (elemIndex)
 import Data.Map qualified as Map
 import Data.Text qualified
 import Data.Vector qualified as V
@@ -34,6 +34,7 @@ import System.Exit (exitFailure)
 import VM
     ( IOBuffer (..)
     , IOMode (VMBuffer)
+    , Instruction (Jmp, Label)
     , StackFrame (StackFrame, locals, returnAddress)
     , VM (breakpoints, callStack, ioBuffer, ioMode, pc)
     , initVM
@@ -58,8 +59,20 @@ runProgramRaw progPtr progLen = do
                         compileFail "<input>" errors (Map.singleton "<input>" input)
                         exitFailure
             putStrLn $ printAssembly (V.fromList xxx) True
-            let xxxPoint = locateLabel xxx "main"
-            runVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}]}
+            let mainPc = locateLabel xxx "main"
+            let sepIndex = elemIndex (VM.Label "__sep") xxx
+            let hasTopLevelLets = VM.Jmp "main" `elem` xxx
+            let startPc =
+                    if hasTopLevelLets
+                        then case sepIndex of
+                            Just sepPc -> sepPc + 1
+                            Nothing -> 0
+                        else mainPc
+            let initialCallStack =
+                    if hasTopLevelLets
+                        then [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainPc, locals = []}]
+                        else [StackFrame{returnAddress = mainPc, locals = []}]
+            runVM $ (initVM (V.fromList xxx)){pc = startPc, breakpoints = [], callStack = initialCallStack}
 
 runProgramRawBuffered :: Ptr CChar -> Int -> Ptr CChar -> Int -> Ptr (Ptr CChar) -> IO Int
 runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
@@ -77,8 +90,20 @@ runProgramRawBuffered progPtr progLen inputPtr inputLen outputPtrPtr = do
                     Right errors -> do
                         compileFail "<input>" errors (Map.singleton "<input>" programStr)
                         exitFailure
-            let xxxPoint = locateLabel xxx "main"
-            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = xxxPoint, breakpoints = [], callStack = [StackFrame{returnAddress = xxxPoint, locals = []}], ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
+            let mainPc = locateLabel xxx "main"
+            let sepIndex = elemIndex (VM.Label "__sep") xxx
+            let hasTopLevelLets = VM.Jmp "main" `elem` xxx
+            let startPc =
+                    if hasTopLevelLets
+                        then case sepIndex of
+                            Just sepPc -> sepPc + 1
+                            Nothing -> 0
+                        else mainPc
+            let initialCallStack =
+                    if hasTopLevelLets
+                        then [StackFrame{returnAddress = 0, locals = []}, StackFrame{returnAddress = mainPc, locals = []}]
+                        else [StackFrame{returnAddress = mainPc, locals = []}]
+            vm <- runVMVM $ (initVM (V.fromList xxx)){pc = startPc, breakpoints = [], callStack = initialCallStack, ioMode = VMBuffer, ioBuffer = IOBuffer{input = input, output = ""}, shouldExit = False}
             let output' = BS.pack $ output $ ioBuffer vm
             BU.unsafeUseAsCStringLen output' $ \(buf, len) -> do
                 outputPtr <- mallocBytes len

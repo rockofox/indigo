@@ -137,7 +137,7 @@ let main : IO<Unit> = do
     println ("(5 * 2) + 10 = " ++ result as String)
 
     let items = [1, 2, 3, 4]
-    println ("Sum of [1, 2, 3, 4] = " ++ (sum items) as String)
+    println ("Sum of [1, 2, 3, 4] = " ++ (items |> sum) as String)
 end"""
       )
     , ( "99 Bottles"
