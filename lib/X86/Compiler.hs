@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module X86.Compiler (compileInstructionsToAsm, compileProgramToAssemblyFile) where
@@ -328,8 +329,10 @@ compileInstruction (Builtin GetChar) =
     return $ callC "indigo_builtin_getchar"
 compileInstruction (Builtin Random) =
     return $ callC "indigo_builtin_random"
+#ifdef POSIX_IO
 compileInstruction (Builtin _) =
     return $ callC "indigo_builtin_print"
+#endif
 compileInstruction (Comment msg) =
     return [CommentLine msg]
 compileInstruction (Meta msg) =

@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Compiler.Functions where
 
 import AST (Position (..), anyPosition)
@@ -244,6 +246,41 @@ unsafeBinaryBuiltins =
         , ("unsafeStructAccess", [AAccess])
         ]
 
+#ifdef POSIX_IO
+compilePosixBuiltin :: CompileExpr -> String -> [Parser.Expr] -> Parser.Type -> Maybe (Compiler [Instruction])
+compilePosixBuiltin compileExpr' funcName funcArgs expectedType =
+    case (funcName, funcArgs) of
+        ("unsafeOpenFile", [path, mode]) -> Just $ bin path mode [Builtin OpenFile]
+        ("unsafeReadFile", [fd, size]) -> Just $ bin fd size [Builtin ReadFile]
+        ("unsafeWriteFile", [fd, content]) -> Just $ bin fd content [Builtin WriteFile]
+        ("unsafeCloseFile", [fd]) -> Just $ un fd [Builtin CloseFile]
+        ("unsafeSocket", [d, t, p]) -> Just $ tri d t p [Builtin Socket]
+        ("unsafeBind", [fd, host, port]) -> Just $ tri fd host port [Builtin Bind]
+        ("unsafeListen", [fd, backlog]) -> Just $ bin fd backlog [Builtin Listen]
+        ("unsafeAccept", [fd]) -> Just $ un fd [Builtin Accept]
+        ("unsafeConnect", [fd, host, port]) -> Just $ tri fd host port [Builtin Connect]
+        ("unsafeSend", [fd, dat, flags]) -> Just $ tri fd dat flags [Builtin Send]
+        ("unsafeRecv", [fd, size, flags]) -> Just $ tri fd size flags [Builtin Recv]
+        ("unsafeCloseSocket", [fd]) -> Just $ un fd [Builtin CloseSocket]
+        _ -> Nothing
+  where
+    bin x y instrs = do
+        x' <- compileExpr' x expectedType
+        y' <- compileExpr' y expectedType
+        return (x' ++ y' ++ instrs)
+    un x instrs = do
+        x' <- compileExpr' x expectedType
+        return (x' ++ instrs)
+    tri x y z instrs = do
+        x' <- compileExpr' x expectedType
+        y' <- compileExpr' y expectedType
+        z' <- compileExpr' z expectedType
+        return (x' ++ y' ++ z' ++ instrs)
+#else
+compilePosixBuiltin :: CompileExpr -> String -> [Parser.Expr] -> Parser.Type -> Maybe (Compiler [Instruction])
+compilePosixBuiltin _ _ _ _ = Nothing
+#endif
+
 compileUnsafeBuiltin :: CompileExpr -> String -> [Parser.Expr] -> Parser.Type -> Maybe (Compiler [Instruction])
 compileUnsafeBuiltin compileExpr' funcName funcArgs expectedType =
     case Data.Map.lookup funcName unsafeBinaryBuiltins of
@@ -253,18 +290,6 @@ compileUnsafeBuiltin compileExpr' funcName funcArgs expectedType =
             ("unsafeGetLine", []) -> Just $ return [Builtin GetLine]
             ("unsafeGetChar", []) -> Just $ return [Builtin GetChar]
             ("unsafeRandom", []) -> Just $ return [Builtin Random]
-            ("unsafeOpenFile", [path, mode]) -> Just $ bin path mode [Builtin OpenFile]
-            ("unsafeReadFile", [fd, size]) -> Just $ bin fd size [Builtin ReadFile]
-            ("unsafeWriteFile", [fd, content]) -> Just $ bin fd content [Builtin WriteFile]
-            ("unsafeCloseFile", [fd]) -> Just $ un fd [Builtin CloseFile]
-            ("unsafeSocket", [d, t, p]) -> Just $ tri d t p [Builtin Socket]
-            ("unsafeBind", [fd, host, port]) -> Just $ tri fd host port [Builtin Bind]
-            ("unsafeListen", [fd, backlog]) -> Just $ bin fd backlog [Builtin Listen]
-            ("unsafeAccept", [fd]) -> Just $ un fd [Builtin Accept]
-            ("unsafeConnect", [fd, host, port]) -> Just $ tri fd host port [Builtin Connect]
-            ("unsafeSend", [fd, dat, flags]) -> Just $ tri fd dat flags [Builtin Send]
-            ("unsafeRecv", [fd, size, flags]) -> Just $ tri fd size flags [Builtin Recv]
-            ("unsafeCloseSocket", [fd]) -> Just $ un fd [Builtin CloseSocket]
             ("unsafeListAdd", [y, x]) -> Just $ do
                 x' <- compileExpr' x expectedType
                 y' <- compileExpr' y expectedType
@@ -281,7 +306,7 @@ compileUnsafeBuiltin compileExpr' funcName funcArgs expectedType =
             ("sqrt", [x]) -> Just $ do
                 x' <- compileExpr' x expectedType
                 return (x' ++ [Push $ DFloat 0.5, Pow])
-            _ -> Nothing
+            _ -> compilePosixBuiltin compileExpr' funcName funcArgs expectedType
   where
     bin x y instrs = do
         x' <- compileExpr' x expectedType
