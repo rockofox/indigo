@@ -8,9 +8,8 @@ import BytecodeCompiler (CompilerError (..), compileFail, renderCompilerErrors)
 import BytecodeCompiler qualified
 import Control.Exception
 import Control.Monad (filterM, when)
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Identity (Identity (..))
-import Control.Monad.State.Strict
+import Control.Monad.Identity (Identity (..), runIdentity)
+import Control.Monad.State
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as B
 import Data.List (elemIndex, intercalate, isPrefixOf)
