@@ -70,18 +70,18 @@ typedef struct IndigoFuncRef {
     bool has_local[MAX_LOCALS];
 } IndigoFuncRef;
 
-static IndigoValue g_stack[STACK_CAPACITY];
-static int64_t g_sp = 0;
+IndigoValue g_stack[STACK_CAPACITY];
+int64_t g_sp = 0;
 
-static IndigoValue g_sidestack[STACK_CAPACITY];
-static int64_t g_ssp = 0;
+IndigoValue g_sidestack[STACK_CAPACITY];
+int64_t g_ssp = 0;
 
-static IndigoValue g_memory[MEMORY_CAPACITY];
+IndigoValue g_memory[MEMORY_CAPACITY];
 
 #define FRAME_POOL_CAPACITY 65536
-static IndigoFrame g_frame_pool[FRAME_POOL_CAPACITY];
-static int64_t g_frame_pool_sp = 0;
-static IndigoFrame* g_current_frame = NULL;
+IndigoFrame g_frame_pool[FRAME_POOL_CAPACITY];
+int64_t g_frame_pool_sp = 0;
+IndigoFrame* g_current_frame = NULL;
 
 static inline int64_t float_to_payload(float f) {
     int64_t p = 0;
