@@ -61,8 +61,6 @@ typedef struct IndigoLocalEntry {
 
 typedef struct IndigoFrame {
     IndigoLocalEntry* locals;
-    IndigoValue sidestack[STACK_CAPACITY];
-    int64_t ssp;
     struct IndigoFrame* prev;
 } IndigoFrame;
 
@@ -82,6 +80,9 @@ static int64_t g_ssp = 0;
 
 static IndigoValue g_memory[MEMORY_CAPACITY];
 
+#define FRAME_POOL_CAPACITY 65536
+static IndigoFrame g_frame_pool[FRAME_POOL_CAPACITY];
+static int64_t g_frame_pool_sp = 0;
 static IndigoFrame* g_current_frame = NULL;
 
 static inline int64_t float_to_payload(float f) {
@@ -167,22 +168,24 @@ void indigo_swp(void) {
 }
 
 void indigo_enter_frame(void) {
-    IndigoFrame* frame = (IndigoFrame*)malloc(sizeof(IndigoFrame));
+    if (g_frame_pool_sp >= FRAME_POOL_CAPACITY) {
+        fprintf(stderr, "Call frame stack overflow\n");
+        exit(1);
+    }
+    IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
     frame->locals = NULL;
-    frame->ssp = 0;
     frame->prev = g_current_frame;
     g_current_frame = frame;
 }
 
 void indigo_enter_frame_inherit(void) {
-    IndigoFrame* frame = (IndigoFrame*)malloc(sizeof(IndigoFrame));
+    if (g_frame_pool_sp >= FRAME_POOL_CAPACITY) {
+        fprintf(stderr, "Call frame stack overflow\n");
+        exit(1);
+    }
+    IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
     frame->locals = NULL;
-    frame->ssp = 0;
     if (g_current_frame) {
-        frame->ssp = g_current_frame->ssp;
-        for (int64_t i = 0; i < g_current_frame->ssp && i < STACK_CAPACITY; i++) {
-            frame->sidestack[i] = g_current_frame->sidestack[i];
-        }
         IndigoLocalEntry* cur = g_current_frame->locals;
         IndigoLocalEntry** tail = &frame->locals;
         while (cur) {
@@ -200,7 +203,7 @@ void indigo_enter_frame_inherit(void) {
 }
 
 void indigo_leave_frame(void) {
-    if (!g_current_frame) return;
+    if (!g_current_frame || g_frame_pool_sp <= 0) return;
     IndigoFrame* frame = g_current_frame;
     g_current_frame = frame->prev;
     IndigoLocalEntry* cur = frame->locals;
@@ -210,30 +213,28 @@ void indigo_leave_frame(void) {
         free(cur);
         cur = next;
     }
-    free(frame);
+    frame->locals = NULL;
+    g_frame_pool_sp--;
 }
 
 void indigo_storesidestack(void) {
-    if (!g_current_frame) indigo_enter_frame();
-    g_current_frame->ssp = g_sp;
+    g_ssp = g_sp;
     for (int64_t i = 0; i < g_sp && i < STACK_CAPACITY; i++) {
-        g_current_frame->sidestack[i] = g_stack[i];
+        g_sidestack[i] = g_stack[i];
     }
 }
 
 void indigo_loadsidestack(void) {
-    if (g_current_frame && g_current_frame->ssp > 0) {
-        g_sp = g_current_frame->ssp;
-        for (int64_t i = 0; i < g_current_frame->ssp && i < STACK_CAPACITY; i++) {
-            g_stack[i] = g_current_frame->sidestack[i];
+    if (g_ssp > 0) {
+        g_sp = g_ssp;
+        for (int64_t i = 0; i < g_ssp && i < STACK_CAPACITY; i++) {
+            g_stack[i] = g_sidestack[i];
         }
     }
 }
 
 void indigo_clearsidestack(void) {
-    if (g_current_frame) {
-        g_current_frame->ssp = 0;
-    }
+    g_ssp = 0;
 }
 
 void indigo_lstore(const char* name) {
