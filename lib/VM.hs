@@ -10,8 +10,7 @@ module VM (run, runPc, runVM, initVM, toBytecode, fromBytecode, printAssembly, r
 
 import Control.Exception (IOException, try)
 import Control.Monad
-import Control.Monad.RWS hiding (local)
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
 import Data.Binary (Binary, decode, encode)
 import Data.ByteString.Lazy (LazyByteString)
 import Data.Function ((&))
@@ -201,47 +200,47 @@ instance Ord Data where
         dataTag (DCPtr _) = 11
 
 data StackFrame = StackFrame
-    { returnAddress :: Int
-    , locals :: [(String, Data)]
+    { returnAddress :: !Int
+    , locals :: ![(String, Data)]
     }
     deriving (Show)
 
 #ifdef POSIX_IO
 data VM = VM
-    { program :: Program
-    , stack :: [Data]
-    , pc :: Int
-    , running :: Bool
-    , labels :: [(String, Int)]
-    , memory :: [Data]
-    , callStack :: [StackFrame]
-    , breakpoints :: [Int]
-    , ioMode :: IOMode
-    , ioBuffer :: IOBuffer
-    , sideStack :: [Data]
-    , shouldExit :: Bool
-    , vmError :: Maybe String
-    , sockets :: Map.Map Int Socket
-    , nextSocketId :: Int
-    , fileHandles :: Map.Map Int SIO.Handle
-    , nextHandleId :: Int
+    { program :: !Program
+    , stack :: ![Data]
+    , pc :: !Int
+    , running :: !Bool
+    , labels :: ![(String, Int)]
+    , memory :: ![Data]
+    , callStack :: ![StackFrame]
+    , breakpoints :: ![Int]
+    , ioMode :: !IOMode
+    , ioBuffer :: !IOBuffer
+    , sideStack :: ![Data]
+    , shouldExit :: !Bool
+    , vmError :: !(Maybe String)
+    , sockets :: !(Map.Map Int Socket)
+    , nextSocketId :: !Int
+    , fileHandles :: !(Map.Map Int SIO.Handle)
+    , nextHandleId :: !Int
     }
     deriving (Show)
 #else
 data VM = VM
-    { program :: Program
-    , stack :: [Data]
-    , pc :: Int
-    , running :: Bool
-    , labels :: [(String, Int)]
-    , memory :: [Data]
-    , callStack :: [StackFrame]
-    , breakpoints :: [Int]
-    , ioMode :: IOMode
-    , ioBuffer :: IOBuffer
-    , sideStack :: [Data]
-    , shouldExit :: Bool
-    , vmError :: Maybe String
+    { program :: !Program
+    , stack :: ![Data]
+    , pc :: !Int
+    , running :: !Bool
+    , labels :: ![(String, Int)]
+    , memory :: ![Data]
+    , callStack :: ![StackFrame]
+    , breakpoints :: ![Int]
+    , ioMode :: !IOMode
+    , ioBuffer :: !IOBuffer
+    , sideStack :: ![Data]
+    , shouldExit :: !Bool
+    , vmError :: !(Maybe String)
     }
     deriving (Show)
 #endif

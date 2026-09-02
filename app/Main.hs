@@ -10,8 +10,7 @@ import Control.Exception
 import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Identity (Identity (..))
-import Control.Monad.State (StateT (runStateT), evalStateT)
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as B
 import Data.List (elemIndex, intercalate, isPrefixOf)
