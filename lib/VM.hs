@@ -376,11 +376,12 @@ run' prog = do
             then modify $ \v -> v{running = False}
             else do
                 let inst = prog V.! currentPc
-                let breakpoints' = breakpoints vm
-                let atBreakpoint = not (null breakpoints') && (currentPc `elem` breakpoints' || -1 `elem` breakpoints')
-                when atBreakpoint $ do
-                    info <- showDebugInfo
-                    liftIO $ putStrLn info
+                case breakpoints vm of
+                    [] -> return ()
+                    bps | currentPc `elem` bps || (-1) `elem` bps -> do
+                        info <- showDebugInfo
+                        liftIO $ putStrLn info
+                    _ -> return ()
                 runInstruction inst
                 modify $ \v -> v{pc = pc v + 1}
                 gets running >>= flip when (run' prog)
