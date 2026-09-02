@@ -273,8 +273,17 @@ IndigoList* indigo_alloc_list(int64_t capacity) {
 
 void indigo_list_append(IndigoList* list, IndigoValue val) {
     if (list->length >= list->capacity) {
+        int64_t old_cap = list->capacity;
         list->capacity = list->capacity * 2 + 4;
-        list->items = (IndigoValue*)realloc(list->items, sizeof(IndigoValue) * list->capacity);
+        if (old_cap == 0) {
+            IndigoValue* new_items = (IndigoValue*)malloc(sizeof(IndigoValue) * list->capacity);
+            if (list->length > 0 && list->items != NULL) {
+                memcpy(new_items, list->items, sizeof(IndigoValue) * list->length);
+            }
+            list->items = new_items;
+        } else {
+            list->items = (IndigoValue*)realloc(list->items, sizeof(IndigoValue) * list->capacity);
+        }
     }
     list->items[list->length++] = val;
 }
@@ -417,10 +426,10 @@ void indigo_slice(void) {
         if (s > len) s = len;
         if (e < s) e = s;
         int64_t new_len = e - s;
-        IndigoList* res = indigo_alloc_list(new_len);
-        for (int64_t i = s; i < e; i++) {
-            indigo_list_append(res, list->items[i]);
-        }
+        IndigoList* res = (IndigoList*)malloc(sizeof(IndigoList));
+        res->length = new_len;
+        res->capacity = 0;
+        res->items = list->items + s;
         indigo_push(TAG_LIST, (int64_t)res);
     } else if (container.tag == TAG_STRING) {
         char* str = (char*)container.payload;

@@ -1258,22 +1258,36 @@ runInstruction Slice = do
     target <- stackPop
     case target of
         DString s -> do
-            let res = sliceHelper start end s
+            let res = sliceHelperStr start end s
             stackPush $ DString res
         DList l -> do
-            let res = sliceHelper start end l
+            let res = sliceHelperList start end l
             stackPush $ DList res
         _ -> stackPush DNone
   where
-    sliceHelper sVal eVal xs =
-        let len = length xs
-            s = case sVal of
+    sliceHelperStr sVal eVal s =
+        let len = length s
+            st = case sVal of
                 DInt start' -> if start' >= 0 then min start' len else max 0 (len + start')
                 _ -> 0
-            e = case eVal of
+            en = case eVal of
                 DInt end' -> if end' >= 0 then min end' len else max 0 (len + end')
                 _ -> len
-         in if s >= e then [] else take (e - s) (drop s xs)
+         in if st >= en then "" else take (en - st) (drop st s)
+
+    sliceHelperList sVal eVal xs = case (sVal, eVal) of
+        (DInt start', DNone) | start' >= 0 -> drop start' xs
+        (DNone, DNone) -> xs
+        (DInt start', DInt end') | start' >= 0 && end' >= start' -> take (end' - start') (drop start' xs)
+        _ ->
+            let len = length xs
+                st = case sVal of
+                    DInt start' -> if start' >= 0 then min start' len else max 0 (len + start')
+                    _ -> 0
+                en = case eVal of
+                    DInt end' -> if end' >= 0 then min end' len else max 0 (len + end')
+                    _ -> len
+             in if st >= en then [] else take (en - st) (drop st xs)
 runInstruction Length = do
     st <- gets stack
     if null st
