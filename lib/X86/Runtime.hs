@@ -626,17 +626,31 @@ void* indigo_calls_prepare(void) {
     }
 }
 
+static inline double to_double_val(IndigoValue v) {
+    if (v.tag == TAG_DOUBLE) return payload_to_double(v.payload);
+    if (v.tag == TAG_FLOAT) return (double)payload_to_float(v.payload);
+    if (v.tag == TAG_INT) return (double)v.payload;
+    return 0.0;
+}
+
+static inline float to_float_val(IndigoValue v) {
+    if (v.tag == TAG_FLOAT) return payload_to_float(v.payload);
+    if (v.tag == TAG_INT) return (float)v.payload;
+    if (v.tag == TAG_DOUBLE) return (float)payload_to_double(v.payload);
+    return 0.0f;
+}
+
 void indigo_add(void) {
     IndigoValue y = indigo_pop();
     IndigoValue x = indigo_pop();
     if (x.tag == TAG_INT && y.tag == TAG_INT) {
         indigo_push(TAG_INT, x.payload + y.payload);
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        float res = payload_to_float(x.payload) + payload_to_float(y.payload);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        double res = payload_to_double(x.payload) + payload_to_double(y.payload);
+    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
+        double res = to_double_val(x) + to_double_val(y);
         indigo_push(TAG_DOUBLE, double_to_payload(res));
+    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
+        float res = to_float_val(x) + to_float_val(y);
+        indigo_push(TAG_FLOAT, float_to_payload(res));
     } else if (x.tag == TAG_STRING && y.tag == TAG_STRING) {
         char* a = (char*)x.payload;
         char* b = (char*)y.payload;
@@ -659,12 +673,12 @@ void indigo_sub(void) {
     IndigoValue x = indigo_pop();
     if (x.tag == TAG_INT && y.tag == TAG_INT) {
         indigo_push(TAG_INT, x.payload - y.payload);
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        float res = payload_to_float(x.payload) - payload_to_float(y.payload);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        double res = payload_to_double(x.payload) - payload_to_double(y.payload);
+    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
+        double res = to_double_val(x) - to_double_val(y);
         indigo_push(TAG_DOUBLE, double_to_payload(res));
+    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
+        float res = to_float_val(x) - to_float_val(y);
+        indigo_push(TAG_FLOAT, float_to_payload(res));
     } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
         indigo_push(TAG_CHAR, (x.payload - y.payload));
     } else {
@@ -678,12 +692,12 @@ void indigo_mul(void) {
     IndigoValue x = indigo_pop();
     if (x.tag == TAG_INT && y.tag == TAG_INT) {
         indigo_push(TAG_INT, x.payload * y.payload);
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        float res = payload_to_float(x.payload) * payload_to_float(y.payload);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        double res = payload_to_double(x.payload) * payload_to_double(y.payload);
+    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
+        double res = to_double_val(x) * to_double_val(y);
         indigo_push(TAG_DOUBLE, double_to_payload(res));
+    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
+        float res = to_float_val(x) * to_float_val(y);
+        indigo_push(TAG_FLOAT, float_to_payload(res));
     } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
         indigo_push(TAG_CHAR, (x.payload * y.payload));
     } else {
@@ -695,19 +709,17 @@ void indigo_mul(void) {
 void indigo_div(void) {
     IndigoValue y = indigo_pop();
     IndigoValue x = indigo_pop();
-    if (y.payload == 0 && (y.tag == TAG_INT || y.tag == TAG_CHAR)) {
-        fprintf(stderr, "Division by zero\n");
-        exit(1);
-    }
     if (x.tag == TAG_INT && y.tag == TAG_INT) {
+        if (y.payload == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
         indigo_push(TAG_INT, x.payload / y.payload);
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        float res = payload_to_float(x.payload) / payload_to_float(y.payload);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        double res = payload_to_double(x.payload) / payload_to_double(y.payload);
+    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
+        double res = to_double_val(x) / to_double_val(y);
         indigo_push(TAG_DOUBLE, double_to_payload(res));
+    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
+        float res = to_float_val(x) / to_float_val(y);
+        indigo_push(TAG_FLOAT, float_to_payload(res));
     } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
+        if (y.payload == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
         indigo_push(TAG_CHAR, (x.payload / y.payload));
     } else {
         fprintf(stderr, "Cannot divide incompatible types\n");
@@ -745,12 +757,12 @@ void indigo_pow(void) {
             exp >>= 1;
         }
         indigo_push(TAG_INT, res);
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        float res = powf(payload_to_float(x.payload), payload_to_float(y.payload));
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        double res = pow(payload_to_double(x.payload), payload_to_double(y.payload));
+    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
+        double res = pow(to_double_val(x), to_double_val(y));
         indigo_push(TAG_DOUBLE, double_to_payload(res));
+    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
+        float res = powf(to_float_val(x), to_float_val(y));
+        indigo_push(TAG_FLOAT, float_to_payload(res));
     } else {
         fprintf(stderr, "Cannot compute power for incompatible types\n");
         exit(1);
