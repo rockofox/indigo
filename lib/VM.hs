@@ -208,6 +208,7 @@ data StackFrame = StackFrame
 #ifdef POSIX_IO
 data VM = VM
     { program :: !Program
+    , jumpTargets :: !(V.Vector Int)
     , stack :: ![Data]
     , pc :: !Int
     , running :: !Bool
@@ -229,6 +230,7 @@ data VM = VM
 #else
 data VM = VM
     { program :: !Program
+    , jumpTargets :: !(V.Vector Int)
     , stack :: ![Data]
     , pc :: !Int
     , running :: !Bool
@@ -249,11 +251,28 @@ data IOMode = HostDirect | VMBuffer deriving (Show, Eq)
 
 data IOBuffer = IOBuffer {input :: String, output :: String} deriving (Show, Eq)
 
+computeJumpTargets :: Program -> [(String, Int)] -> V.Vector Int
+computeJumpTargets prog lbls = V.imap resolveTarget prog
+  where
+    resolveTarget _ (Jmp x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (Jt x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (Jf x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (Call x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (CallLocal x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (PushPf x _) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ _ = -1
+
 initVM :: Program -> VM
 #ifdef POSIX_IO
-initVM prog = VM{program = prog, stack = [], pc = 0, running = True, labels = locateLabels prog, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
+initVM prog =
+    let lbls = locateLabels prog
+        targets = computeJumpTargets prog lbls
+     in VM{program = prog, jumpTargets = targets, stack = [], pc = 0, running = True, labels = lbls, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing, sockets = Map.empty, nextSocketId = 1, fileHandles = Map.empty, nextHandleId = 1}
 #else
-initVM prog = VM{program = prog, stack = [], pc = 0, running = True, labels = locateLabels prog, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing}
+initVM prog =
+    let lbls = locateLabels prog
+        targets = computeJumpTargets prog lbls
+     in VM{program = prog, jumpTargets = targets, stack = [], pc = 0, running = True, labels = lbls, memory = [], callStack = [], breakpoints = [], ioMode = HostDirect, ioBuffer = IOBuffer{input = "", output = ""}, sideStack = [], shouldExit = True, vmError = Nothing}
 #endif
 
 type Program = V.Vector Instruction
@@ -568,15 +587,29 @@ instance Floating Data where
     atanh (DInt x) = DFloat (atanh (fromIntegral x))
     atanh x = x
 
+findLabelFuzzy' :: String -> [(String, Int)] -> Maybe (String, Int)
+findLabelFuzzy' x lbls =
+    case lookup x lbls of
+        Just n -> Just (x, n)
+        Nothing ->
+            case filter (\(y, _) -> x == takeWhile (/= '#') y) lbls of
+                [] -> Nothing
+                ((n, l) : _) -> Just (n, l)
+
 findLabelFuzzy :: String -> StateT VM IO (Maybe (String, Int))
 findLabelFuzzy x = do
     lbls <- gets labels
-    case lookup x lbls of
-        Just n -> return (Just (x, n))
-        Nothing ->
-            case filter (\(y, _) -> x == takeWhile (/= '#') y) lbls of
-                [] -> return Nothing
-                ((n, l) : _) -> return (Just (n, l))
+    return $ findLabelFuzzy' x lbls
+
+getJumpTarget :: String -> StateT VM IO Int
+getJumpTarget x = do
+    vm <- get
+    let currPc = pc vm
+    case jumpTargets vm V.!? currPc of
+        Just n | n >= 0 -> return n
+        _ -> case findLabelFuzzy' x (labels vm) of
+            Just (_, target) -> return target
+            Nothing -> return (-1)
 
 class IntoData a where
     intoData :: a -> Data
@@ -1089,11 +1122,10 @@ runInstruction (Call x) = do
     case nextInstruction of
         Just Ret -> runInstruction (Jmp x)
         _ -> do
-            lblRes <- findLabelFuzzy x
-            case lblRes of
-                Just (_, target) ->
-                    modify $ \vm' -> vm'{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack vm'}
-                Nothing -> setVMError $ "Label not found: " ++ x
+            target <- getJumpTarget x
+            if target >= 0
+                then modify' $ \vm' -> vm'{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack vm'}
+                else setVMError $ "Label not found: " ++ x
 runInstruction (CallLocal x) = do
     p <- gets program
     currPc <- gets pc
@@ -1101,20 +1133,14 @@ runInstruction (CallLocal x) = do
     case nextInstruction of
         Just Ret -> runInstruction (Jmp x)
         _ -> do
-            vm <- get
-            case callStack vm of
-                (frame : _) -> do
-                    lblRes <- findLabelFuzzy x
-                    case lblRes of
-                        Just (_, target) ->
-                            modify $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = frame.locals} : callStack v}
-                        Nothing -> setVMError $ "Label not found: " ++ x
-                [] -> do
-                    lblRes <- findLabelFuzzy x
-                    case lblRes of
-                        Just (_, target) ->
-                            modify $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack v}
-                        Nothing -> setVMError $ "Label not found: " ++ x
+            target <- getJumpTarget x
+            if target >= 0
+                then do
+                    vm <- get
+                    case callStack vm of
+                        (frame : _) -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = frame.locals} : callStack v}
+                        [] -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack v}
+                else setVMError $ "Label not found: " ++ x
 runInstruction CallS =
     stackPop >>= \case
         DFuncRef x args fnLocals -> do
@@ -1125,10 +1151,10 @@ runInstruction CallS =
                 runInstruction (LStore name)
         d -> setVMError $ "Cannot call " ++ show d
 runInstruction (Jmp x) = do
-    lblRes <- findLabelFuzzy x
-    case lblRes of
-        Just (_, target) -> modify $ \vm -> vm{pc = target}
-        Nothing -> setVMError $ "Label not found: " ++ x
+    target <- getJumpTarget x
+    if target >= 0
+        then modify' $ \vm -> vm{pc = target}
+        else setVMError $ "Label not found: " ++ x
 runInstruction (Jt x) = do
     d <- stackPop
     when (isTruthy d) $ runInstruction (Jmp x)
