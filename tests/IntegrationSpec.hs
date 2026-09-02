@@ -168,7 +168,7 @@ spec = do
                     println (bind None{}, \x -> x + 1)
                 end
             |]
-                `shouldReturn` "6\nNone{__traits: [Monad,Optional]}\n"
+                `shouldReturn` "6\nNone{__traits: [Monad,Applicative,Functor,Monoid,Semigroup,Optional]}\n"
         it "Handles multiple variables correctly" $ do
             compileAndRun
                 [r|
@@ -1737,3 +1737,261 @@ end
                 end
             |]
                 `shouldReturn` "14\n"
+    describe "Haskell Concepts" $ do
+        describe "Semigroup" $ do
+            it "Can combine strings using Semigroup" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let s = combine "Hello, ", "world!"
+                        println s
+                    end
+                    |]
+                    `shouldReturn` "Hello, world!\n"
+            it "Can combine Some values using Semigroup" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let s1 = Some<String>{value: "foo"}
+                        let s2 = Some<String>{value: "bar"}
+                        let res = combine s1, s2
+                        println res.value
+                    end
+                    |]
+                    `shouldReturn` "foobar\n"
+            it "Can combine Unit using Semigroup" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let u = combine Unit{}, Unit{}
+                        println "unit combined"
+                    end
+                    |]
+                    `shouldReturn` "unit combined\n"
+            it "Can combine None using Semigroup" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let n = combine None{}, None{}
+                        println "none combined"
+                    end
+                    |]
+                    `shouldReturn` "none combined\n"
+            it "Can use custom Semigroup implementation" $ do
+                compileAndRun
+                    [r|
+                    type Sum = (val: Int) is Semigroup
+
+                    impl Semigroup for Sum = do
+                        combine Sum{val: a} Sum{val: b} = Sum{val: a + b}
+                    end
+
+                    let main : IO<Unit> = do
+                        let res = combine (Sum{val: 10}), (Sum{val: 20})
+                        println res.val
+                    end
+                    |]
+                    `shouldReturn` "30\n"
+        describe "Monoid" $ do
+            it "Can get empty string using Monoid" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let e : String = empty "hello"
+                        println ("empty:" ++ e)
+                    end
+                    |]
+                    `shouldReturn` "empty:\n"
+            it "Can get empty unit using Monoid" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let u : Unit = empty Unit{}
+                        println "empty unit ok"
+                    end
+                    |]
+                    `shouldReturn` "empty unit ok\n"
+            it "Can get empty none using Monoid" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let n : None = empty None{}
+                        println "empty none ok"
+                    end
+                    |]
+                    `shouldReturn` "empty none ok\n"
+            it "Can concatenate string list with sconcat and mconcat" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        println (sconcat ["a", "b", "c"])
+                        println (mconcat ["x", "y", "z"])
+                    end
+                    |]
+                    `shouldReturn` "abc\nxyz\n"
+            it "Can use custom Monoid implementation" $ do
+                compileAndRun
+                    [r|
+                    type Product = (val: Int) is Semigroup, Monoid
+
+                    impl Semigroup for Product = do
+                        combine Product{val: a} Product{val: b} = Product{val: a * b}
+                    end
+
+                    impl Monoid for Product = do
+                        empty _ = Product{val: 1}
+                    end
+
+                    let main : IO<Unit> = do
+                        let p1 = Product{val: 5}
+                        let p2 = Product{val: 6}
+                        let res = combine p1, p2
+                        let e : Product = empty p1
+                        println res.val
+                        println e.val
+                    end
+                    |]
+                    `shouldReturn` "30\n1\n"
+        describe "Functor" $ do
+            it "Can fmap over Some" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let opt = Some<Int>{value: 21}
+                        let res = fmap opt, (\x -> x * 2)
+                        println res.value
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can fmap over None" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let n = None{}
+                        let res = fmap n, (\x -> x + 1)
+                        println "none mapped ok"
+                    end
+                    |]
+                    `shouldReturn` "none mapped ok\n"
+            it "Can fmap over IO" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let io = IO<Int>{inner: 10}
+                        let res = fmap io, (\x -> x + 5)
+                        println res.inner
+                    end
+                    |]
+                    `shouldReturn` "15\n"
+            it "Can use custom Functor implementation" $ do
+                compileAndRun
+                    [r|
+                    type Box<T> = (val: T) is Functor<T>
+
+                    impl Functor<T> for Box<T> = do
+                        fmap Box<T>{val: x} f = Box<T>{val: f x}
+                    end
+
+                    let main : IO<Unit> = do
+                        let b = Box<Int>{val: 100}
+                        let res = fmap b, (\x -> x + 23)
+                        println res.val
+                    end
+                    |]
+                    `shouldReturn` "123\n"
+        describe "Applicative" $ do
+            it "Can use pure for Some and IO" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let s : Some<Int> = pure 99
+                        let io : IO<Int> = pure 100
+                        println s.value
+                        println io.inner
+                    end
+                    |]
+                    `shouldReturn` "99\n100\n"
+            it "Can apply function in Some to Some" $ do
+                compileAndRun
+                    [r|
+                    let double (x: Int) : Int = x * 2
+
+                    let main : IO<Unit> = do
+                        let fnOpt = Some<Any>{value: double}
+                        let valOpt = Some<Int>{value: 21}
+                        let res = apply fnOpt, valOpt
+                        println res.value
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can apply function in IO to IO" $ do
+                compileAndRun
+                    [r|
+                    let inc (x: Int) : Int = x + 1
+
+                    let main : IO<Unit> = do
+                        let fnIO = IO<Any>{inner: inc}
+                        let valIO = IO<Int>{inner: 41}
+                        let res = apply fnIO, valIO
+                        println res.inner
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can use liftA2 with Some" $ do
+                compileAndRun
+                    [r|
+                    let addInt (x: Int y: Int) : Int = x + y
+
+                    let main : IO<Unit> = do
+                        let a = Some<Int>{value: 15}
+                        let b = Some<Int>{value: 27}
+                        let res = liftA2 a, addInt, b
+                        println res.value
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can use liftA2 with IO" $ do
+                compileAndRun
+                    [r|
+                    let addInt (x: Int y: Int) : Int = x + y
+
+                    let main : IO<Unit> = do
+                        let a = IO<Int>{inner: 20}
+                        let b = IO<Int>{inner: 22}
+                        let res = liftA2 a, addInt, b
+                        println res.inner
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+        describe "Monad" $ do
+            it "Can use >>= with IO" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let io1 : IO<Int> = return 10
+                        let io2 = io1 >>= \x -> return (x + 32)
+                        println io2.inner
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can use >> with IO" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let io1 : IO<Int> = return 1
+                        let io2 : IO<Int> = return 42
+                        let io3 = io1 >> io2
+                        println io3.inner
+                    end
+                    |]
+                    `shouldReturn` "42\n"
+            it "Can bind Some" $ do
+                compileAndRun
+                    [r|
+                    let main : IO<Unit> = do
+                        let s = Some<Int>{value: 20}
+                        let res = bind s, \x -> Some<Int>{value: x * 2}
+                        println res.value
+                    end
+                    |]
+                    `shouldReturn` "40\n"

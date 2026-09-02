@@ -149,12 +149,20 @@ functionTypesAcceptable use def generics = do
 typeOf :: Parser.Expr -> Compiler Parser.Type
 typeOf Parser.FuncCall{funcName, funcArgs} = do
     funcDecs' <- gets CS.funcDecs
-    let a =
-            maybe
-                [Parser.Type.Unknown]
-                Parser.types
-                (find (\x -> x.name == funcName) funcDecs')
-    return $ evaluateFunction a (length funcArgs)
+    let fd = find (\x -> x.name == funcName) funcDecs'
+    case fd of
+        Just Parser.FuncDec{types = fnTypes, generics} -> do
+            let genericNames = map (\(Parser.GenericExpr n _) -> n) generics
+            let rawRetType = evaluateFunction fnTypes (length funcArgs)
+            if null genericNames
+                then return rawRetType
+                else do
+                    argTypes <- mapM typeOf funcArgs
+                    let expectedParamTypes = take (length funcArgs) fnTypes
+                    let zipped = zip expectedParamTypes argTypes
+                    let substitutions = concatMap (\case (Parser.StructT n [], actualT) | n `elem` genericNames -> [(n, actualT)]; _ -> []) zipped
+                    return $ substituteGenerics rawRetType substitutions
+        Nothing -> return Parser.Unknown
 typeOf Parser.Var{varName = varName} = do
     lets' <- gets CS.lets
     let a = maybe Parser.Unknown vtype (find (\(Let n _ _) -> n == varName) lets')

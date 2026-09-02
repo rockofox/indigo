@@ -1,29 +1,101 @@
-type IO<T> = (inner: T)
-type Unit = ()
-
-nop :: IO<Unit>
-nop _ = IO<Unit>{inner: Unit{}}
-
-let return<M, T: Any> (x: T) : M = IO<T>{inner: x}
-
 trait Optional<T>
-type Some<T> = (value: T) is Optional<T>
-type None = () is Optional<Any>
-
-maybe :: Any -> Optional -> Any
-maybe x Some{value: y} = y
-maybe x None{} = x
-
+trait Semigroup = do
+  combine :: Self -> Self -> Self
+end
+trait Monoid = do
+  empty :: Self -> Self
+end
+trait Functor<T> = do
+  fmap :: Self -> (T -> T) -> Self
+end
+trait Applicative<T> = do
+  pure :: T -> Self
+  apply :: Self -> Self -> Self
+  liftA2 :: Self -> (Any -> Any -> Any) -> Self -> Self
+end
 trait Monad<T> = do
   bind :: Self -> (T -> Self) -> Self
   return :: T -> Self
   sequence :: Self -> Self -> Self
 end
 
+type IO<T> = (inner: T)
+type Unit = ()
+type Some<T> = (value: T) is Optional<T>
+type None = () is Optional<Any>
+
+nop :: IO<Unit>
+nop _ = IO<Unit>{inner: Unit{}}
+
+let return<T: Any> (x: T) : IO<T> = IO<T>{inner: x}
+let pure<T: Any> (x: T) : IO<T> = IO<T>{inner: x}
+
+maybe :: Any -> Optional -> Any
+maybe x Some{value: y} = y
+maybe x None{} = x
+
+impl Semigroup for String = do
+  combine a b = a ++ b
+end
+
+impl Semigroup for Unit = do
+  combine Unit{} Unit{} = Unit{}
+end
+
+impl Semigroup for None = do
+  combine None{} None{} = None{}
+end
+
+impl Semigroup for Some<T> = do
+  combine Some<T>{value: x} Some<T>{value: y} = Some<T>{value: combine x, y}
+end
+
+impl Monoid for String = do
+  empty _ = ""
+end
+
+impl Monoid for Unit = do
+  empty _ = Unit{}
+end
+
+impl Monoid for None = do
+  empty _ = None{}
+end
+
+impl Functor<T> for Some<T> = do
+  fmap Some<T>{value: x} f = Some<T>{value: f x}
+end
+
+impl Functor<Any> for None = do
+  fmap None{} f = None{}
+end
+
+impl Functor<T> for IO<T> = do
+  fmap IO<T>{inner: x} f = IO<T>{inner: f x}
+end
+
+impl Applicative<T> for Some<T> = do
+  pure x = Some<T>{value: x}
+  apply Some<T>{value: f} sx = fmap sx, f
+  liftA2 Some<T>{value: x} f Some<T>{value: y} = Some<T>{value: f x, y}
+end
+
+impl Applicative<Any> for None = do
+  pure x = None{}
+  apply None{} _ = None{}
+  liftA2 None{} f _ = None{}
+end
+
+impl Applicative<T> for IO<T> = do
+  pure x = IO<T>{inner: x}
+  apply IO<T>{inner: f} ix = fmap ix, f
+  liftA2 IO<T>{inner: x} f IO<T>{inner: y} = IO<T>{inner: f x, y}
+end
+
 impl Monad<T> for Some<T> = do
   bind Some<T>{value: x} f = f x
   return x = Some<T>{value: x}
-  sequence Some<T>{value: x} Some<T>{value: y}= Some<T>{value: y}
+  sequence Some<T>{value: x} Some<T>{value: y} = Some<T>{value: y}
 end
 
 impl Monad<Any> for None = do
@@ -33,7 +105,7 @@ impl Monad<Any> for None = do
 end
 
 impl Monad<T> for IO<T> = do
-  bind IO<T>{inner: x}f = f x
+  bind IO<T>{inner: x} f = f x
   return x = IO<T>{inner: x}
   sequence IO<T>{inner: x} IO<T>{inner: y} = IO<T>{inner: y}
 end
@@ -88,6 +160,13 @@ foldl fun acc (x:xs) = foldl (fun), (fun acc, x), xs
 foldr :: (Any -> Any -> Any) -> Any -> [Any] -> Any
 foldr fun acc [] = acc
 foldr fun acc (x:xs) = fun x, (foldr fun, acc, xs)
+
+sconcat :: [Any] -> Any
+sconcat (x:xs) = foldl combine, x, xs
+
+mconcat :: [Any] -> Any
+mconcat [] = ""
+mconcat (x:xs) = foldl combine, x, xs
 
 add x y = x + y
 

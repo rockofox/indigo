@@ -1348,7 +1348,7 @@ viewPrelude onLoadCode =
     section [ id "prelude" ]
         [ h2 [] [ text "Standard library: Prelude" ]
         , p [] [ text "share/std/prelude.in is loaded for normal programs. It defines core types, operators, list helpers, and IO utilities." ]
-        , h3 [] [ text "Core types" ]
+        , h3 [] [ text "Core types and traits" ]
         , viewCodeBlock """# From prelude (already available)
 # type IO<T> = (inner: T)
 # type Unit = ()
@@ -1356,7 +1356,21 @@ viewPrelude onLoadCode =
 # type Some<T> = (value: T) is Optional<T>
 # type None = () is Optional<Any>
 # trait Number
+# trait Semigroup
+# trait Monoid
+# trait Functor<T>
+# trait Applicative<T>
 # trait Monad<T>""" onLoadCode False "indigo"
+        , h3 [] [ text "Haskell Concepts" ]
+        , p [] [ text "The standard library includes core Haskell-inspired algebraic traits: Semigroup (combine, sconcat), Monoid (empty, mconcat), Functor (fmap, <$>), Applicative (pure, apply, liftA2, <*>, <*, *>), and Monad (bind, return, sequence, >>=, >>)." ]
+        , viewCodeBlock """let main : IO<Unit> = do
+    let s = Some<Int>{value: 10}
+    let doubled = fmap s, (\\x -> x * 2)
+    let s2 = Some<Int>{value: 5}
+    let combined = combine s, s2
+    println doubled.value
+    println combined.value
+end""" onLoadCode True "indigo"
         , h3 [] [ text "Optional" ]
         , viewCodeBlock """let main = do
     let s = Some<Int>{value: 10}

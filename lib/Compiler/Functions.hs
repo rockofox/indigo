@@ -511,7 +511,7 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
         Nothing ->
             case funcDec of
                 (Just fd) -> do
-                    let isExpectedTypeTraitMethod = isJust expectedTypeTraitMethodDec
+                    let isExpectedTypeTraitMethod = isJust expectedTypeTraitMethodDec && (funcName == "return" || funcName == "pure")
                     if isExpectedTypeTraitMethod
                         then do
                             args' <- concatMapM (uncurry compileExpr') (zip funcArgs (tail fd.types))
@@ -761,9 +761,17 @@ compileLet compileExpr' (Parser.Let{letName, letType, letValue}) _ = do
             let fun = Parser.Function{def = renamedDef, dec = renamedDec, functionPos = Parser.anyPosition}
             compileExpr' fun Parser.Any
         _ -> do
-            valType <- typeOf letValue
             case letType of
                 Just explicitType -> do
+                    let explicitStructName = case explicitType of
+                            Parser.StructT n _ -> n
+                            _ -> ""
+                    implsForExplicit <- if null explicitStructName then return [] else implsFor explicitStructName
+                    fbt <- gets functionsByTrait
+                    let isTraitMethodForExplicit = not (null implsForExplicit) && case letValue of
+                            Parser.FuncCall{funcName} -> any (\(for, n, _, _) -> for == explicitStructName && n == funcName) fbt
+                            _ -> False
+                    valType <- if isTraitMethodForExplicit then return explicitType else typeOf letValue
                     compatible <- typeCompatible valType explicitType
                     unless compatible $
                         cerror ("Type mismatch in let binding `" ++ letName ++ "`: expected " ++ show explicitType ++ ", got " ++ show valType) (extractPosition letValue)
@@ -771,6 +779,7 @@ compileLet compileExpr' (Parser.Let{letName, letType, letValue}) _ = do
                     value' <- compileExpr' letValue explicitType
                     return $ value' ++ [LStore letName]
                 Nothing -> do
+                    valType <- typeOf letValue
                     modify (\s -> s{lets = Let{name = letName, vtype = valType, context = curCon} : lets s})
                     value' <- compileExpr' letValue valType
                     return $ value' ++ [LStore letName]

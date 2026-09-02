@@ -388,7 +388,7 @@ void indigo_concat(int64_t n) {
         return;
     }
     IndigoValue* popped = (IndigoValue*)malloc(sizeof(IndigoValue) * n);
-    for (int64_t i = n - 1; i >= 0; i--) {
+    for (int64_t i = 0; i < n; i++) {
         popped[i] = indigo_pop();
     }
     IndigoList* res = indigo_alloc_list(16);

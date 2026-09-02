@@ -1389,8 +1389,8 @@ runInstruction TypeEq = do
 runInstruction (PackList n) = stackPopN n >>= stackPush . DList . reverse
 runInstruction UnpackList =
     stackPop >>= \case
-        DList l -> stackPushN l
-        DString s -> stackPushN (map DChar s)
+        DList l -> stackPushN (reverse l)
+        DString s -> stackPushN (map DChar (reverse s))
         x -> stackPush x
 runInstruction (Mov n dat) =
     modify $ \vm -> vm{memory = storeMemory n dat (memory vm)}

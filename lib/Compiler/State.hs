@@ -185,6 +185,10 @@ implsFor structName = do
 
 structNameFromType :: Parser.Type -> String
 structNameFromType (Parser.StructT n _) = n
+structNameFromType Parser.None = "None"
+structNameFromType (Parser.List _) = "List"
+structNameFromType (Parser.Tuple _) = "Tuple"
+structNameFromType Parser.Any = "Any"
 structNameFromType t = internalError $ "structNameFromType: expected StructT, got " ++ show t
 
 concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
