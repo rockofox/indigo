@@ -53,14 +53,11 @@ typedef struct IndigoMap {
     IndigoMapEntry* head;
 } IndigoMap;
 
-typedef struct IndigoLocalEntry {
-    char* name;
-    IndigoValue val;
-    struct IndigoLocalEntry* next;
-} IndigoLocalEntry;
+#define MAX_LOCALS 1024
 
 typedef struct IndigoFrame {
-    IndigoLocalEntry* locals;
+    IndigoValue locals[MAX_LOCALS];
+    bool has_local[MAX_LOCALS];
     struct IndigoFrame* prev;
 } IndigoFrame;
 
@@ -69,7 +66,8 @@ typedef struct IndigoFuncRef {
     char* name;
     int64_t arg_count;
     IndigoValue* args;
-    IndigoLocalEntry* locals;
+    IndigoValue locals[MAX_LOCALS];
+    bool has_local[MAX_LOCALS];
 } IndigoFuncRef;
 
 static IndigoValue g_stack[STACK_CAPACITY];
@@ -173,7 +171,7 @@ void indigo_enter_frame(void) {
         exit(1);
     }
     IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
-    frame->locals = NULL;
+    memset(frame->has_local, 0, sizeof(frame->has_local));
     frame->prev = g_current_frame;
     g_current_frame = frame;
 }
@@ -184,19 +182,11 @@ void indigo_enter_frame_inherit(void) {
         exit(1);
     }
     IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
-    frame->locals = NULL;
     if (g_current_frame) {
-        IndigoLocalEntry* cur = g_current_frame->locals;
-        IndigoLocalEntry** tail = &frame->locals;
-        while (cur) {
-            IndigoLocalEntry* copy = (IndigoLocalEntry*)malloc(sizeof(IndigoLocalEntry));
-            copy->name = heap_strdup(cur->name);
-            copy->val = cur->val;
-            copy->next = NULL;
-            *tail = copy;
-            tail = &copy->next;
-            cur = cur->next;
-        }
+        memcpy(frame->locals, g_current_frame->locals, sizeof(frame->locals));
+        memcpy(frame->has_local, g_current_frame->has_local, sizeof(frame->has_local));
+    } else {
+        memset(frame->has_local, 0, sizeof(frame->has_local));
     }
     frame->prev = g_current_frame;
     g_current_frame = frame;
@@ -204,16 +194,7 @@ void indigo_enter_frame_inherit(void) {
 
 void indigo_leave_frame(void) {
     if (!g_current_frame || g_frame_pool_sp <= 0) return;
-    IndigoFrame* frame = g_current_frame;
-    g_current_frame = frame->prev;
-    IndigoLocalEntry* cur = frame->locals;
-    while (cur) {
-        IndigoLocalEntry* next = cur->next;
-        free(cur->name);
-        free(cur);
-        cur = next;
-    }
-    frame->locals = NULL;
+    g_current_frame = g_current_frame->prev;
     g_frame_pool_sp--;
 }
 
@@ -237,41 +218,27 @@ void indigo_clearsidestack(void) {
     g_ssp = 0;
 }
 
-void indigo_lstore(const char* name) {
+void indigo_lstore_slot(int64_t slot) {
     IndigoValue val = indigo_pop();
     if (!g_current_frame) {
         indigo_enter_frame();
     }
-    IndigoLocalEntry* cur = g_current_frame->locals;
-    while (cur) {
-        if (strcmp(cur->name, name) == 0) {
-            cur->val = val;
-            return;
-        }
-        cur = cur->next;
+    if (slot >= 0 && slot < MAX_LOCALS) {
+        g_current_frame->locals[slot] = val;
+        g_current_frame->has_local[slot] = true;
     }
-    IndigoLocalEntry* entry = (IndigoLocalEntry*)malloc(sizeof(IndigoLocalEntry));
-    entry->name = heap_strdup(name);
-    entry->val = val;
-    entry->next = g_current_frame->locals;
-    g_current_frame->locals = entry;
 }
 
-void indigo_lload(const char* name) {
+void indigo_lload_slot(int64_t slot) {
     IndigoFrame* f = g_current_frame;
     while (f) {
-        IndigoLocalEntry* cur = f->locals;
-        while (cur) {
-            if (strcmp(cur->name, name) == 0) {
-                indigo_push(cur->val.tag, cur->val.payload);
-                return;
-            }
-            cur = cur->next;
+        if (slot >= 0 && slot < MAX_LOCALS && f->has_local[slot]) {
+            indigo_push(f->locals[slot].tag, f->locals[slot].payload);
+            return;
         }
         f = f->prev;
     }
-    fprintf(stderr, "Local not found: %s\n", name);
-    exit(1);
+    indigo_push(0, 0);
 }
 
 void indigo_store(int64_t idx) {
@@ -624,19 +591,11 @@ void indigo_push_pf(void* code_ptr, const char* name, int64_t n_args) {
     for (int64_t i = n_args - 1; i >= 0; i--) {
         ref->args[i] = indigo_pop();
     }
-    ref->locals = NULL;
     if (g_current_frame) {
-        IndigoLocalEntry* cur = g_current_frame->locals;
-        IndigoLocalEntry** tail = &ref->locals;
-        while (cur) {
-            IndigoLocalEntry* copy = (IndigoLocalEntry*)malloc(sizeof(IndigoLocalEntry));
-            copy->name = heap_strdup(cur->name);
-            copy->val = cur->val;
-            copy->next = NULL;
-            *tail = copy;
-            tail = &copy->next;
-            cur = cur->next;
-        }
+        memcpy(ref->locals, g_current_frame->locals, sizeof(ref->locals));
+        memcpy(ref->has_local, g_current_frame->has_local, sizeof(ref->has_local));
+    } else {
+        memset(ref->has_local, 0, sizeof(ref->has_local));
     }
     indigo_push(TAG_FUNCREF, (int64_t)ref);
 }
@@ -649,12 +608,8 @@ void* indigo_calls_prepare(void) {
             indigo_push(ref->args[i].tag, ref->args[i].payload);
         }
         indigo_enter_frame();
-        IndigoLocalEntry* cur = ref->locals;
-        while (cur) {
-            indigo_push(cur->val.tag, cur->val.payload);
-            indigo_lstore(cur->name);
-            cur = cur->next;
-        }
+        memcpy(g_current_frame->locals, ref->locals, sizeof(ref->locals));
+        memcpy(g_current_frame->has_local, ref->has_local, sizeof(ref->has_local));
         return ref->code_ptr;
     } else {
         fprintf(stderr, "Cannot call non-function reference\n");

@@ -77,6 +77,8 @@ data CodegenState = CodegenState
     { stringMap :: Map.Map String String
     , nextStrId :: Int
     , nextLblId :: Int
+    , varSlotMap :: Map.Map String Int
+    , nextSlotId :: Int
     , definedLabels :: [String]
     , unresolvedLabels :: Set.Set String
     }
@@ -89,12 +91,24 @@ initCodegenState defs =
         { stringMap = Map.empty
         , nextStrId = 0
         , nextLblId = 0
+        , varSlotMap = Map.empty
+        , nextSlotId = 0
         , definedLabels = defs
         , unresolvedLabels = Set.empty
         }
 
 callC :: String -> [X86Instr]
 callC name = [SubOp (Reg RSP) (Imm 8), CallOp name, AddOp (Reg RSP) (Imm 8)]
+
+getVarSlot :: String -> Codegen Int
+getVarSlot name = do
+    st <- get
+    case Map.lookup name (varSlotMap st) of
+        Just slot -> return slot
+        Nothing -> do
+            let slot = nextSlotId st
+            put $ st{varSlotMap = Map.insert name slot (varSlotMap st), nextSlotId = slot + 1}
+            return slot
 
 internString :: String -> Codegen String
 internString str = do
@@ -268,11 +282,11 @@ compileInstruction Ret =
 compileInstruction Exit =
     return $ callC "indigo_exit"
 compileInstruction (LStore name) = do
-    nameLbl <- internString name
-    return $ Lea (Reg RDI) (MemLabel nameLbl) : callC "indigo_lstore"
+    slot <- getVarSlot name
+    return $ Mov (Reg RDI) (Imm slot) : callC "indigo_lstore_slot"
 compileInstruction (LLoad name) = do
-    nameLbl <- internString name
-    return $ Lea (Reg RDI) (MemLabel nameLbl) : callC "indigo_lload"
+    slot <- getVarSlot name
+    return $ Mov (Reg RDI) (Imm slot) : callC "indigo_lload_slot"
 compileInstruction (Store idx) =
     return $ Mov (Reg RDI) (Imm idx) : callC "indigo_store"
 compileInstruction (Load idx) =
