@@ -77,6 +77,8 @@ data Instruction
     | Jf String
     | Call String
     | CallLocal String
+    | TailCall String
+    | TailCallLocal String
     | CallS
     | PushPf String Int
     | Pop
@@ -259,6 +261,8 @@ computeJumpTargets prog lbls = V.imap resolveTarget prog
     resolveTarget _ (Jf x) = maybe (-1) snd (findLabelFuzzy' x lbls)
     resolveTarget _ (Call x) = maybe (-1) snd (findLabelFuzzy' x lbls)
     resolveTarget _ (CallLocal x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (TailCall x) = maybe (-1) snd (findLabelFuzzy' x lbls)
+    resolveTarget _ (TailCallLocal x) = maybe (-1) snd (findLabelFuzzy' x lbls)
     resolveTarget _ (PushPf x _) = maybe (-1) snd (findLabelFuzzy' x lbls)
     resolveTarget _ _ = -1
 
@@ -1116,31 +1120,31 @@ runInstruction Exit = do
             _ -> liftIO exitSuccess
     unless actuallyExit $ void stackPop
 runInstruction (Call x) = do
-    p <- gets program
     currPc <- gets pc
-    let nextInstruction = p V.!? (currPc + 1)
-    case nextInstruction of
-        Just Ret -> runInstruction (Jmp x)
-        _ -> do
-            target <- getJumpTarget x
-            if target >= 0
-                then modify' $ \vm' -> vm'{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack vm'}
-                else setVMError $ "Label not found: " ++ x
+    target <- getJumpTarget x
+    if target >= 0
+        then modify' $ \vm' -> vm'{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack vm'}
+        else setVMError $ "Label not found: " ++ x
 runInstruction (CallLocal x) = do
-    p <- gets program
     currPc <- gets pc
-    let nextInstruction = p V.!? (currPc + 1)
-    case nextInstruction of
-        Just Ret -> runInstruction (Jmp x)
-        _ -> do
-            target <- getJumpTarget x
-            if target >= 0
-                then do
-                    vm <- get
-                    case callStack vm of
-                        (frame : _) -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = frame.locals} : callStack v}
-                        [] -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack v}
-                else setVMError $ "Label not found: " ++ x
+    target <- getJumpTarget x
+    if target >= 0
+        then do
+            vm <- get
+            case callStack vm of
+                (frame : _) -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = frame.locals} : callStack v}
+                [] -> modify' $ \v -> v{pc = target, callStack = StackFrame{returnAddress = currPc, locals = []} : callStack v}
+        else setVMError $ "Label not found: " ++ x
+runInstruction (TailCall x) = do
+    target <- getJumpTarget x
+    if target >= 0
+        then modify' $ \vm' -> vm'{pc = target, callStack = case callStack vm' of (f:rest) -> f{locals = []} : rest; [] -> []}
+        else setVMError $ "Label not found: " ++ x
+runInstruction (TailCallLocal x) = do
+    target <- getJumpTarget x
+    if target >= 0
+        then modify' $ \vm' -> vm'{pc = target}
+        else setVMError $ "Label not found: " ++ x
 runInstruction CallS =
     stackPop >>= \case
         DFuncRef x args fnLocals -> do
@@ -1457,6 +1461,9 @@ printAssembly prog showLineNumbers =
     printAssembly' (PushPf x y) = asmLine ("push_pf " ++ x ++ " " ++ show y)
     printAssembly' (Push x) = asmLine $ "push " ++ show x
     printAssembly' (Call name) = asmLine ("call " <> name)
+    printAssembly' (CallLocal name) = asmLine ("calllocal " <> name)
+    printAssembly' (TailCall name) = asmLine ("tailcall " <> name)
+    printAssembly' (TailCallLocal name) = asmLine ("tailcalllocal " <> name)
     printAssembly' (Jmp name) = asmLine ("jmp " <> name)
     printAssembly' (Jt name) = asmLine ("jt " <> name)
     printAssembly' (Jf name) = asmLine ("jf " <> name)

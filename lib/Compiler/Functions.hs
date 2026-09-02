@@ -699,12 +699,24 @@ compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) exp
                 cerror ("Return type mismatch in function `" ++ origName ++ "`: expected " ++ show expectedReturnType ++ ", got " ++ show bodyType) (extractPosition body)
 
     args' <- concatMapM (`compileParameter` (name, funame', nextFunName)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))
-    let function = Label funame' : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ [Ret | name /= "main"]
+    let rawFunction = Label funame' : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ [Ret | name /= "main"]
+    let function = if name /= "main" then optimizeTailCalls rawFunction else rawFunction
     modify (\s -> s{functions = Function name funame' function funcDec.types curCon : functions s})
     let restoredContextPath = if previousContext == "__outside" then ["__outside"] else Data.List.Split.splitOn "@" previousContext
     modify (\s -> s{contextStack = restoredContextPath})
     return []
   where
+    optimizeTailCalls :: [Instruction] -> [Instruction]
+    optimizeTailCalls [] = []
+    optimizeTailCalls (Call target : ClearSideStack : Ret : rest) =
+        ClearSideStack : TailCall target : optimizeTailCalls rest
+    optimizeTailCalls (CallLocal target : ClearSideStack : Ret : rest) =
+        ClearSideStack : TailCallLocal target : optimizeTailCalls rest
+    optimizeTailCalls (Call target : Ret : rest) =
+        TailCall target : optimizeTailCalls rest
+    optimizeTailCalls (CallLocal target : Ret : rest) =
+        TailCallLocal target : optimizeTailCalls rest
+    optimizeTailCalls (x : xs) = x : optimizeTailCalls xs
     compileParameter :: Parser.Expr -> (String, String, String) -> Compiler [Instruction]
     compileParameter pat (_funcName, _currentFuname, nextFunName) = do
         compilePatternMatch compileExpr' pat nextFunName expectedType

@@ -36,6 +36,8 @@ treeShake prog = do
                 Jf l' -> match l'
                 Call l' -> match l'
                 CallLocal l' -> match l'
+                TailCall l' -> match l'
+                TailCallLocal l' -> match l'
                 PushPf l' _ -> match l'
                 _ -> False
             )

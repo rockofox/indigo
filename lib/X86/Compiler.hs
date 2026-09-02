@@ -63,6 +63,8 @@ import VM
         , StoreSideStack
         , Sub
         , Swp
+        , TailCall
+        , TailCallLocal
         , TypeEq
         , TypeOf
         , UnpackList
@@ -294,6 +296,18 @@ compileInstruction (CallLocal name) = do
         callC "indigo_enter_frame_inherit"
             ++ [SubOp (Reg RSP) (Imm 8), CallOp (sanitizeLabel tgt), AddOp (Reg RSP) (Imm 8)]
             ++ callC "indigo_leave_frame"
+compileInstruction (TailCall name) = do
+    tgt <- resolveTarget name
+    return $
+        callC "indigo_leave_frame"
+            ++ callC "indigo_enter_frame"
+            ++ [JmpOp (sanitizeLabel tgt)]
+compileInstruction (TailCallLocal name) = do
+    tgt <- resolveTarget name
+    return $
+        callC "indigo_leave_frame"
+            ++ callC "indigo_enter_frame_inherit"
+            ++ [JmpOp (sanitizeLabel tgt)]
 compileInstruction CallS =
     return $
         callC "indigo_calls_prepare"
