@@ -180,34 +180,45 @@ doBinOp compileExpr' opName x y expectedType op = do
     let argTypes = [xType, yType]
     let foundFunc = findFunction opName functions' argTypes
     let hasFuncDec = isJust $ find (\case Parser.FuncDec{name} -> name == opName; _ -> False) funcDecs'
-    let aName = "__op_a_" ++ show id'
-    let bName = "__op_b_" ++ show id'
-    x' <- compileExpr' x expectedType
-    y' <- compileExpr' y expectedType
+    let isPrimitiveType (Parser.StructT name _) =
+            name `elem` ["Int", "Float", "Double", "Bool", "Char", "String", "Number", "Any", "Unit", "T", "a", "b"]
+        isPrimitiveType Parser.Any = True
+        isPrimitiveType Parser.Unknown = True
+        isPrimitiveType (Parser.List _) = True
+        isPrimitiveType _ = False
 
+    let isPrimitiveOp = isPrimitiveType xType && isPrimitiveType yType
     let hasFlexible = case (x, y) of
             (Parser.Flexible{}, _) -> True
             (_, Parser.Flexible{}) -> True
             _ -> False
 
-    castInstrs <- case (x, y) of
-        (Parser.Flexible{}, Parser.Flexible{}) -> internalError "Double cast"
-        (Parser.Flexible{}, _) -> do
-            let targetType = compileTypeFromType yType
-            return ([LLoad aName] ++ targetType ++ [Cast, LLoad bName])
-        (_, Parser.Flexible{}) -> do
-            let targetType = compileTypeFromType xType
-            return ([LLoad bName] ++ targetType ++ [Cast, LLoad aName, Swp])
-        _ -> return [LLoad aName, LLoad bName]
     let finalOp = case (foundFunc, hasFuncDec, hasFlexible) of
-            (Just fun, _, False) -> Call (funame fun)
-            (Nothing, True, False) -> Call opName
+            (Just fun, _, False) | not isPrimitiveOp -> Call (funame fun)
+            (Nothing, True, False) | not isPrimitiveOp -> Call opName
             _ -> op
+
+    x' <- compileExpr' x expectedType
+    y' <- compileExpr' y expectedType
+
     case (x, y) of
         (Parser.Placeholder _, Parser.Placeholder _) -> pushPartialOp f 0 []
         (Parser.Placeholder _, _) -> pushPartialOp f 1 y'
         (_, Parser.Placeholder _) -> pushPartialOp f 1 x'
-        _ -> return (x' ++ LStore aName : y' ++ [LStore bName] ++ castInstrs ++ [finalOp])
+        _ | not hasFlexible && isPrimitiveOp -> return (x' ++ y' ++ [finalOp])
+        _ -> do
+            let aName = "__op_a_" ++ show id'
+            let bName = "__op_b_" ++ show id'
+            castInstrs <- case (x, y) of
+                (Parser.Flexible{}, Parser.Flexible{}) -> internalError "Double cast"
+                (Parser.Flexible{}, _) -> do
+                    let targetType = compileTypeFromType yType
+                    return ([LLoad aName] ++ targetType ++ [Cast, LLoad bName])
+                (_, Parser.Flexible{}) -> do
+                    let targetType = compileTypeFromType xType
+                    return ([LLoad bName] ++ targetType ++ [Cast, LLoad aName, Swp])
+                _ -> return [LLoad aName, LLoad bName]
+            return (x' ++ LStore aName : y' ++ [LStore bName] ++ castInstrs ++ [finalOp])
   where
     pushPartialOp :: Maybe Function -> Int -> [Instruction] -> Compiler [Instruction]
     pushPartialOp (Just fun) n pre = return $ pre ++ [PushPf (funame fun) n]

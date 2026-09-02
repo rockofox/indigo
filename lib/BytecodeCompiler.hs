@@ -66,17 +66,26 @@ compileBinOpSeq compileExpr' opName x y expectedType ops = do
     if errorCountAfter > errorCountBefore
         then return []
         else do
-            id' <- allocId
-            let aName = "__op_a_" ++ show id'
-            let bName = "__op_b_" ++ show id'
-            x' <- compileExpr' x expectedType
-            y' <- compileExpr' y expectedType
-            let cast = case (x, y) of
-                    (Parser.Flexible{}, Parser.Flexible{}) -> error "Double cast"
-                    (Parser.Flexible{}, _) -> Cast : y'
-                    (_, Parser.Flexible{}) -> [Swp, Cast] ++ x'
-                    _ -> []
-            return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ ops)
+            case (x, y) of
+                (Parser.Flexible{}, _) -> doFlexibleCast
+                (_, Parser.Flexible{}) -> doFlexibleCast
+                _ -> do
+                    x' <- compileExpr' x expectedType
+                    y' <- compileExpr' y expectedType
+                    return (x' ++ y' ++ ops)
+  where
+    doFlexibleCast = do
+        id' <- allocId
+        let aName = "__op_a_" ++ show id'
+        let bName = "__op_b_" ++ show id'
+        x' <- compileExpr' x expectedType
+        y' <- compileExpr' y expectedType
+        let cast = case (x, y) of
+                (Parser.Flexible{}, Parser.Flexible{}) -> error "Double cast"
+                (Parser.Flexible{}, _) -> Cast : y'
+                (_, Parser.Flexible{}) -> [Swp, Cast] ++ x'
+                _ -> []
+        return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ ops)
 
 compileExpr :: Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileExpr expr typ = do

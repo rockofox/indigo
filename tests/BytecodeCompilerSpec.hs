@@ -83,14 +83,14 @@ spec = do
     describe "Addition" $ do
         it "Should compile 2+4" $
             compile [r|2+4|]
-                `shouldReturn` [Label "main", StoreSideStack, Push 2, LStore "__op_a_0", Push 4, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Call "+", ClearSideStack, Push $ DInt 0, Exit]
+                `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 4, Add, ClearSideStack, Push $ DInt 0, Exit]
         it "Should work properly with function calls" $
             compile
                 [r|
                 f :: Int -> Int
                 f x = x + 1
                 let main : IO<Unit> = unsafePrint (f 2) + 4|]
-                `shouldReturn` [Label "f#0", StoreSideStack, LStore "x", LLoad "x", LStore "__op_a_1", Push 1, LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 2, Call "f#0", LStore "__op_a_2", Push 4, LStore "__op_b_2", LLoad "__op_a_2", LLoad "__op_b_2", Call "+", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
+                `shouldReturn` [Label "f#0", StoreSideStack, LStore "x", LLoad "x", Push 1, Add, ClearSideStack, Ret, Label "main", StoreSideStack, Push 2, Call "f#0", Push 4, Add, Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
     describe "Hello World" $
         it "Should print Hello, world!" $
             compile [r|let main : IO<Unit> = unsafePrint "Hello, world!"|]
@@ -107,7 +107,7 @@ spec = do
                 `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, ClearSideStack, Push $ DInt 0, Exit]
         it "Casts are compatible with binary operations" $
             compile [r|(2 as Float) + 4.0|]
-                `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, LStore "__op_a_0", Push 4.0, LStore "__op_b_0", LLoad "__op_a_0", LLoad "__op_b_0", Call "+", ClearSideStack, Push $ DInt 0, Exit]
+                `shouldReturn` [Label "main", StoreSideStack, Push 2, Push 0.0, Cast, Push 4.0, Add, ClearSideStack, Push $ DInt 0, Exit]
     describe "Value structs" $ do
         it "Can cast to value struct without refinement" $ do
             result <-
@@ -367,7 +367,7 @@ spec = do
                 let add<N: Number> (a: N b: N) : N = a + b
                 let main : IO<Unit> = unsafePrint (add 1, 2)
                 |]
-                `shouldReturn` [Label "add#0", StoreSideStack, LStore "b", LStore "a", LLoad "a", LStore "__op_a_1", LLoad "b", LStore "__op_b_1", LLoad "__op_a_1", LLoad "__op_b_1", Call "+", ClearSideStack, Ret, Label "main", StoreSideStack, Push 1, Push 2, Call "add#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
+                `shouldReturn` [Label "add#0", StoreSideStack, LStore "b", LStore "a", LLoad "a", LLoad "b", Add, ClearSideStack, Ret, Label "main", StoreSideStack, Push 1, Push 2, Call "add#0", Builtin Print, ClearSideStack, Push $ DInt 0, Exit]
         it "Should require matching generic types" $ do
             let prog =
                     [r|
