@@ -26,6 +26,7 @@ import ErrorRenderer (parseErrorBundleToSourceErrors, renderErrors)
 import GHC.IO.Handle (hFlush)
 import GHC.IO.StdHandles (stdout)
 import IndigoConfig (IndigoConfig (..), findConfigFile, loadConfig, mainFile, sourceDirs)
+import LLVMCompiler qualified
 import Optimizer
 import Options.Applicative
 import Parser
@@ -54,6 +55,8 @@ data CmdOptions = Options
     , noOptimize :: Bool
     , emitAsm :: Bool
     , compileNative :: Bool
+    , emitLLVM :: Bool
+    , compileLLVM :: Bool
     }
 
 optionsParser :: Options.Applicative.Parser CmdOptions
@@ -87,6 +90,8 @@ optionsParser =
         <*> switch (long "no-optimize" <> short 'O' <> help "Don't optimize the program")
         <*> switch (long "emit-asm" <> short 'S' <> help "Emit x86-64 assembly")
         <*> switch (long "compile-native" <> short 'c' <> help "Compile to native x86-64 binary")
+        <*> switch (long "emit-llvm" <> short 'l' <> help "Emit LLVM IR (.ll)")
+        <*> switch (long "compile-llvm" <> help "Compile to native binary via LLVM IR (Clang)")
 
 prettyPrintExpr :: Expr -> Int -> String
 prettyPrintExpr (DoBlock exprs _) i = indent i ++ "DoBlock[\n" ++ intercalate "\n" (map (\x -> prettyPrintExpr x (i + 1)) exprs) ++ "\n" ++ indent i ++ "]"
@@ -149,7 +154,7 @@ parseNoVerify name input compilerFlags = return $ do
 
 main :: IO ()
 main = do
-    Options inputs output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize emitAsm compileNative <-
+    Options inputs output debugAST debugBytecode verbose emitBytecode runBytecode breakpoints showTime showVersion noVerify noOptimize emitAsm compileNative emitLLVM compileLLVM <-
         execParser $
             info
                 (optionsParser <**> helper)
@@ -254,6 +259,23 @@ main = do
     when compileNative $ do
         let outFile = fromMaybe "a.out" output
         res <- X86Compiler.compileToNative program outFile
+        case res of
+            Left err -> do
+                putStrLn err
+                exitFailure
+            Right _ -> exitSuccess
+
+    when emitLLVM $ do
+        let ir = LLVMCompiler.compileToLLVM program
+        case output of
+            Just "-" -> putStr ir
+            Just file -> writeFile file ir
+            Nothing -> putStr ir
+        exitSuccess
+
+    when compileLLVM $ do
+        let outFile = fromMaybe "a.out" output
+        res <- LLVMCompiler.compileToNative program outFile
         case res of
             Left err -> do
                 putStrLn err

@@ -34,6 +34,11 @@ library
         X86.Runtime
         X86.Compiler
         X86.Emitter
+        LLVMCompiler
+        LLVM.Types
+        LLVM.Sanitizer
+        LLVM.Compiler
+        LLVM.Emitter
 
     hs-source-dirs:     lib
     other-modules:
@@ -127,6 +132,7 @@ test-suite spec
         OptimizerSpec
         IndigoConfigSpec
         X86CompilerSpec
+        LLVMCompilerSpec
         VMSpec
 
     default-language:   Haskell2010

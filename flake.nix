@@ -180,6 +180,7 @@
             pkgs.wasmtime
             pkgs.wabt
             pkgs.wizer
+            pkgs.clang
             ghc-wasm-meta.packages.${system}.default
           ];
           withHoogle = false;
