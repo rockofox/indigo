@@ -215,40 +215,34 @@ compileInstruction Pop = return [RawAsm "sub qword ptr [rip + g_sp], 1"]
 compileInstruction Dup =
     return
         [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
+        , RawAsm "shl rax, 3"
         , RawAsm "lea r11, [rip + g_stack]"
         , RawAsm "add r11, rax"
-        , RawAsm "mov rbx, [r11 - 16]"
-        , RawAsm "mov rcx, [r11 - 8]"
+        , RawAsm "mov rbx, [r11 - 8]"
         , RawAsm "mov [r11], rbx"
-        , RawAsm "mov [r11 + 8], rcx"
         , RawAsm "add qword ptr [rip + g_sp], 1"
         ]
 compileInstruction Swp =
     return
         [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
+        , RawAsm "shl rax, 3"
         , RawAsm "lea r11, [rip + g_stack]"
         , RawAsm "add r11, rax"
-        , RawAsm "mov rbx, [r11 - 16]"
-        , RawAsm "mov rcx, [r11 - 8]"
-        , RawAsm "mov rdx, [r11 - 32]"
-        , RawAsm "mov rsi, [r11 - 24]"
-        , RawAsm "mov [r11 - 32], rbx"
-        , RawAsm "mov [r11 - 24], rcx"
-        , RawAsm "mov [r11 - 16], rdx"
-        , RawAsm "mov [r11 - 8], rsi"
+        , RawAsm "mov rbx, [r11 - 8]"
+        , RawAsm "mov rdx, [r11 - 16]"
+        , RawAsm "mov [r11 - 16], rbx"
+        , RawAsm "mov [r11 - 8], rdx"
         ]
-compileInstruction Add = compileAdd
-compileInstruction Sub = compileSub
-compileInstruction Mul = compileMul
-compileInstruction Div = compileDiv
+compileInstruction Add = return $ callC "indigo_add"
+compileInstruction Sub = return $ callC "indigo_sub"
+compileInstruction Mul = return $ callC "indigo_mul"
+compileInstruction Div = return $ callC "indigo_div"
 compileInstruction Mod = return $ callC "indigo_mod"
 compileInstruction Pow = return $ callC "indigo_pow"
 compileInstruction Abs = return $ callC "indigo_abs"
-compileInstruction Eq = compileEq
+compileInstruction Eq = return $ callC "indigo_eq"
 compileInstruction Neq = return $ callC "indigo_neq"
-compileInstruction Lt = compileLt
+compileInstruction Lt = return $ callC "indigo_lt"
 compileInstruction Gt = return $ callC "indigo_gt"
 compileInstruction Not = return $ callC "indigo_not"
 compileInstruction And = return $ callC "indigo_and"
@@ -261,29 +255,35 @@ compileInstruction (Jmp name) = do
 compileInstruction (Jt name) = do
     tgt <- resolveTarget name
     skipLbl <- freshLocalLabel "jt_skip"
-    return
+    return $
         [ RawAsm "sub qword ptr [rip + g_sp], 1"
         , RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
+        , RawAsm "shl rax, 3"
         , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "cmp qword ptr [r11 + rax + 8], 0"
-        , RawAsm ("je " ++ skipLbl)
-        , JmpOp (sanitizeLabel tgt)
-        , LabelDef skipLbl
+        , RawAsm "mov rdi, [r11 + rax]"
         ]
+            ++ callC "indigo_is_truthy"
+            ++ [ RawAsm "cmp al, 0"
+               , RawAsm ("je " ++ skipLbl)
+               , JmpOp (sanitizeLabel tgt)
+               , LabelDef skipLbl
+               ]
 compileInstruction (Jf name) = do
     tgt <- resolveTarget name
     skipLbl <- freshLocalLabel "jf_skip"
-    return
+    return $
         [ RawAsm "sub qword ptr [rip + g_sp], 1"
         , RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
+        , RawAsm "shl rax, 3"
         , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "cmp qword ptr [r11 + rax + 8], 0"
-        , RawAsm ("jne " ++ skipLbl)
-        , JmpOp (sanitizeLabel tgt)
-        , LabelDef skipLbl
+        , RawAsm "mov rdi, [r11 + rax]"
         ]
+            ++ callC "indigo_is_truthy"
+            ++ [ RawAsm "cmp al, 0"
+               , RawAsm ("jne " ++ skipLbl)
+               , JmpOp (sanitizeLabel tgt)
+               , LabelDef skipLbl
+               ]
 compileInstruction (Call name) = do
     tgt <- resolveTarget name
     return $
@@ -328,31 +328,10 @@ compileInstruction Exit =
     return $ callC "indigo_exit"
 compileInstruction (LStore name) = do
     slot <- getVarSlot name
-    return
-        [ RawAsm "mov rdx, [rip + g_current_frame]"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "mov rbx, [r11 + rax]"
-        , RawAsm "mov rcx, [r11 + rax + 8]"
-        , RawAsm ("mov [rdx + " ++ show (slot * 16) ++ "], rbx")
-        , RawAsm ("mov [rdx + " ++ show (slot * 16 + 8) ++ "], rcx")
-        , RawAsm ("mov byte ptr [rdx + " ++ show (16384 + slot) ++ "], 1")
-        ]
+    return $ Mov (Reg RDI) (Imm slot) : callC "indigo_lstore_slot"
 compileInstruction (LLoad name) = do
     slot <- getVarSlot name
-    return
-        [ RawAsm "mov rdx, [rip + g_current_frame]"
-        , RawAsm ("mov rbx, [rdx + " ++ show (slot * 16) ++ "]")
-        , RawAsm ("mov rcx, [rdx + " ++ show (slot * 16 + 8) ++ "]")
-        , RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "mov [r11 + rax], rbx"
-        , RawAsm "mov [r11 + rax + 8], rcx"
-        , RawAsm "add qword ptr [rip + g_sp], 1"
-        ]
+    return $ Mov (Reg RDI) (Imm slot) : callC "indigo_lload_slot"
 compileInstruction (Store idx) =
     return $ Mov (Reg RDI) (Imm idx) : callC "indigo_store"
 compileInstruction (Load idx) =
@@ -420,270 +399,27 @@ compileInstruction (Meta msg) =
 compileInstruction (CallFFI name _ numArgs) =
     return $ Mov (Reg RDI) (Imm numArgs) : callC ("indigo_ffi_" ++ name)
 
-compileAdd :: Codegen [X86Instr]
-compileAdd = do
-    checkInt <- freshLocalLabel "add_check_int"
-    fallback <- freshLocalLabel "add_fallback"
-    done <- freshLocalLabel "add_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ checkInt)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "addss xmm0, xmm1"
-        , RawAsm "movd dword ptr [r11 - 24], xmm0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef checkInt
-        , RawAsm "cmp qword ptr [r11 - 32], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "mov rbx, [r11 - 24]"
-        , RawAsm "add rbx, [r11 - 8]"
-        , RawAsm "mov [r11 - 24], rbx"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_add"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
-compileSub :: Codegen [X86Instr]
-compileSub = do
-    checkInt <- freshLocalLabel "sub_check_int"
-    fallback <- freshLocalLabel "sub_fallback"
-    done <- freshLocalLabel "sub_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ checkInt)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "subss xmm0, xmm1"
-        , RawAsm "movd dword ptr [r11 - 24], xmm0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef checkInt
-        , RawAsm "cmp qword ptr [r11 - 32], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "mov rbx, [r11 - 24]"
-        , RawAsm "sub rbx, [r11 - 8]"
-        , RawAsm "mov [r11 - 24], rbx"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_sub"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
-compileMul :: Codegen [X86Instr]
-compileMul = do
-    checkInt <- freshLocalLabel "mul_check_int"
-    fallback <- freshLocalLabel "mul_fallback"
-    done <- freshLocalLabel "mul_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ checkInt)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "mulss xmm0, xmm1"
-        , RawAsm "movd dword ptr [r11 - 24], xmm0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef checkInt
-        , RawAsm "cmp qword ptr [r11 - 32], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "mov rbx, [r11 - 24]"
-        , RawAsm "imul rbx, [r11 - 8]"
-        , RawAsm "mov [r11 - 24], rbx"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_mul"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
-compileDiv :: Codegen [X86Instr]
-compileDiv = do
-    fallback <- freshLocalLabel "div_fallback"
-    done <- freshLocalLabel "div_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "divss xmm0, xmm1"
-        , RawAsm "movd dword ptr [r11 - 24], xmm0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_div"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
-compileLt :: Codegen [X86Instr]
-compileLt = do
-    checkInt <- freshLocalLabel "lt_check_int"
-    fallback <- freshLocalLabel "lt_fallback"
-    setTrue <- freshLocalLabel "lt_true"
-    setFalse <- freshLocalLabel "lt_false"
-    done <- freshLocalLabel "lt_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ checkInt)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "ucomiss xmm0, xmm1"
-        , RawAsm ("jb " ++ setTrue)
-        , RawAsm ("jmp " ++ setFalse)
-        , LabelDef checkInt
-        , RawAsm "cmp qword ptr [r11 - 32], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "mov rbx, [r11 - 24]"
-        , RawAsm "cmp rbx, [r11 - 8]"
-        , RawAsm ("jl " ++ setTrue)
-        , RawAsm ("jmp " ++ setFalse)
-        , LabelDef setTrue
-        , RawAsm "mov qword ptr [r11 - 32], 5"
-        , RawAsm "mov qword ptr [r11 - 24], 1"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef setFalse
-        , RawAsm "mov qword ptr [r11 - 32], 5"
-        , RawAsm "mov qword ptr [r11 - 24], 0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_lt"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
-compileEq :: Codegen [X86Instr]
-compileEq = do
-    checkInt <- freshLocalLabel "eq_check_int"
-    fallback <- freshLocalLabel "eq_fallback"
-    setTrue <- freshLocalLabel "eq_true"
-    setFalse <- freshLocalLabel "eq_false"
-    done <- freshLocalLabel "eq_done"
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "add r11, rax"
-        , RawAsm "cmp qword ptr [r11 - 32], 2"
-        , RawAsm ("jne " ++ checkInt)
-        , RawAsm "cmp qword ptr [r11 - 16], 2"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "movd xmm0, dword ptr [r11 - 24]"
-        , RawAsm "movd xmm1, dword ptr [r11 - 8]"
-        , RawAsm "ucomiss xmm0, xmm1"
-        , RawAsm ("je " ++ setTrue)
-        , RawAsm ("jmp " ++ setFalse)
-        , LabelDef checkInt
-        , RawAsm "cmp qword ptr [r11 - 32], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "cmp qword ptr [r11 - 16], 1"
-        , RawAsm ("jne " ++ fallback)
-        , RawAsm "mov rbx, [r11 - 24]"
-        , RawAsm "cmp rbx, [r11 - 8]"
-        , RawAsm ("je " ++ setTrue)
-        , RawAsm ("jmp " ++ setFalse)
-        , LabelDef setTrue
-        , RawAsm "mov qword ptr [r11 - 32], 5"
-        , RawAsm "mov qword ptr [r11 - 24], 1"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef setFalse
-        , RawAsm "mov qword ptr [r11 - 32], 5"
-        , RawAsm "mov qword ptr [r11 - 24], 0"
-        , RawAsm "sub qword ptr [rip + g_sp], 1"
-        , RawAsm ("jmp " ++ done)
-        , LabelDef fallback
-        , SubOp (Reg RSP) (Imm 8)
-        , CallOp "indigo_eq"
-        , AddOp (Reg RSP) (Imm 8)
-        , LabelDef done
-        ]
-
 compilePushData :: Data -> Codegen [X86Instr]
 compilePushData (DInt n) =
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "mov qword ptr [r11 + rax], 1"
-        , RawAsm ("mov r10, " ++ show n)
-        , RawAsm "mov [r11 + rax + 8], r10"
-        , RawAsm "add qword ptr [rip + g_sp], 1"
+    return $
+        [ Mov (Reg RDI) (Imm 1)
+        , Mov (Reg RSI) (Imm (fromIntegral n))
         ]
+            ++ callC "indigo_push"
 compilePushData (DFloat f) =
     let w = fromIntegral (castFloatToWord32 f) :: Int
-     in return
-            [ RawAsm "mov rax, [rip + g_sp]"
-            , RawAsm "shl rax, 4"
-            , RawAsm "lea r11, [rip + g_stack]"
-            , RawAsm "mov qword ptr [r11 + rax], 2"
-            , RawAsm ("mov r10, " ++ show w)
-            , RawAsm "mov [r11 + rax + 8], r10"
-            , RawAsm "add qword ptr [rip + g_sp], 1"
+     in return $
+            [ Mov (Reg RDI) (Imm 2)
+            , Mov (Reg RSI) (Imm (fromIntegral w))
             ]
+                ++ callC "indigo_push"
 compilePushData (DDouble d) =
     let w = fromIntegral (castDoubleToWord64 d) :: Int
-     in return
-            [ RawAsm "mov rax, [rip + g_sp]"
-            , RawAsm "shl rax, 4"
-            , RawAsm "lea r11, [rip + g_stack]"
-            , RawAsm "mov qword ptr [r11 + rax], 3"
-            , RawAsm ("mov r10, " ++ show w)
-            , RawAsm "mov [r11 + rax + 8], r10"
-            , RawAsm "add qword ptr [rip + g_sp], 1"
+     in return $
+            [ Mov (Reg RDI) (Imm 3)
+            , Mov (Reg RSI) (Imm (fromIntegral w))
             ]
+                ++ callC "indigo_push"
 compilePushData (DString s) = do
     lbl <- internString s
     return $
@@ -692,14 +428,11 @@ compilePushData (DString s) = do
         ]
             ++ callC "indigo_push"
 compilePushData (DBool b) =
-    return
-        [ RawAsm "mov rax, [rip + g_sp]"
-        , RawAsm "shl rax, 4"
-        , RawAsm "lea r11, [rip + g_stack]"
-        , RawAsm "mov qword ptr [r11 + rax], 5"
-        , RawAsm ("mov qword ptr [r11 + rax + 8], " ++ (if b then "1" else "0"))
-        , RawAsm "add qword ptr [rip + g_sp], 1"
+    return $
+        [ Mov (Reg RDI) (Imm 5)
+        , Mov (Reg RSI) (Imm (if b then 1 else 0))
         ]
+            ++ callC "indigo_push"
 compilePushData (DList xs) = do
     pushElems <- concatMapM compilePushData xs
     return $

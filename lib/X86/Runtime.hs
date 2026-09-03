@@ -32,15 +32,83 @@ typedef enum {
     TAG_CPTR = 11
 } IndigoTag;
 
-typedef struct {
-    int64_t tag;
-    int64_t payload;
-} IndigoValue;
+typedef uint64_t IndigoValue;
+
+#define QNAN_MASK      0xFFF0000000000000ULL
+#define TAG_BITS(t)    (0xFFF0000000000000ULL | (((uint64_t)(t) & 0xFULL) << 48))
+#define PAYLOAD_MASK   0x0000FFFFFFFFFFFFULL
+
+static inline bool is_double(IndigoValue v) {
+    return (v & QNAN_MASK) != QNAN_MASK;
+}
+
+static inline int64_t indigo_tag(IndigoValue v) {
+    if (is_double(v)) return TAG_DOUBLE;
+    return (int64_t)((v >> 48) & 0xFULL);
+}
+
+static inline int64_t indigo_payload(IndigoValue v) {
+    if (is_double(v)) return (int64_t)v;
+    int64_t p = (int64_t)(v & PAYLOAD_MASK);
+    if (((v >> 48) & 0xFULL) == TAG_INT && (p & 0x0000800000000000ULL)) {
+        p |= 0xFFFF000000000000ULL;
+    }
+    return p;
+}
+
+static inline IndigoValue indigo_pack(int64_t tag, int64_t payload) {
+    if (tag == TAG_DOUBLE) {
+        IndigoValue v;
+        memcpy(&v, &payload, sizeof(uint64_t));
+        if ((v & QNAN_MASK) == QNAN_MASK) {
+            v = 0x7FF8000000000000ULL;
+        }
+        return v;
+    }
+    return TAG_BITS(tag) | ((uint64_t)payload & PAYLOAD_MASK);
+}
+
+static inline IndigoValue pack_double(double d) {
+    IndigoValue v;
+    memcpy(&v, &d, sizeof(double));
+    if ((v & QNAN_MASK) == QNAN_MASK) {
+        v = 0x7FF8000000000000ULL;
+    }
+    return v;
+}
+
+static inline IndigoValue pack_float(float f) {
+    uint32_t u;
+    memcpy(&u, &f, sizeof(float));
+    return TAG_BITS(TAG_FLOAT) | (uint64_t)u;
+}
+
+static inline IndigoValue pack_int(int64_t n) {
+    return TAG_BITS(TAG_INT) | ((uint64_t)n & PAYLOAD_MASK);
+}
+
+static inline IndigoValue pack_bool(bool b) {
+    return TAG_BITS(TAG_BOOL) | (b ? 1ULL : 0ULL);
+}
+
+static inline IndigoValue pack_ptr(int64_t tag, void* ptr) {
+    return TAG_BITS(tag) | ((uint64_t)ptr & PAYLOAD_MASK);
+}
+
+bool indigo_is_truthy(IndigoValue v) {
+    if (is_double(v)) {
+        double d;
+        memcpy(&d, &v, sizeof(double));
+        return d != 0.0;
+    }
+    return (indigo_payload(v) != 0);
+}
 
 typedef struct IndigoList {
     int64_t length;
     int64_t capacity;
     IndigoValue* items;
+    IndigoValue inline_items[2];
 } IndigoList;
 
 typedef struct IndigoMapEntry {
@@ -53,11 +121,12 @@ typedef struct IndigoMap {
     IndigoMapEntry* head;
 } IndigoMap;
 
-#define MAX_LOCALS 1024
+#define MAX_LOCALS 128
+#define FRAME_POOL_CAPACITY 8192
 
 typedef struct IndigoFrame {
     IndigoValue locals[MAX_LOCALS];
-    bool has_local[MAX_LOCALS];
+    uint64_t has_local_mask[2];
     struct IndigoFrame* prev;
 } IndigoFrame;
 
@@ -67,7 +136,7 @@ typedef struct IndigoFuncRef {
     int64_t arg_count;
     IndigoValue* args;
     IndigoValue locals[MAX_LOCALS];
-    bool has_local[MAX_LOCALS];
+    uint64_t has_local_mask[2];
 } IndigoFuncRef;
 
 IndigoValue g_stack[STACK_CAPACITY];
@@ -78,20 +147,20 @@ int64_t g_ssp = 0;
 
 IndigoValue g_memory[MEMORY_CAPACITY];
 
-#define FRAME_POOL_CAPACITY 65536
 IndigoFrame g_frame_pool[FRAME_POOL_CAPACITY];
 int64_t g_frame_pool_sp = 0;
 IndigoFrame* g_current_frame = NULL;
 
 static inline int64_t float_to_payload(float f) {
-    int64_t p = 0;
-    memcpy(&p, &f, sizeof(float));
-    return p;
+    uint32_t u;
+    memcpy(&u, &f, sizeof(float));
+    return (int64_t)u;
 }
 
 static inline float payload_to_float(int64_t p) {
-    float f = 0.0f;
-    memcpy(&f, &p, sizeof(float));
+    uint32_t u = (uint32_t)p;
+    float f;
+    memcpy(&f, &u, sizeof(float));
     return f;
 }
 
@@ -107,6 +176,30 @@ static inline double payload_to_double(int64_t p) {
     return d;
 }
 
+static inline double to_double_val(IndigoValue v) {
+    if (is_double(v)) {
+        double d;
+        memcpy(&d, &v, sizeof(double));
+        return d;
+    }
+    int64_t tag = indigo_tag(v);
+    if (tag == TAG_FLOAT) return (double)payload_to_float(indigo_payload(v));
+    if (tag == TAG_INT) return (double)indigo_payload(v);
+    return 0.0;
+}
+
+static inline float to_float_val(IndigoValue v) {
+    if (is_double(v)) {
+        double d;
+        memcpy(&d, &v, sizeof(double));
+        return (float)d;
+    }
+    int64_t tag = indigo_tag(v);
+    if (tag == TAG_FLOAT) return payload_to_float(indigo_payload(v));
+    if (tag == TAG_INT) return (float)indigo_payload(v);
+    return 0.0f;
+}
+
 static inline char* heap_strdup(const char* s) {
     if (!s) return NULL;
     size_t len = strlen(s);
@@ -120,26 +213,31 @@ static inline char* heap_strdup(const char* s) {
 }
 
 void indigo_push(int64_t tag, int64_t payload) {
-    if (g_sp >= STACK_CAPACITY) {
+    if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
         fprintf(stderr, "Stack overflow\n");
         exit(1);
     }
-    g_stack[g_sp].tag = tag;
-    g_stack[g_sp].payload = payload;
-    g_sp++;
+    g_stack[g_sp++] = indigo_pack(tag, payload);
+}
+
+static inline void indigo_push_val(IndigoValue v) {
+    if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
+        fprintf(stderr, "Stack overflow\n");
+        exit(1);
+    }
+    g_stack[g_sp++] = v;
 }
 
 IndigoValue indigo_pop(void) {
-    if (g_sp <= 0) {
+    if (__builtin_expect(g_sp <= 0, 0)) {
         fprintf(stderr, "Stack underflow\n");
         exit(1);
     }
-    g_sp--;
-    return g_stack[g_sp];
+    return g_stack[--g_sp];
 }
 
 IndigoValue indigo_peek(void) {
-    if (g_sp <= 0) {
+    if (__builtin_expect(g_sp <= 0, 0)) {
         fprintf(stderr, "Stack underflow in peek\n");
         exit(1);
     }
@@ -147,17 +245,20 @@ IndigoValue indigo_peek(void) {
 }
 
 void indigo_dup(void) {
-    if (g_sp > 0) {
-        IndigoValue v = g_stack[g_sp - 1];
-        indigo_push(v.tag, v.payload);
+    if (__builtin_expect(g_sp > 0, 1)) {
+        if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
+            fprintf(stderr, "Stack overflow in dup\n");
+            exit(1);
+        }
+        g_stack[g_sp] = g_stack[g_sp - 1];
+        g_sp++;
     }
 }
 
 void indigo_swp(void) {
-    if (g_sp >= 2) {
+    if (__builtin_expect(g_sp >= 2, 1)) {
         IndigoValue a = g_stack[g_sp - 1];
-        IndigoValue b = g_stack[g_sp - 2];
-        g_stack[g_sp - 1] = b;
+        g_stack[g_sp - 1] = g_stack[g_sp - 2];
         g_stack[g_sp - 2] = a;
     } else {
         fprintf(stderr, "Swp: expected at least 2 values\n");
@@ -166,27 +267,30 @@ void indigo_swp(void) {
 }
 
 void indigo_enter_frame(void) {
-    if (g_frame_pool_sp >= FRAME_POOL_CAPACITY) {
+    if (__builtin_expect(g_frame_pool_sp >= FRAME_POOL_CAPACITY, 0)) {
         fprintf(stderr, "Call frame stack overflow\n");
         exit(1);
     }
     IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
-    memset(frame->has_local, 0, sizeof(frame->has_local));
+    frame->has_local_mask[0] = 0;
+    frame->has_local_mask[1] = 0;
     frame->prev = g_current_frame;
     g_current_frame = frame;
 }
 
 void indigo_enter_frame_inherit(void) {
-    if (g_frame_pool_sp >= FRAME_POOL_CAPACITY) {
+    if (__builtin_expect(g_frame_pool_sp >= FRAME_POOL_CAPACITY, 0)) {
         fprintf(stderr, "Call frame stack overflow\n");
         exit(1);
     }
     IndigoFrame* frame = &g_frame_pool[g_frame_pool_sp++];
     if (g_current_frame) {
         memcpy(frame->locals, g_current_frame->locals, sizeof(frame->locals));
-        memcpy(frame->has_local, g_current_frame->has_local, sizeof(frame->has_local));
+        frame->has_local_mask[0] = g_current_frame->has_local_mask[0];
+        frame->has_local_mask[1] = g_current_frame->has_local_mask[1];
     } else {
-        memset(frame->has_local, 0, sizeof(frame->has_local));
+        frame->has_local_mask[0] = 0;
+        frame->has_local_mask[1] = 0;
     }
     frame->prev = g_current_frame;
     g_current_frame = frame;
@@ -200,17 +304,15 @@ void indigo_leave_frame(void) {
 
 void indigo_storesidestack(void) {
     g_ssp = g_sp;
-    for (int64_t i = 0; i < g_sp && i < STACK_CAPACITY; i++) {
-        g_sidestack[i] = g_stack[i];
+    if (g_sp > 0) {
+        memcpy(g_sidestack, g_stack, g_sp * sizeof(IndigoValue));
     }
 }
 
 void indigo_loadsidestack(void) {
     if (g_ssp > 0) {
         g_sp = g_ssp;
-        for (int64_t i = 0; i < g_ssp && i < STACK_CAPACITY; i++) {
-            g_stack[i] = g_sidestack[i];
-        }
+        memcpy(g_stack, g_sidestack, g_ssp * sizeof(IndigoValue));
     }
 }
 
@@ -219,55 +321,76 @@ void indigo_clearsidestack(void) {
 }
 
 void indigo_lstore_slot(int64_t slot) {
-    IndigoValue val = indigo_pop();
-    if (!g_current_frame) {
+    if (__builtin_expect(g_sp <= 0, 0)) {
+        fprintf(stderr, "Stack underflow in lstore\n");
+        exit(1);
+    }
+    IndigoValue val = g_stack[--g_sp];
+    if (__builtin_expect(!g_current_frame, 0)) {
         indigo_enter_frame();
     }
-    if (slot >= 0 && slot < MAX_LOCALS) {
+    if (__builtin_expect(slot >= 0 && slot < MAX_LOCALS, 1)) {
         g_current_frame->locals[slot] = val;
-        g_current_frame->has_local[slot] = true;
+        g_current_frame->has_local_mask[slot / 64] |= (1ULL << (slot % 64));
     }
 }
 
 void indigo_lload_slot(int64_t slot) {
-    IndigoFrame* f = g_current_frame;
-    while (f) {
-        if (slot >= 0 && slot < MAX_LOCALS && f->has_local[slot]) {
-            indigo_push(f->locals[slot].tag, f->locals[slot].payload);
-            return;
+    if (__builtin_expect(slot >= 0 && slot < MAX_LOCALS, 1)) {
+        int word_idx = (int)(slot / 64);
+        uint64_t bit = (1ULL << (slot % 64));
+        IndigoFrame* f = g_current_frame;
+        while (f) {
+            if (f->has_local_mask[word_idx] & bit) {
+                if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
+                    fprintf(stderr, "Stack overflow in lload\n");
+                    exit(1);
+                }
+                g_stack[g_sp++] = f->locals[slot];
+                return;
+            }
+            f = f->prev;
         }
-        f = f->prev;
     }
-    indigo_push(0, 0);
+    if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
+        fprintf(stderr, "Stack overflow in lload\n");
+        exit(1);
+    }
+    g_stack[g_sp++] = TAG_BITS(TAG_NONE);
 }
 
 void indigo_store(int64_t idx) {
-    IndigoValue val = indigo_pop();
+    if (__builtin_expect(g_sp <= 0, 0)) {
+        fprintf(stderr, "Stack underflow in store\n");
+        exit(1);
+    }
+    IndigoValue val = g_stack[--g_sp];
     if (idx >= 0 && idx < MEMORY_CAPACITY) {
         g_memory[idx] = val;
     }
 }
 
 void indigo_load(int64_t idx) {
-    if (idx >= 0 && idx < MEMORY_CAPACITY) {
-        indigo_push(g_memory[idx].tag, g_memory[idx].payload);
-    } else {
-        indigo_push(TAG_NONE, 0);
+    if (__builtin_expect(g_sp >= STACK_CAPACITY, 0)) {
+        fprintf(stderr, "Stack overflow in load\n");
+        exit(1);
     }
-}
-
-void indigo_mov(int64_t idx, int64_t tag, int64_t payload) {
     if (idx >= 0 && idx < MEMORY_CAPACITY) {
-        g_memory[idx].tag = tag;
-        g_memory[idx].payload = payload;
+        g_stack[g_sp++] = g_memory[idx];
+    } else {
+        g_stack[g_sp++] = TAG_BITS(TAG_NONE);
     }
 }
 
 IndigoList* indigo_alloc_list(int64_t capacity) {
     IndigoList* list = (IndigoList*)malloc(sizeof(IndigoList));
     list->length = 0;
-    list->capacity = capacity > 0 ? capacity : 8;
-    list->items = (IndigoValue*)malloc(sizeof(IndigoValue) * list->capacity);
+    list->capacity = capacity > 0 ? capacity : 2;
+    if (list->capacity <= 2) {
+        list->items = list->inline_items;
+    } else {
+        list->items = (IndigoValue*)malloc(sizeof(IndigoValue) * list->capacity);
+    }
     return list;
 }
 
@@ -275,7 +398,11 @@ void indigo_list_append(IndigoList* list, IndigoValue val) {
     if (list->length >= list->capacity) {
         int64_t old_cap = list->capacity;
         list->capacity = list->capacity * 2 + 4;
-        if (old_cap == 0) {
+        if (old_cap <= 2 && list->items == list->inline_items) {
+            IndigoValue* new_items = (IndigoValue*)malloc(sizeof(IndigoValue) * list->capacity);
+            memcpy(new_items, list->inline_items, sizeof(IndigoValue) * list->length);
+            list->items = new_items;
+        } else if (old_cap == 0) {
             IndigoValue* new_items = (IndigoValue*)malloc(sizeof(IndigoValue) * list->capacity);
             if (list->length > 0 && list->items != NULL) {
                 memcpy(new_items, list->items, sizeof(IndigoValue) * list->length);
@@ -289,21 +416,31 @@ void indigo_list_append(IndigoList* list, IndigoValue val) {
 }
 
 void indigo_pack_list(int64_t n) {
+    if (__builtin_expect(g_sp < n, 0)) {
+        fprintf(stderr, "Stack underflow in pack_list\n");
+        exit(1);
+    }
     IndigoList* list = indigo_alloc_list(n);
     list->length = n;
-    for (int64_t i = n - 1; i >= 0; i--) {
-        list->items[i] = indigo_pop();
-    }
-    indigo_push(TAG_LIST, (int64_t)list);
+    g_sp -= n;
+    memcpy(list->items, &g_stack[g_sp], sizeof(IndigoValue) * n);
+    indigo_push_val(pack_ptr(TAG_LIST, list));
 }
 
 void indigo_unpack_list(void) {
-    IndigoValue v = indigo_pop();
-    if (v.tag == TAG_LIST) {
-        IndigoList* list = (IndigoList*)v.payload;
-        for (int64_t i = 0; i < list->length; i++) {
-            indigo_push(list->items[i].tag, list->items[i].payload);
+    if (__builtin_expect(g_sp <= 0, 0)) {
+        fprintf(stderr, "Stack underflow in unpack_list\n");
+        exit(1);
+    }
+    IndigoValue v = g_stack[--g_sp];
+    if (indigo_tag(v) == TAG_LIST) {
+        IndigoList* list = (IndigoList*)indigo_payload(v);
+        if (__builtin_expect(g_sp + list->length > STACK_CAPACITY, 0)) {
+            fprintf(stderr, "Stack overflow in unpack_list\n");
+            exit(1);
         }
+        memcpy(&g_stack[g_sp], list->items, sizeof(IndigoValue) * list->length);
+        g_sp += list->length;
     } else {
         fprintf(stderr, "Invalid type for unpack list\n");
         exit(1);
@@ -312,7 +449,7 @@ void indigo_unpack_list(void) {
 
 static bool is_char_list(IndigoList* list) {
     for (int64_t i = 0; i < list->length; i++) {
-        if (list->items[i].tag != TAG_CHAR) return false;
+        if (indigo_tag(list->items[i]) != TAG_CHAR) return false;
     }
     return true;
 }
@@ -320,83 +457,116 @@ static bool is_char_list(IndigoList* list) {
 static char* char_list_to_string(IndigoList* list) {
     char* str = (char*)malloc(list->length + 1);
     for (int64_t i = 0; i < list->length; i++) {
-        str[i] = (char)list->items[i].payload;
+        str[i] = (char)indigo_payload(list->items[i]);
     }
     str[list->length] = '\0';
     return str;
 }
 
 void indigo_list_add(int64_t n) {
-    IndigoValue* popped = (IndigoValue*)malloc(sizeof(IndigoValue) * n);
-    for (int64_t i = 0; i < n; i++) {
-        popped[i] = indigo_pop();
+    if (n == 0) {
+        IndigoList* list = indigo_alloc_list(0);
+        indigo_push_val(pack_ptr(TAG_LIST, list));
+        return;
     }
-    IndigoList* res = indigo_alloc_list(16);
+    if (__builtin_expect(g_sp < n, 0)) {
+        fprintf(stderr, "Stack underflow in list_add\n");
+        exit(1);
+    }
+    int64_t total_capacity = 0;
+    bool has_non_char = false;
     for (int64_t i = 0; i < n; i++) {
-        if (popped[i].tag == TAG_LIST) {
-            IndigoList* l = (IndigoList*)popped[i].payload;
-            for (int64_t j = 0; j < l->length; j++) {
-                indigo_list_append(res, l->items[j]);
-            }
-        } else if (popped[i].tag == TAG_STRING) {
-            char* s = (char*)popped[i].payload;
-            size_t slen = strlen(s);
-            for (size_t j = 0; j < slen; j++) {
-                IndigoValue ch = { TAG_CHAR, (int64_t)s[j] };
-                indigo_list_append(res, ch);
-            }
+        IndigoValue item = g_stack[g_sp - 1 - i];
+        int64_t itag = indigo_tag(item);
+        if (itag == TAG_LIST) {
+            total_capacity += ((IndigoList*)indigo_payload(item))->length;
+        } else if (itag == TAG_STRING) {
+            total_capacity += strlen((char*)indigo_payload(item));
         } else {
-            indigo_list_append(res, popped[i]);
+            total_capacity += 1;
+            if (itag != TAG_CHAR) has_non_char = true;
         }
     }
-    free(popped);
-    if (is_char_list(res)) {
+    IndigoList* res = indigo_alloc_list(total_capacity);
+    for (int64_t i = 0; i < n; i++) {
+        IndigoValue item = g_stack[g_sp - 1 - i];
+        int64_t itag = indigo_tag(item);
+        if (itag == TAG_LIST) {
+            IndigoList* l = (IndigoList*)indigo_payload(item);
+            if (l->length > 0) {
+                memcpy(res->items + res->length, l->items, sizeof(IndigoValue) * l->length);
+                res->length += l->length;
+            }
+        } else if (itag == TAG_STRING) {
+            char* s = (char*)indigo_payload(item);
+            size_t slen = strlen(s);
+            for (size_t j = 0; j < slen; j++) {
+                res->items[res->length++] = TAG_BITS(TAG_CHAR) | ((uint64_t)s[j] & 0xFF);
+            }
+        } else {
+            res->items[res->length++] = item;
+        }
+    }
+    g_sp -= n;
+    if (!has_non_char && is_char_list(res)) {
         char* str = char_list_to_string(res);
-        indigo_push(TAG_STRING, (int64_t)str);
+        indigo_push_val(pack_ptr(TAG_STRING, str));
     } else {
-        indigo_push(TAG_LIST, (int64_t)res);
+        indigo_push_val(pack_ptr(TAG_LIST, res));
     }
 }
 
 void indigo_concat(int64_t n) {
     if (n == 0) {
         IndigoList* list = indigo_alloc_list(0);
-        indigo_push(TAG_LIST, (int64_t)list);
+        indigo_push_val(pack_ptr(TAG_LIST, list));
         return;
     }
-    IndigoValue* popped = (IndigoValue*)malloc(sizeof(IndigoValue) * n);
-    for (int64_t i = 0; i < n; i++) {
-        popped[i] = indigo_pop();
+    if (__builtin_expect(g_sp < n, 0)) {
+        fprintf(stderr, "Stack underflow in concat\n");
+        exit(1);
     }
-    IndigoList* res = indigo_alloc_list(16);
+    int64_t total_len = 0;
     for (int64_t i = 0; i < n; i++) {
-        if (popped[i].tag == TAG_LIST) {
-            IndigoList* l = (IndigoList*)popped[i].payload;
-            for (int64_t j = 0; j < l->length; j++) {
-                indigo_list_append(res, l->items[j]);
-            }
+        IndigoValue item = g_stack[g_sp - 1 - i];
+        if (indigo_tag(item) == TAG_LIST) {
+            total_len += ((IndigoList*)indigo_payload(item))->length;
         } else {
-            indigo_list_append(res, popped[i]);
+            total_len += 1;
         }
     }
-    free(popped);
-    indigo_push(TAG_LIST, (int64_t)res);
+    IndigoList* res = indigo_alloc_list(total_len);
+    for (int64_t i = 0; i < n; i++) {
+        IndigoValue item = g_stack[g_sp - 1 - i];
+        if (indigo_tag(item) == TAG_LIST) {
+            IndigoList* l = (IndigoList*)indigo_payload(item);
+            if (l->length > 0) {
+                memcpy(res->items + res->length, l->items, sizeof(IndigoValue) * l->length);
+                res->length += l->length;
+            }
+        } else {
+            res->items[res->length++] = item;
+        }
+    }
+    g_sp -= n;
+    indigo_push_val(pack_ptr(TAG_LIST, res));
 }
 
 void indigo_index(void) {
     IndigoValue val = indigo_pop();
     IndigoValue container = indigo_pop();
-    int64_t idx = val.payload;
-    if (container.tag == TAG_LIST) {
-        IndigoList* list = (IndigoList*)container.payload;
+    int64_t idx = indigo_payload(val);
+    int64_t ctag = indigo_tag(container);
+    if (ctag == TAG_LIST) {
+        IndigoList* list = (IndigoList*)indigo_payload(container);
         if (idx >= 0 && idx < list->length) {
-            indigo_push(list->items[idx].tag, list->items[idx].payload);
+            indigo_push_val(list->items[idx]);
         } else {
             fprintf(stderr, "List index out of bounds: %ld (list length: %ld)\n", idx, list->length);
             exit(1);
         }
-    } else if (container.tag == TAG_STRING) {
-        char* str = (char*)container.payload;
+    } else if (ctag == TAG_STRING) {
+        char* str = (char*)indigo_payload(container);
         int64_t len = (int64_t)strlen(str);
         if (idx >= 0 && idx < len) {
             indigo_push(TAG_CHAR, (int64_t)str[idx]);
@@ -414,11 +584,12 @@ void indigo_slice(void) {
     IndigoValue end_v = indigo_pop();
     IndigoValue start_v = indigo_pop();
     IndigoValue container = indigo_pop();
-    if (container.tag == TAG_LIST) {
-        IndigoList* list = (IndigoList*)container.payload;
+    int64_t ctag = indigo_tag(container);
+    if (ctag == TAG_LIST) {
+        IndigoList* list = (IndigoList*)indigo_payload(container);
         int64_t len = list->length;
-        int64_t s = (start_v.tag == TAG_INT) ? start_v.payload : 0;
-        int64_t e = (end_v.tag == TAG_INT) ? end_v.payload : len;
+        int64_t s = (indigo_tag(start_v) == TAG_INT) ? indigo_payload(start_v) : 0;
+        int64_t e = (indigo_tag(end_v) == TAG_INT) ? indigo_payload(end_v) : len;
         if (s < 0) s = len + s;
         if (e < 0) e = len + e;
         if (s < 0) s = 0;
@@ -430,12 +601,12 @@ void indigo_slice(void) {
         res->length = new_len;
         res->capacity = 0;
         res->items = list->items + s;
-        indigo_push(TAG_LIST, (int64_t)res);
-    } else if (container.tag == TAG_STRING) {
-        char* str = (char*)container.payload;
+        indigo_push_val(pack_ptr(TAG_LIST, res));
+    } else if (ctag == TAG_STRING) {
+        char* str = (char*)indigo_payload(container);
         int64_t len = (int64_t)strlen(str);
-        int64_t s = (start_v.tag == TAG_INT) ? start_v.payload : 0;
-        int64_t e = (end_v.tag == TAG_INT) ? end_v.payload : len;
+        int64_t s = (indigo_tag(start_v) == TAG_INT) ? indigo_payload(start_v) : 0;
+        int64_t e = (indigo_tag(end_v) == TAG_INT) ? indigo_payload(end_v) : len;
         if (s < 0) s = len + s;
         if (e < 0) e = len + e;
         if (s < 0) s = 0;
@@ -446,27 +617,24 @@ void indigo_slice(void) {
         char* res = (char*)malloc(new_len + 1);
         memcpy(res, str + s, new_len);
         res[new_len] = '\0';
-        indigo_push(TAG_STRING, (int64_t)res);
+        indigo_push_val(pack_ptr(TAG_STRING, res));
     } else {
-        fprintf(stderr, "Invalid type for slice\n");
+        fprintf(stderr, "Invalid types for slice\n");
         exit(1);
     }
 }
 
 void indigo_length(void) {
-    if (g_sp <= 0) {
-        indigo_push(TAG_INT, -1);
-        return;
-    }
     IndigoValue v = indigo_pop();
-    if (v.tag == TAG_LIST) {
-        IndigoList* list = (IndigoList*)v.payload;
-        indigo_push(TAG_INT, list->length);
-    } else if (v.tag == TAG_STRING) {
-        char* str = (char*)v.payload;
-        indigo_push(TAG_INT, (int64_t)strlen(str));
+    int64_t tag = indigo_tag(v);
+    if (tag == TAG_LIST) {
+        IndigoList* list = (IndigoList*)indigo_payload(v);
+        indigo_push_val(pack_int(list->length));
+    } else if (tag == TAG_STRING) {
+        char* str = (char*)indigo_payload(v);
+        indigo_push_val(pack_int((int64_t)strlen(str)));
     } else {
-        fprintf(stderr, "Invalid type for length\n");
+        fprintf(stderr, "Length: expected list or string\n");
         exit(1);
     }
 }
@@ -505,33 +673,34 @@ IndigoValue* indigo_map_get(IndigoMap* map, const char* key) {
 }
 
 void indigo_pack_map(int64_t n) {
+    if (__builtin_expect(g_sp < n, 0)) {
+        fprintf(stderr, "Stack underflow in pack_map\n");
+        exit(1);
+    }
     IndigoMap* map = indigo_alloc_map();
-    IndigoValue* popped = (IndigoValue*)malloc(sizeof(IndigoValue) * n);
-    for (int64_t i = 0; i < n; i++) {
-        popped[i] = indigo_pop();
+    for (int64_t i = n - 1; i >= 0; i -= 2) {
+        IndigoValue val = g_stack[g_sp - 1 - i];
+        IndigoValue key_v = g_stack[g_sp - 1 - (i - 1)];
+        char* key = (char*)indigo_payload(key_v);
+        indigo_map_insert(map, key, val);
     }
-    for (int64_t i = 0; i + 1 < n; i += 2) {
-        if (popped[i].tag == TAG_STRING) {
-            indigo_map_insert(map, (char*)popped[i].payload, popped[i + 1]);
-        }
-    }
-    free(popped);
-    indigo_push(TAG_MAP, (int64_t)map);
+    g_sp -= n;
+    indigo_push_val(pack_ptr(TAG_MAP, map));
 }
 
-void indigo_access(const char* key) {
+void indigo_access(const char* field) {
     IndigoValue v = indigo_pop();
-    if (v.tag == TAG_MAP) {
-        IndigoMap* map = (IndigoMap*)v.payload;
-        IndigoValue* val = indigo_map_get(map, key);
+    if (indigo_tag(v) == TAG_MAP) {
+        IndigoMap* map = (IndigoMap*)indigo_payload(v);
+        IndigoValue* val = indigo_map_get(map, field);
         if (val) {
-            indigo_push(val->tag, val->payload);
+            indigo_push_val(*val);
         } else {
-            fprintf(stderr, "Field '%s' not found in struct\n", key);
+            fprintf(stderr, "Field not found: %s\n", field);
             exit(1);
         }
     } else {
-        fprintf(stderr, "Invalid type for access '%s'\n", key);
+        fprintf(stderr, "Cannot access field on non-map\n");
         exit(1);
     }
 }
@@ -539,34 +708,34 @@ void indigo_access(const char* key) {
 void indigo_aaccess(void) {
     IndigoValue key_v = indigo_pop();
     IndigoValue map_v = indigo_pop();
-    if (key_v.tag == TAG_STRING && map_v.tag == TAG_MAP) {
-        IndigoMap* map = (IndigoMap*)map_v.payload;
-        IndigoValue* val = indigo_map_get(map, (char*)key_v.payload);
+    if (indigo_tag(key_v) == TAG_STRING && indigo_tag(map_v) == TAG_MAP) {
+        IndigoMap* map = (IndigoMap*)indigo_payload(map_v);
+        IndigoValue* val = indigo_map_get(map, (char*)indigo_payload(key_v));
         if (val) {
-            indigo_push(val->tag, val->payload);
+            indigo_push_val(*val);
         } else {
-            indigo_push(TAG_NONE, 0);
+            indigo_push_val(TAG_BITS(TAG_NONE));
         }
     } else {
-        fprintf(stderr, "AAccess: expected String and Map\n");
+        fprintf(stderr, "Invalid types for aaccess\n");
         exit(1);
     }
 }
 
 void indigo_keys(void) {
     IndigoValue v = indigo_pop();
-    if (v.tag == TAG_MAP) {
-        IndigoMap* map = (IndigoMap*)v.payload;
+    if (indigo_tag(v) == TAG_MAP) {
+        IndigoMap* map = (IndigoMap*)indigo_payload(v);
         IndigoList* list = indigo_alloc_list(8);
         IndigoMapEntry* cur = map->head;
         while (cur) {
-            IndigoValue k = { TAG_STRING, (int64_t)heap_strdup(cur->key) };
+            IndigoValue k = pack_ptr(TAG_STRING, heap_strdup(cur->key));
             indigo_list_append(list, k);
             cur = cur->next;
         }
-        indigo_push(TAG_LIST, (int64_t)list);
+        indigo_push_val(pack_ptr(TAG_LIST, list));
     } else {
-        fprintf(stderr, "Invalid type for keys\n");
+        fprintf(stderr, "Keys: expected map\n");
         exit(1);
     }
 }
@@ -575,21 +744,22 @@ void indigo_update(void) {
     IndigoValue val = indigo_pop();
     IndigoValue key_v = indigo_pop();
     IndigoValue map_v = indigo_pop();
-    if (key_v.tag == TAG_STRING && map_v.tag == TAG_MAP) {
-        IndigoMap* orig = (IndigoMap*)map_v.payload;
-        IndigoMap* copy = indigo_alloc_map();
+    if (indigo_tag(key_v) == TAG_STRING && indigo_tag(map_v) == TAG_MAP) {
+        IndigoMap* orig = (IndigoMap*)indigo_payload(map_v);
+        IndigoMap* new_map = indigo_alloc_map();
         IndigoMapEntry* cur = orig->head;
         while (cur) {
-            indigo_map_insert(copy, cur->key, cur->val);
+            indigo_map_insert(new_map, cur->key, cur->val);
             cur = cur->next;
         }
-        indigo_map_insert(copy, (char*)key_v.payload, val);
-        indigo_push(TAG_MAP, (int64_t)copy);
+        indigo_map_insert(new_map, (char*)indigo_payload(key_v), val);
+        indigo_push_val(pack_ptr(TAG_MAP, new_map));
     } else {
-        fprintf(stderr, "Update: expected value, String key, and Map\n");
+        fprintf(stderr, "Update: expected map and string key\n");
         exit(1);
     }
 }
+
 
 void indigo_push_pf(void* code_ptr, const char* name, int64_t n_args) {
     IndigoFuncRef* ref = (IndigoFuncRef*)malloc(sizeof(IndigoFuncRef));
@@ -602,23 +772,47 @@ void indigo_push_pf(void* code_ptr, const char* name, int64_t n_args) {
     }
     if (g_current_frame) {
         memcpy(ref->locals, g_current_frame->locals, sizeof(ref->locals));
-        memcpy(ref->has_local, g_current_frame->has_local, sizeof(ref->has_local));
+        ref->has_local_mask[0] = g_current_frame->has_local_mask[0];
+        ref->has_local_mask[1] = g_current_frame->has_local_mask[1];
     } else {
-        memset(ref->has_local, 0, sizeof(ref->has_local));
+        ref->has_local_mask[0] = 0;
+        ref->has_local_mask[1] = 0;
     }
-    indigo_push(TAG_FUNCREF, (int64_t)ref);
+    indigo_push_val(pack_ptr(TAG_FUNCREF, ref));
+}
+
+void indigo_make_closure(int64_t n_args) {
+    IndigoValue code_ptr_v = indigo_pop();
+    IndigoFuncRef* ref = (IndigoFuncRef*)malloc(sizeof(IndigoFuncRef));
+    ref->code_ptr = (void*)indigo_payload(code_ptr_v);
+    ref->name = "closure";
+    ref->arg_count = n_args;
+    ref->args = (IndigoValue*)malloc(sizeof(IndigoValue) * (n_args > 0 ? n_args : 1));
+    for (int64_t i = n_args - 1; i >= 0; i--) {
+        ref->args[i] = indigo_pop();
+    }
+    if (g_current_frame) {
+        memcpy(ref->locals, g_current_frame->locals, sizeof(ref->locals));
+        ref->has_local_mask[0] = g_current_frame->has_local_mask[0];
+        ref->has_local_mask[1] = g_current_frame->has_local_mask[1];
+    } else {
+        ref->has_local_mask[0] = 0;
+        ref->has_local_mask[1] = 0;
+    }
+    indigo_push_val(pack_ptr(TAG_FUNCREF, ref));
 }
 
 void* indigo_calls_prepare(void) {
     IndigoValue v = indigo_pop();
-    if (v.tag == TAG_FUNCREF) {
-        IndigoFuncRef* ref = (IndigoFuncRef*)v.payload;
+    if (indigo_tag(v) == TAG_FUNCREF) {
+        IndigoFuncRef* ref = (IndigoFuncRef*)indigo_payload(v);
         for (int64_t i = 0; i < ref->arg_count; i++) {
-            indigo_push(ref->args[i].tag, ref->args[i].payload);
+            indigo_push_val(ref->args[i]);
         }
         indigo_enter_frame();
         memcpy(g_current_frame->locals, ref->locals, sizeof(ref->locals));
-        memcpy(g_current_frame->has_local, ref->has_local, sizeof(ref->has_local));
+        g_current_frame->has_local_mask[0] = ref->has_local_mask[0];
+        g_current_frame->has_local_mask[1] = ref->has_local_mask[1];
         return ref->code_ptr;
     } else {
         fprintf(stderr, "Cannot call non-function reference\n");
@@ -626,159 +820,165 @@ void* indigo_calls_prepare(void) {
     }
 }
 
-static inline double to_double_val(IndigoValue v) {
-    if (v.tag == TAG_DOUBLE) return payload_to_double(v.payload);
-    if (v.tag == TAG_FLOAT) return (double)payload_to_float(v.payload);
-    if (v.tag == TAG_INT) return (double)v.payload;
-    return 0.0;
-}
-
-static inline float to_float_val(IndigoValue v) {
-    if (v.tag == TAG_FLOAT) return payload_to_float(v.payload);
-    if (v.tag == TAG_INT) return (float)v.payload;
-    if (v.tag == TAG_DOUBLE) return (float)payload_to_double(v.payload);
-    return 0.0f;
-}
-
 void indigo_add(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        indigo_push(TAG_INT, x.payload + y.payload);
-    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
-        double res = to_double_val(x) + to_double_val(y);
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
-    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
-        float res = to_float_val(x) + to_float_val(y);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_STRING && y.tag == TAG_STRING) {
-        char* a = (char*)x.payload;
-        char* b = (char*)y.payload;
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in add\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
+    if (__builtin_expect(xtag == TAG_INT && ytag == TAG_INT, 1)) {
+        *px = pack_int(indigo_payload(*px) + indigo_payload(*py));
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) + to_float_val(*py));
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        *px = pack_double(to_double_val(*px) + to_double_val(*py));
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) + to_float_val(*py));
+    } else if (xtag == TAG_STRING && ytag == TAG_STRING) {
+        char* a = (char*)indigo_payload(*px);
+        char* b = (char*)indigo_payload(*py);
         size_t la = strlen(a);
         size_t lb = strlen(b);
         char* res = (char*)malloc(la + lb + 1);
         memcpy(res, a, la);
         memcpy(res + la, b, lb + 1);
-        indigo_push(TAG_STRING, (int64_t)res);
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        indigo_push(TAG_CHAR, (x.payload + y.payload));
+        *px = pack_ptr(TAG_STRING, res);
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        *px = TAG_BITS(TAG_CHAR) | ((indigo_payload(*px) + indigo_payload(*py)) & PAYLOAD_MASK);
     } else {
         fprintf(stderr, "Cannot add incompatible types\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_sub(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        indigo_push(TAG_INT, x.payload - y.payload);
-    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
-        double res = to_double_val(x) - to_double_val(y);
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
-    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
-        float res = to_float_val(x) - to_float_val(y);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        indigo_push(TAG_CHAR, (x.payload - y.payload));
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in sub\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
+    if (__builtin_expect(xtag == TAG_INT && ytag == TAG_INT, 1)) {
+        *px = pack_int(indigo_payload(*px) - indigo_payload(*py));
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) - to_float_val(*py));
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        *px = pack_double(to_double_val(*px) - to_double_val(*py));
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) - to_float_val(*py));
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        *px = TAG_BITS(TAG_CHAR) | ((indigo_payload(*px) - indigo_payload(*py)) & PAYLOAD_MASK);
     } else {
         fprintf(stderr, "Cannot subtract incompatible types\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_mul(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        indigo_push(TAG_INT, x.payload * y.payload);
-    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
-        double res = to_double_val(x) * to_double_val(y);
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
-    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
-        float res = to_float_val(x) * to_float_val(y);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        indigo_push(TAG_CHAR, (x.payload * y.payload));
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in mul\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
+    if (__builtin_expect(xtag == TAG_INT && ytag == TAG_INT, 1)) {
+        *px = pack_int(indigo_payload(*px) * indigo_payload(*py));
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) * to_float_val(*py));
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        *px = pack_double(to_double_val(*px) * to_double_val(*py));
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) * to_float_val(*py));
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        *px = TAG_BITS(TAG_CHAR) | ((indigo_payload(*px) * indigo_payload(*py)) & PAYLOAD_MASK);
     } else {
         fprintf(stderr, "Cannot multiply incompatible types\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_div(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        if (y.payload == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
-        indigo_push(TAG_INT, x.payload / y.payload);
-    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
-        double res = to_double_val(x) / to_double_val(y);
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
-    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
-        float res = to_float_val(x) / to_float_val(y);
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        if (y.payload == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
-        indigo_push(TAG_CHAR, (x.payload / y.payload));
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in div\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
+    if (__builtin_expect(xtag == TAG_INT && ytag == TAG_INT, 1)) {
+        if (indigo_payload(*py) == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
+        *px = pack_int(indigo_payload(*px) / indigo_payload(*py));
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) / to_float_val(*py));
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        *px = pack_double(to_double_val(*px) / to_double_val(*py));
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        *px = pack_float(to_float_val(*px) / to_float_val(*py));
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        if (indigo_payload(*py) == 0) { fprintf(stderr, "Division by zero\n"); exit(1); }
+        *px = TAG_BITS(TAG_CHAR) | ((indigo_payload(*px) / indigo_payload(*py)) & PAYLOAD_MASK);
     } else {
         fprintf(stderr, "Cannot divide incompatible types\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_mod(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        if (y.payload == 0) {
-            fprintf(stderr, "Modulo by zero\n");
-            exit(1);
-        }
-        int64_t res = x.payload % y.payload;
-        if (res < 0) res += y.payload;
-        indigo_push(TAG_INT, res);
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in mod\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    if (indigo_tag(*px) == TAG_INT && indigo_tag(*py) == TAG_INT) {
+        int64_t y = indigo_payload(*py);
+        if (y == 0) { fprintf(stderr, "Modulo by zero\n"); exit(1); }
+        int64_t res = indigo_payload(*px) % y;
+        if (res < 0) res += y;
+        *px = pack_int(res);
     } else {
         fprintf(stderr, "Mod: expected two integers\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_pow(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        int64_t base = x.payload;
-        int64_t exp = y.payload;
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in pow\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
+    if (xtag == TAG_INT && ytag == TAG_INT) {
+        int64_t base = indigo_payload(*px);
+        int64_t exp = indigo_payload(*py);
         int64_t res = 1;
         while (exp > 0) {
             if (exp & 1) res *= base;
             base *= base;
             exp >>= 1;
         }
-        indigo_push(TAG_INT, res);
-    } else if (x.tag == TAG_DOUBLE || y.tag == TAG_DOUBLE) {
-        double res = pow(to_double_val(x), to_double_val(y));
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
-    } else if (x.tag == TAG_FLOAT || y.tag == TAG_FLOAT) {
-        float res = powf(to_float_val(x), to_float_val(y));
-        indigo_push(TAG_FLOAT, float_to_payload(res));
+        *px = pack_int(res);
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        double res = pow(to_double_val(*px), to_double_val(*py));
+        *px = pack_double(res);
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        float res = powf(to_float_val(*px), to_float_val(*py));
+        *px = pack_float(res);
     } else {
         fprintf(stderr, "Cannot compute power for incompatible types\n");
         exit(1);
     }
+    g_sp--;
 }
 
 void indigo_abs(void) {
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_INT) {
-        indigo_push(TAG_INT, llabs(x.payload));
-    } else if (x.tag == TAG_FLOAT) {
-        float res = fabsf(payload_to_float(x.payload));
-        indigo_push(TAG_FLOAT, float_to_payload(res));
-    } else if (x.tag == TAG_DOUBLE) {
-        double res = fabs(payload_to_double(x.payload));
-        indigo_push(TAG_DOUBLE, double_to_payload(res));
+    if (__builtin_expect(g_sp <= 0, 0)) { fprintf(stderr, "Stack underflow in abs\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 1];
+    int64_t tag = indigo_tag(*px);
+    if (tag == TAG_INT) {
+        *px = pack_int(llabs(indigo_payload(*px)));
+    } else if (tag == TAG_FLOAT) {
+        *px = pack_float(fabsf(to_float_val(*px)));
+    } else if (tag == TAG_DOUBLE) {
+        *px = pack_double(fabs(to_double_val(*px)));
     } else {
         fprintf(stderr, "Cannot take absolute value\n");
         exit(1);
@@ -786,35 +986,44 @@ void indigo_abs(void) {
 }
 
 bool indigo_values_equal(IndigoValue x, IndigoValue y) {
-    if (x.tag == TAG_STRING && y.tag == TAG_LIST) {
-        char* str = (char*)x.payload;
-        IndigoList* list = (IndigoList*)y.payload;
+    if (x == y) return true;
+    int64_t xtag = indigo_tag(x);
+    int64_t ytag = indigo_tag(y);
+    if (xtag == TAG_STRING && ytag == TAG_LIST) {
+        char* str = (char*)indigo_payload(x);
+        IndigoList* list = (IndigoList*)indigo_payload(y);
         if ((int64_t)strlen(str) != list->length) return false;
         for (int64_t i = 0; i < list->length; i++) {
-            if (list->items[i].tag != TAG_CHAR || list->items[i].payload != (int64_t)str[i]) return false;
+            if (indigo_tag(list->items[i]) != TAG_CHAR || indigo_payload(list->items[i]) != (int64_t)str[i]) return false;
         }
         return true;
     }
-    if (x.tag == TAG_LIST && y.tag == TAG_STRING) {
+    if (xtag == TAG_LIST && ytag == TAG_STRING) {
         return indigo_values_equal(y, x);
     }
-    if (x.tag != y.tag) return false;
-    switch (x.tag) {
+    if (xtag != ytag) {
+        if ((xtag == TAG_INT || xtag == TAG_FLOAT || xtag == TAG_DOUBLE) &&
+            (ytag == TAG_INT || ytag == TAG_FLOAT || ytag == TAG_DOUBLE)) {
+            return to_double_val(x) == to_double_val(y);
+        }
+        return false;
+    }
+    switch (xtag) {
         case TAG_NONE: return true;
         case TAG_INT:
         case TAG_BOOL:
         case TAG_CHAR:
         case TAG_CPTR:
-            return x.payload == y.payload;
+            return indigo_payload(x) == indigo_payload(y);
         case TAG_FLOAT:
-            return payload_to_float(x.payload) == payload_to_float(y.payload);
+            return to_float_val(x) == to_float_val(y);
         case TAG_DOUBLE:
-            return payload_to_double(x.payload) == payload_to_double(y.payload);
+            return to_double_val(x) == to_double_val(y);
         case TAG_STRING:
-            return strcmp((char*)x.payload, (char*)y.payload) == 0;
+            return strcmp((char*)indigo_payload(x), (char*)indigo_payload(y)) == 0;
         case TAG_LIST: {
-            IndigoList* la = (IndigoList*)x.payload;
-            IndigoList* lb = (IndigoList*)y.payload;
+            IndigoList* la = (IndigoList*)indigo_payload(x);
+            IndigoList* lb = (IndigoList*)indigo_payload(y);
             if (la->length != lb->length) return false;
             for (int64_t i = 0; i < la->length; i++) {
                 if (!indigo_values_equal(la->items[i], lb->items[i])) return false;
@@ -822,8 +1031,8 @@ bool indigo_values_equal(IndigoValue x, IndigoValue y) {
             return true;
         }
         case TAG_MAP: {
-            IndigoMap* ma = (IndigoMap*)x.payload;
-            IndigoMap* mb = (IndigoMap*)y.payload;
+            IndigoMap* ma = (IndigoMap*)indigo_payload(x);
+            IndigoMap* mb = (IndigoMap*)indigo_payload(y);
             IndigoMapEntry* ca = ma->head;
             while (ca) {
                 IndigoValue* vb = indigo_map_get(mb, ca->key);
@@ -839,72 +1048,91 @@ bool indigo_values_equal(IndigoValue x, IndigoValue y) {
             return true;
         }
         default:
-            return x.payload == y.payload;
+            return x == y;
     }
 }
 
 void indigo_eq(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    indigo_push(TAG_BOOL, indigo_values_equal(x, y) ? 1 : 0);
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in eq\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    bool eq = (*px == *py) ? true : indigo_values_equal(*px, *py);
+    *px = pack_bool(eq);
+    g_sp--;
 }
 
 void indigo_neq(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    indigo_push(TAG_BOOL, indigo_values_equal(x, y) ? 0 : 1);
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in neq\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    bool eq = (*px == *py) ? true : indigo_values_equal(*px, *py);
+    *px = pack_bool(!eq);
+    g_sp--;
 }
 
 void indigo_lt(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in lt\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
     bool res = false;
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        res = x.payload < y.payload;
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        res = payload_to_float(x.payload) < payload_to_float(y.payload);
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        res = payload_to_double(x.payload) < payload_to_double(y.payload);
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        res = x.payload < y.payload;
-    } else if (x.tag == TAG_STRING && y.tag == TAG_STRING) {
-        res = strcmp((char*)x.payload, (char*)y.payload) < 0;
-    } else if (x.tag == TAG_BOOL && y.tag == TAG_BOOL) {
-        res = x.payload < y.payload;
+    if (xtag == TAG_INT && ytag == TAG_INT) {
+        res = indigo_payload(*px) < indigo_payload(*py);
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        res = to_float_val(*px) < to_float_val(*py);
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        res = to_double_val(*px) < to_double_val(*py);
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        res = to_float_val(*px) < to_float_val(*py);
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        res = indigo_payload(*px) < indigo_payload(*py);
+    } else if (xtag == TAG_STRING && ytag == TAG_STRING) {
+        res = strcmp((char*)indigo_payload(*px), (char*)indigo_payload(*py)) < 0;
+    } else if (xtag == TAG_BOOL && ytag == TAG_BOOL) {
+        res = indigo_payload(*px) < indigo_payload(*py);
     } else {
         fprintf(stderr, "Cannot compare incompatible types\n");
         exit(1);
     }
-    indigo_push(TAG_BOOL, res ? 1 : 0);
+    *px = pack_bool(res);
+    g_sp--;
 }
 
 void indigo_gt(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in gt\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    int64_t xtag = indigo_tag(*px);
+    int64_t ytag = indigo_tag(*py);
     bool res = false;
-    if (x.tag == TAG_INT && y.tag == TAG_INT) {
-        res = x.payload > y.payload;
-    } else if (x.tag == TAG_FLOAT && y.tag == TAG_FLOAT) {
-        res = payload_to_float(x.payload) > payload_to_float(y.payload);
-    } else if (x.tag == TAG_DOUBLE && y.tag == TAG_DOUBLE) {
-        res = payload_to_double(x.payload) > payload_to_double(y.payload);
-    } else if (x.tag == TAG_CHAR && y.tag == TAG_CHAR) {
-        res = x.payload > y.payload;
-    } else if (x.tag == TAG_STRING && y.tag == TAG_STRING) {
-        res = strcmp((char*)x.payload, (char*)y.payload) > 0;
-    } else if (x.tag == TAG_BOOL && y.tag == TAG_BOOL) {
-        res = x.payload > y.payload;
+    if (xtag == TAG_INT && ytag == TAG_INT) {
+        res = indigo_payload(*px) > indigo_payload(*py);
+    } else if (xtag == TAG_FLOAT && ytag == TAG_FLOAT) {
+        res = to_float_val(*px) > to_float_val(*py);
+    } else if (xtag == TAG_DOUBLE || ytag == TAG_DOUBLE) {
+        res = to_double_val(*px) > to_double_val(*py);
+    } else if (xtag == TAG_FLOAT || ytag == TAG_FLOAT) {
+        res = to_float_val(*px) > to_float_val(*py);
+    } else if (xtag == TAG_CHAR && ytag == TAG_CHAR) {
+        res = indigo_payload(*px) > indigo_payload(*py);
+    } else if (xtag == TAG_STRING && ytag == TAG_STRING) {
+        res = strcmp((char*)indigo_payload(*px), (char*)indigo_payload(*py)) > 0;
+    } else if (xtag == TAG_BOOL && ytag == TAG_BOOL) {
+        res = indigo_payload(*px) > indigo_payload(*py);
     } else {
         fprintf(stderr, "Cannot compare incompatible types\n");
         exit(1);
     }
-    indigo_push(TAG_BOOL, res ? 1 : 0);
+    *px = pack_bool(res);
+    g_sp--;
 }
 
 void indigo_not(void) {
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_BOOL) {
-        indigo_push(TAG_BOOL, x.payload ? 0 : 1);
+    if (__builtin_expect(g_sp <= 0, 0)) { fprintf(stderr, "Stack underflow in not\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 1];
+    if (indigo_tag(*px) == TAG_BOOL) {
+        *px = pack_bool(indigo_payload(*px) == 0);
     } else {
         fprintf(stderr, "Not: expected boolean\n");
         exit(1);
@@ -912,10 +1140,12 @@ void indigo_not(void) {
 }
 
 void indigo_and(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_BOOL && y.tag == TAG_BOOL) {
-        indigo_push(TAG_BOOL, (x.payload && y.payload) ? 1 : 0);
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in and\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    if (indigo_tag(*px) == TAG_BOOL && indigo_tag(*py) == TAG_BOOL) {
+        *px = pack_bool(indigo_payload(*px) && indigo_payload(*py));
+        g_sp--;
     } else {
         fprintf(stderr, "And: expected boolean\n");
         exit(1);
@@ -923,61 +1153,68 @@ void indigo_and(void) {
 }
 
 void indigo_or(void) {
-    IndigoValue y = indigo_pop();
-    IndigoValue x = indigo_pop();
-    if (x.tag == TAG_BOOL && y.tag == TAG_BOOL) {
-        indigo_push(TAG_BOOL, (x.payload || y.payload) ? 1 : 0);
+    if (__builtin_expect(g_sp < 2, 0)) { fprintf(stderr, "Stack underflow in or\n"); exit(1); }
+    IndigoValue* px = &g_stack[g_sp - 2];
+    IndigoValue* py = &g_stack[g_sp - 1];
+    if (indigo_tag(*px) == TAG_BOOL && indigo_tag(*py) == TAG_BOOL) {
+        *px = pack_bool(indigo_payload(*px) || indigo_payload(*py));
+        g_sp--;
     } else {
         fprintf(stderr, "Or: expected boolean\n");
         exit(1);
     }
 }
 
-static void buf_append_str(char** buf, size_t* len, size_t* cap, const char* str) {
-    size_t slen = strlen(str);
-    while (*len + slen + 1 >= *cap) {
-        *cap = (*cap) * 2 + slen + 16;
+static void buf_append_str(char** buf, size_t* len, size_t* cap, const char* s) {
+    size_t slen = strlen(s);
+    while (*len + slen + 1 > *cap) {
+        *cap *= 2;
         *buf = (char*)realloc(*buf, *cap);
     }
-    memcpy(*buf + *len, str, slen);
+    memcpy(*buf + *len, s, slen);
     *len += slen;
     (*buf)[*len] = '\0';
 }
 
 static void buf_append_char(char** buf, size_t* len, size_t* cap, char c) {
-    char s[2] = { c, '\0' };
-    buf_append_str(buf, len, cap, s);
+    if (*len + 2 > *cap) {
+        *cap *= 2;
+        *buf = (char*)realloc(*buf, *cap);
+    }
+    (*buf)[(*len)++] = c;
+    (*buf)[*len] = '\0';
 }
 
 static void format_value_to_buf(IndigoValue v, char** buf, size_t* len, size_t* cap) {
     char tmp[64];
-    switch (v.tag) {
+    int64_t tag = indigo_tag(v);
+    switch (tag) {
         case TAG_INT:
-            snprintf(tmp, sizeof(tmp), "%ld", v.payload);
+            snprintf(tmp, sizeof(tmp), "%ld", indigo_payload(v));
             buf_append_str(buf, len, cap, tmp);
             break;
         case TAG_FLOAT:
-            snprintf(tmp, sizeof(tmp), "%g", payload_to_float(v.payload));
+            snprintf(tmp, sizeof(tmp), "%g", to_float_val(v));
             buf_append_str(buf, len, cap, tmp);
             break;
         case TAG_DOUBLE:
-            snprintf(tmp, sizeof(tmp), "%g", payload_to_double(v.payload));
+            snprintf(tmp, sizeof(tmp), "%g", to_double_val(v));
             buf_append_str(buf, len, cap, tmp);
             break;
         case TAG_STRING:
-            buf_append_str(buf, len, cap, (char*)v.payload);
+            buf_append_str(buf, len, cap, (char*)indigo_payload(v));
             break;
         case TAG_BOOL:
-            buf_append_str(buf, len, cap, v.payload ? "True" : "False");
+            buf_append_str(buf, len, cap, indigo_payload(v) ? "True" : "False");
             break;
         case TAG_CHAR:
-            buf_append_char(buf, len, cap, (char)v.payload);
+            buf_append_char(buf, len, cap, (char)indigo_payload(v));
             break;
         case TAG_NONE:
             buf_append_str(buf, len, cap, "None");
             break;
         case TAG_LIST: {
-            IndigoList* l = (IndigoList*)v.payload;
+            IndigoList* l = (IndigoList*)indigo_payload(v);
             buf_append_str(buf, len, cap, "[");
             for (int64_t i = 0; i < l->length; i++) {
                 if (i > 0) buf_append_str(buf, len, cap, ",");
@@ -997,78 +1234,81 @@ static char* format_list_to_string(IndigoList* l) {
     size_t len = 0;
     char* buf = (char*)malloc(cap);
     buf[0] = '\0';
-    format_value_to_buf((IndigoValue){ TAG_LIST, (int64_t)l }, &buf, &len, &cap);
+    format_value_to_buf(pack_ptr(TAG_LIST, l), &buf, &len, &cap);
     return buf;
 }
 
 void indigo_cast(void) {
     IndigoValue to = indigo_pop();
     IndigoValue from = indigo_pop();
-    if (from.tag == TAG_INT) {
-        int64_t x = from.payload;
-        if (to.tag == TAG_INT) indigo_push(TAG_INT, x);
-        else if (to.tag == TAG_FLOAT) indigo_push(TAG_FLOAT, float_to_payload((float)x));
-        else if (to.tag == TAG_DOUBLE) indigo_push(TAG_DOUBLE, double_to_payload((double)x));
-        else if (to.tag == TAG_STRING) {
+    int64_t from_tag = indigo_tag(from);
+    int64_t to_tag = indigo_tag(to);
+    if (from_tag == TAG_INT) {
+        int64_t x = indigo_payload(from);
+        if (to_tag == TAG_INT) indigo_push_val(pack_int(x));
+        else if (to_tag == TAG_FLOAT) indigo_push_val(pack_float((float)x));
+        else if (to_tag == TAG_DOUBLE) indigo_push_val(pack_double((double)x));
+        else if (to_tag == TAG_STRING) {
             char buf[64];
             snprintf(buf, sizeof(buf), "%ld", x);
-            indigo_push(TAG_STRING, (int64_t)heap_strdup(buf));
-        } else if (to.tag == TAG_BOOL) indigo_push(TAG_BOOL, x != 0 ? 1 : 0);
-        else if (to.tag == TAG_CHAR) indigo_push(TAG_CHAR, x);
-        else if (to.tag == TAG_NONE) indigo_push(TAG_NONE, 0);
-        else indigo_push(from.tag, from.payload);
-    } else if (from.tag == TAG_FLOAT) {
-        float x = payload_to_float(from.payload);
-        if (to.tag == TAG_INT) indigo_push(TAG_INT, (int64_t)roundf(x));
-        else if (to.tag == TAG_FLOAT) indigo_push(TAG_FLOAT, from.payload);
-        else if (to.tag == TAG_DOUBLE) indigo_push(TAG_DOUBLE, double_to_payload((double)x));
-        else if (to.tag == TAG_STRING) {
+            indigo_push_val(pack_ptr(TAG_STRING, heap_strdup(buf)));
+        } else if (to_tag == TAG_BOOL) indigo_push_val(pack_bool(x != 0));
+        else if (to_tag == TAG_CHAR) indigo_push(TAG_CHAR, x);
+        else if (to_tag == TAG_NONE) indigo_push(TAG_NONE, 0);
+        else indigo_push_val(from);
+    } else if (from_tag == TAG_FLOAT) {
+        float x = to_float_val(from);
+        if (to_tag == TAG_INT) indigo_push_val(pack_int((int64_t)roundf(x)));
+        else if (to_tag == TAG_FLOAT) indigo_push_val(from);
+        else if (to_tag == TAG_DOUBLE) indigo_push_val(pack_double((double)x));
+        else if (to_tag == TAG_STRING) {
             char buf[64];
             snprintf(buf, sizeof(buf), "%g", x);
-            indigo_push(TAG_STRING, (int64_t)heap_strdup(buf));
-        } else if (to.tag == TAG_BOOL) indigo_push(TAG_BOOL, x != 0.0f ? 1 : 0);
-        else indigo_push(from.tag, from.payload);
-    } else if (from.tag == TAG_DOUBLE) {
-        double x = payload_to_double(from.payload);
-        if (to.tag == TAG_INT) indigo_push(TAG_INT, (int64_t)round(x));
-        else if (to.tag == TAG_FLOAT) indigo_push(TAG_FLOAT, float_to_payload((float)x));
-        else if (to.tag == TAG_DOUBLE) indigo_push(TAG_DOUBLE, from.payload);
-        else if (to.tag == TAG_STRING) {
+            indigo_push_val(pack_ptr(TAG_STRING, heap_strdup(buf)));
+        } else if (to_tag == TAG_BOOL) indigo_push_val(pack_bool(x != 0.0f));
+        else indigo_push_val(from);
+    } else if (from_tag == TAG_DOUBLE) {
+        double x = to_double_val(from);
+        if (to_tag == TAG_INT) indigo_push_val(pack_int((int64_t)round(x)));
+        else if (to_tag == TAG_FLOAT) indigo_push_val(pack_float((float)x));
+        else if (to_tag == TAG_DOUBLE) indigo_push_val(from);
+        else if (to_tag == TAG_STRING) {
             char buf[64];
             snprintf(buf, sizeof(buf), "%g", x);
-            indigo_push(TAG_STRING, (int64_t)heap_strdup(buf));
-        } else if (to.tag == TAG_BOOL) indigo_push(TAG_BOOL, x != 0.0 ? 1 : 0);
-        else indigo_push(from.tag, from.payload);
-    } else if (from.tag == TAG_STRING) {
-        char* x = (char*)from.payload;
-        if (to.tag == TAG_INT) indigo_push(TAG_INT, atol(x));
-        else if (to.tag == TAG_FLOAT) indigo_push(TAG_FLOAT, float_to_payload((float)atof(x)));
-        else if (to.tag == TAG_DOUBLE) indigo_push(TAG_DOUBLE, double_to_payload(atof(x)));
-        else if (to.tag == TAG_STRING) indigo_push(TAG_STRING, from.payload);
-        else if (to.tag == TAG_BOOL) indigo_push(TAG_BOOL, strlen(x) > 0 ? 1 : 0);
-        else if (to.tag == TAG_CHAR) indigo_push(TAG_CHAR, x[0]);
-        else indigo_push(from.tag, from.payload);
-    } else if (from.tag == TAG_LIST) {
-        IndigoList* list = (IndigoList*)from.payload;
-        if (to.tag == TAG_STRING) {
+            indigo_push_val(pack_ptr(TAG_STRING, heap_strdup(buf)));
+        } else if (to_tag == TAG_BOOL) indigo_push_val(pack_bool(x != 0.0));
+        else indigo_push_val(from);
+    } else if (from_tag == TAG_STRING) {
+        char* x = (char*)indigo_payload(from);
+        if (to_tag == TAG_INT) indigo_push_val(pack_int(atol(x)));
+        else if (to_tag == TAG_FLOAT) indigo_push_val(pack_float((float)atof(x)));
+        else if (to_tag == TAG_DOUBLE) indigo_push_val(pack_double(atof(x)));
+        else if (to_tag == TAG_STRING) indigo_push_val(from);
+        else if (to_tag == TAG_BOOL) indigo_push_val(pack_bool(strlen(x) > 0));
+        else if (to_tag == TAG_CHAR) indigo_push(TAG_CHAR, x[0]);
+        else indigo_push_val(from);
+    } else if (from_tag == TAG_LIST) {
+        IndigoList* list = (IndigoList*)indigo_payload(from);
+        if (to_tag == TAG_STRING) {
             if (is_char_list(list)) {
-                indigo_push(TAG_STRING, (int64_t)char_list_to_string(list));
+                indigo_push_val(pack_ptr(TAG_STRING, char_list_to_string(list)));
             } else {
                 char* str = format_list_to_string(list);
-                indigo_push(TAG_STRING, (int64_t)str);
+                indigo_push_val(pack_ptr(TAG_STRING, str));
             }
         } else {
-            indigo_push(from.tag, from.payload);
+            indigo_push_val(from);
         }
     } else {
-        indigo_push(from.tag, from.payload);
+        indigo_push_val(from);
     }
 }
 
 void indigo_typeof(void) {
     IndigoValue v = indigo_pop();
     const char* type_name = "Unknown";
-    switch (v.tag) {
+    int64_t tag = indigo_tag(v);
+    switch (tag) {
         case TAG_INT: type_name = "Int"; break;
         case TAG_FLOAT: type_name = "Float"; break;
         case TAG_DOUBLE: type_name = "Double"; break;
@@ -1078,121 +1318,121 @@ void indigo_typeof(void) {
         case TAG_NONE: type_name = "None"; break;
         case TAG_CHAR: type_name = "Char"; break;
         case TAG_FUNCREF: type_name = "FuncRef"; break;
-        case TAG_CPTR: type_name = "CPtr"; break;
         case TAG_MAP: {
-            IndigoMap* m = (IndigoMap*)v.payload;
+            IndigoMap* m = (IndigoMap*)indigo_payload(v);
             IndigoValue* name_val = indigo_map_get(m, "__name");
-            if (name_val && name_val->tag == TAG_STRING) {
-                type_name = (char*)name_val->payload;
+            if (name_val && indigo_tag(*name_val) == TAG_STRING) {
+                type_name = (char*)indigo_payload(*name_val);
             } else {
                 type_name = "Map";
             }
             break;
         }
+        case TAG_TYPEQUERY: type_name = "TypeQuery"; break;
+        case TAG_CPTR: type_name = "CPtr"; break;
         default: type_name = "Unknown"; break;
     }
-    indigo_push(TAG_STRING, (int64_t)heap_strdup(type_name));
+    indigo_push_val(pack_ptr(TAG_STRING, heap_strdup(type_name)));
 }
 
 void indigo_type_eq(void) {
     IndigoValue y = indigo_pop();
     IndigoValue x = indigo_pop();
     bool eq = false;
-    if (y.tag == TAG_TYPEQUERY) {
-        char* q = (char*)y.payload;
-        if (x.tag == TAG_INT && strcmp(q, "Int") == 0) eq = true;
-        else if (x.tag == TAG_FLOAT && strcmp(q, "Float") == 0) eq = true;
-        else if (x.tag == TAG_DOUBLE && strcmp(q, "Double") == 0) eq = true;
-        else if (x.tag == TAG_STRING && strcmp(q, "String") == 0) eq = true;
-        else if (x.tag == TAG_BOOL && strcmp(q, "Bool") == 0) eq = true;
-        else if (x.tag == TAG_LIST && strcmp(q, "List") == 0) eq = true;
-        else if (x.tag == TAG_NONE && strcmp(q, "None") == 0) eq = true;
-        else if (x.tag == TAG_CHAR && strcmp(q, "Char") == 0) eq = true;
-        else if (x.tag == TAG_MAP) {
-            IndigoMap* m = (IndigoMap*)x.payload;
+    int64_t xtag = indigo_tag(x);
+    int64_t ytag = indigo_tag(y);
+    if (ytag == TAG_TYPEQUERY) {
+        char* q = (char*)indigo_payload(y);
+        if (strcmp(q, "Any") == 0) {
+            eq = true;
+        } else if (xtag == TAG_MAP) {
+            IndigoMap* m = (IndigoMap*)indigo_payload(x);
             IndigoValue* name_val = indigo_map_get(m, "__name");
-            IndigoValue* traits_val = indigo_map_get(m, "__traits");
-            if (name_val && name_val->tag == TAG_STRING && strcmp((char*)name_val->payload, q) == 0) {
-                eq = true;
-            } else if (traits_val && traits_val->tag == TAG_LIST) {
-                IndigoList* tl = (IndigoList*)traits_val->payload;
-                for (int64_t i = 0; i < tl->length; i++) {
-                    if (tl->items[i].tag == TAG_STRING && strcmp((char*)tl->items[i].payload, q) == 0) {
-                        eq = true;
-                        break;
+            if (name_val && indigo_tag(*name_val) == TAG_STRING) {
+                eq = (strcmp((char*)indigo_payload(*name_val), q) == 0);
+            }
+            if (!eq) {
+                IndigoValue* traits_val = indigo_map_get(m, "__traits");
+                if (traits_val && indigo_tag(*traits_val) == TAG_LIST) {
+                    IndigoList* tl = (IndigoList*)indigo_payload(*traits_val);
+                    for (int64_t i = 0; i < tl->length; i++) {
+                        if (indigo_tag(tl->items[i]) == TAG_STRING && strcmp((char*)indigo_payload(tl->items[i]), q) == 0) {
+                            eq = true;
+                            break;
+                        }
                     }
                 }
             }
         }
-    } else if (x.tag == TAG_MAP && y.tag == TAG_MAP) {
-        IndigoMap* ma = (IndigoMap*)x.payload;
-        IndigoMap* mb = (IndigoMap*)y.payload;
+    } else if (xtag == TAG_MAP && ytag == TAG_MAP) {
+        IndigoMap* ma = (IndigoMap*)indigo_payload(x);
+        IndigoMap* mb = (IndigoMap*)indigo_payload(y);
         IndigoValue* na = indigo_map_get(ma, "__name");
         IndigoValue* nb = indigo_map_get(mb, "__name");
-        if (na && nb && na->tag == TAG_STRING && nb->tag == TAG_STRING) {
-            eq = strcmp((char*)na->payload, (char*)nb->payload) == 0;
+        if (na && nb && indigo_tag(*na) == TAG_STRING && indigo_tag(*nb) == TAG_STRING) {
+            eq = strcmp((char*)indigo_payload(*na), (char*)indigo_payload(*nb)) == 0;
         } else {
             eq = true;
         }
     } else {
-        eq = x.tag == y.tag;
+        eq = (xtag == ytag);
     }
-    indigo_push(TAG_BOOL, eq ? 1 : 0);
+    indigo_push_val(pack_bool(eq));
 }
 
 static void print_indigo_value(IndigoValue v) {
-    switch (v.tag) {
+    int64_t tag = indigo_tag(v);
+    switch (tag) {
         case TAG_INT:
-            printf("%ld", v.payload);
+            printf("%ld", indigo_payload(v));
             break;
         case TAG_FLOAT:
-            printf("%g", payload_to_float(v.payload));
+            printf("%g", to_float_val(v));
             break;
         case TAG_DOUBLE:
-            printf("%g", payload_to_double(v.payload));
+            printf("%g", to_double_val(v));
             break;
         case TAG_STRING:
-            printf("%s", (char*)v.payload);
+            printf("%s", (char*)indigo_payload(v));
             break;
         case TAG_BOOL:
-            printf("%s", v.payload ? "True" : "False");
+            printf("%s", indigo_payload(v) ? "True" : "False");
             break;
         case TAG_CHAR:
-            putchar((int)v.payload);
+            putchar((int)indigo_payload(v));
             break;
         case TAG_NONE:
             printf("None");
             break;
         case TAG_CPTR:
-            printf("CPtr %ld", v.payload);
+            printf("CPtr %ld", indigo_payload(v));
             break;
         case TAG_FUNCREF: {
-            IndigoFuncRef* r = (IndigoFuncRef*)v.payload;
-            printf("<%s(%ld)>", r->name ? r->name : "fn", r->arg_count);
+            IndigoFuncRef* r = (IndigoFuncRef*)indigo_payload(v);
+            printf("<fn %s>", r->name ? r->name : "anonymous");
             break;
         }
         case TAG_LIST: {
-            IndigoList* l = (IndigoList*)v.payload;
+            IndigoList* l = (IndigoList*)indigo_payload(v);
             printf("[");
             for (int64_t i = 0; i < l->length; i++) {
-                if (i > 0) printf(",");
+                if (i > 0) printf(", ");
                 print_indigo_value(l->items[i]);
             }
             printf("]");
             break;
         }
         case TAG_MAP: {
-            IndigoMap* m = (IndigoMap*)v.payload;
+            IndigoMap* m = (IndigoMap*)indigo_payload(v);
             IndigoValue* name_val = indigo_map_get(m, "__name");
-            if (name_val && name_val->tag == TAG_STRING) {
-                printf("%s{", (char*)name_val->payload);
-            } else {
-                printf("{");
+            if (name_val && indigo_tag(*name_val) == TAG_STRING) {
+                printf("%s", (char*)indigo_payload(*name_val));
             }
-            bool first = true;
+            printf("{");
             IndigoMapEntry* cur = m->head;
+            bool first = true;
             while (cur) {
-                if (strcmp(cur->key, "__name") != 0 && strcmp(cur->key, "__traits") != 0) {
+                if (strncmp(cur->key, "__", 2) != 0) {
                     if (!first) printf(", ");
                     printf("%s: ", cur->key);
                     print_indigo_value(cur->val);
@@ -1222,9 +1462,9 @@ void indigo_builtin_getline(void) {
         if (len > 0 && buf[len - 1] == '\n') {
             buf[len - 1] = '\0';
         }
-        indigo_push(TAG_STRING, (int64_t)heap_strdup(buf));
+        indigo_push_val(pack_ptr(TAG_STRING, heap_strdup(buf)));
     } else {
-        indigo_push(TAG_STRING, (int64_t)heap_strdup(""));
+        indigo_push_val(pack_ptr(TAG_STRING, heap_strdup("")));
     }
 }
 
@@ -1239,12 +1479,12 @@ void indigo_builtin_getchar(void) {
 
 void indigo_builtin_random(void) {
     float r = (float)rand() / (float)RAND_MAX;
-    indigo_push(TAG_FLOAT, float_to_payload(r));
+    indigo_push_val(pack_float(r));
 }
 
 void indigo_exit(void) {
     IndigoValue v = indigo_pop();
-    int code = (v.tag == TAG_INT) ? (int)v.payload : 0;
+    int code = (indigo_tag(v) == TAG_INT) ? (int)indigo_payload(v) : 0;
     exit(code);
 }
 

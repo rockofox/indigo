@@ -34,7 +34,7 @@ spec = describe "LLVMCompiler" $ do
     describe "LLVM IR Emission" $ do
         it "emits LLVM IR header and function definitions" $ do
             let ir = compileToLLVM [Push (DInt 42), Builtin Print]
-            ir `shouldSatisfy` (\s -> "%struct.IndigoValue = type { i64, i64 }" `T.isInfixOf` T.pack s)
+            ir `shouldSatisfy` (\s -> "%struct.IndigoValue = type { i64 }" `T.isInfixOf` T.pack s)
             ir `shouldSatisfy` (\s -> "define i32 @main()" `T.isInfixOf` T.pack s)
             ir `shouldSatisfy` (\s -> "declare void @indigo_push(i64, i64)" `T.isInfixOf` T.pack s)
 

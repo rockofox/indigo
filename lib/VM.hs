@@ -1138,7 +1138,7 @@ runInstruction (CallLocal x) = do
 runInstruction (TailCall x) = do
     target <- getJumpTarget x
     if target >= 0
-        then modify' $ \vm' -> vm'{pc = target, callStack = case callStack vm' of (f:rest) -> f{locals = []} : rest; [] -> []}
+        then modify' $ \vm' -> vm'{pc = target, callStack = case callStack vm' of (f : rest) -> f{locals = []} : rest; [] -> []}
         else setVMError $ "Label not found: " ++ x
 runInstruction (TailCallLocal x) = do
     target <- getJumpTarget x

@@ -246,13 +246,11 @@ compileInstruction localLabels (Jt name) = do
     emitInstr $ SubOp I64 tSpNew (LocalVar tSp) (ConstInt 1)
     emitInstr $ StoreOp I64 (LocalVar tSpNew) (GlobalVar "g_sp")
     tValPtr <- freshTemp
-    emitInstr $ GetElementPtrOp (NamedType "%struct.IndigoValue") tValPtr (GlobalVar "g_stack") [LocalVar tSpNew]
-    tPayloadPtr <- freshTemp
-    emitInstr $ GetElementPtrOp I64 tPayloadPtr (LocalVar tValPtr) [ConstInt 1]
-    tPayload <- freshTemp
-    emitInstr $ LoadOp I64 tPayload (LocalVar tPayloadPtr)
+    emitInstr $ GetElementPtrOp I64 tValPtr (GlobalVar "g_stack") [LocalVar tSpNew]
+    tVal <- freshTemp
+    emitInstr $ LoadOp I64 tVal (LocalVar tValPtr)
     tCond <- freshTemp
-    emitInstr $ ICmpOp "ne" I64 tCond (LocalVar tPayload) (ConstInt 0)
+    emitInstr $ CallOp I1 (Just tCond) (GlobalVar "indigo_is_truthy") [(I64, LocalVar tVal)]
     let localCandidates = Set.toList localLabels
         resolvedLocal = resolveLabel localCandidates name
         isLocal = resolvedLocal `Set.member` localLabels || tgt `Set.member` localLabels
@@ -277,13 +275,13 @@ compileInstruction localLabels (Jf name) = do
     emitInstr $ SubOp I64 tSpNew (LocalVar tSp) (ConstInt 1)
     emitInstr $ StoreOp I64 (LocalVar tSpNew) (GlobalVar "g_sp")
     tValPtr <- freshTemp
-    emitInstr $ GetElementPtrOp (NamedType "%struct.IndigoValue") tValPtr (GlobalVar "g_stack") [LocalVar tSpNew]
-    tPayloadPtr <- freshTemp
-    emitInstr $ GetElementPtrOp I64 tPayloadPtr (LocalVar tValPtr) [ConstInt 1]
-    tPayload <- freshTemp
-    emitInstr $ LoadOp I64 tPayload (LocalVar tPayloadPtr)
+    emitInstr $ GetElementPtrOp I64 tValPtr (GlobalVar "g_stack") [LocalVar tSpNew]
+    tVal <- freshTemp
+    emitInstr $ LoadOp I64 tVal (LocalVar tValPtr)
+    tTruth <- freshTemp
+    emitInstr $ CallOp I1 (Just tTruth) (GlobalVar "indigo_is_truthy") [(I64, LocalVar tVal)]
     tCond <- freshTemp
-    emitInstr $ ICmpOp "eq" I64 tCond (LocalVar tPayload) (ConstInt 0)
+    emitInstr $ ICmpOp "eq" I1 tCond (LocalVar tTruth) (ConstInt 0)
     let localCandidates = Set.toList localLabels
         resolvedLocal = resolveLabel localCandidates name
         isLocal = resolvedLocal `Set.member` localLabels || tgt `Set.member` localLabels

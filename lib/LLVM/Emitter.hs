@@ -17,14 +17,14 @@ emitModule m =
         [ "; ModuleID = '" ++ moduleName m ++ "'"
         , "source_filename = \"" ++ moduleName m ++ "\""
         , ""
-        , "%struct.IndigoValue = type { i64, i64 }"
+        , "%struct.IndigoValue = type { i64 }"
         , ""
-        , "@g_stack = external global [65536 x %struct.IndigoValue], align 16"
+        , "@g_stack = external global [65536 x i64], align 8"
         , "@g_sp = external global i64, align 8"
-        , "@g_sidestack = external global [65536 x %struct.IndigoValue], align 16"
+        , "@g_sidestack = external global [65536 x i64], align 8"
         , "@g_ssp = external global i64, align 8"
         , "@g_current_frame = external global ptr, align 8"
-        , "@g_memory = external global [65536 x %struct.IndigoValue], align 16"
+        , "@g_memory = external global [65536 x i64], align 8"
         , ""
         ]
             ++ map emitGlobalDef runtimeDeclarations
@@ -36,6 +36,7 @@ emitModule m =
 runtimeDeclarations :: [GlobalDef]
 runtimeDeclarations =
     [ GlobalDecl Void "indigo_push" [I64, I64]
+    , GlobalDecl I1 "indigo_is_truthy" [I64]
     , GlobalDecl Void "indigo_dup" []
     , GlobalDecl Void "indigo_swp" []
     , GlobalDecl Void "indigo_enter_frame" []
