@@ -70,3 +70,24 @@ spec = do
             do
                 strengthReduction [Push $ DInt 2, Push $ DInt 3, Add]
                 `shouldBe` [Push $ DInt 5]
+    describe "Boolean & branch folding" $ do
+        it "Simplifies Not followed by Jf into Jt" $
+            do
+                booleanBranchFolding [Not, Jf "target"]
+                `shouldBe` [Jt "target"]
+        it "Simplifies Not followed by Jt into Jf" $
+            do
+                booleanBranchFolding [Not, Jt "target"]
+                `shouldBe` [Jf "target"]
+        it "Eliminates double negation" $
+            do
+                booleanBranchFolding [Not, Not]
+                `shouldBe` []
+        it "Eliminates Dup followed by Pop" $
+            do
+                booleanBranchFolding [Dup, Pop]
+                `shouldBe` []
+        it "Eliminates redundant jump to immediate next label" $
+            do
+                booleanBranchFolding [Jmp "here", Label "here"]
+                `shouldBe` [Label "here"]

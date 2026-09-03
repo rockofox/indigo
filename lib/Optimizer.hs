@@ -137,5 +137,20 @@ strengthReduction = \case
     x : xs -> x : strengthReduction xs
     [] -> []
 
+booleanBranchFolding :: [Instruction] -> [Instruction]
+booleanBranchFolding = \case
+    Not : Jf lbl : rest -> Jt lbl : booleanBranchFolding rest
+    Not : Jt lbl : rest -> Jf lbl : booleanBranchFolding rest
+    Not : Not : rest -> booleanBranchFolding rest
+    Dup : Pop : rest -> booleanBranchFolding rest
+    Push (DBool True) : Jt lbl : rest -> Jmp lbl : booleanBranchFolding rest
+    Push (DBool False) : Jf lbl : rest -> Jmp lbl : booleanBranchFolding rest
+    Push (DBool True) : Jf _ : rest -> booleanBranchFolding rest
+    Push (DBool False) : Jt _ : rest -> booleanBranchFolding rest
+    Jmp l1 : Label l2 : rest
+        | l1 == l2 -> Label l2 : booleanBranchFolding rest
+    x : xs -> x : booleanBranchFolding xs
+    [] -> []
+
 optimize :: [Instruction] -> [Instruction]
-optimize = strengthReduction . eliminateSideStack . treeShake
+optimize = booleanBranchFolding . strengthReduction . eliminateSideStack . treeShake
