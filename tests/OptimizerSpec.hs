@@ -57,3 +57,16 @@ spec = do
                            , ClearSideStack
                            , Ret
                            ]
+    describe "Strength reduction" $ do
+        it "Replaces float pow 2.0 with dup and mul" $
+            do
+                strengthReduction [Push $ DFloat 2.0, Pow]
+                `shouldBe` [Dup, Mul]
+        it "Eliminates addition with zero" $
+            do
+                strengthReduction [Push $ DInt 0, Add]
+                `shouldBe` []
+        it "Folds constant addition" $
+            do
+                strengthReduction [Push $ DInt 2, Push $ DInt 3, Add]
+                `shouldBe` [Push $ DInt 5]

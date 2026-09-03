@@ -114,5 +114,28 @@ eliminateSideStack prog =
         any (`isPrefixOf` l) ["else", "end", "when_end", "when_next", "__tuple_"]
             || "_nested_" `isInfixOf` l
 
+strengthReduction :: [Instruction] -> [Instruction]
+strengthReduction = \case
+    Push (DFloat 2.0) : Pow : rest -> Dup : Mul : strengthReduction rest
+    Push (DDouble 2.0) : Pow : rest -> Dup : Mul : strengthReduction rest
+    Push (DInt 2) : Pow : rest -> Dup : Mul : strengthReduction rest
+    Push (DInt 1) : Mul : rest -> strengthReduction rest
+    Push (DFloat 1.0) : Mul : rest -> strengthReduction rest
+    Push (DDouble 1.0) : Mul : rest -> strengthReduction rest
+    Push (DInt 0) : Add : rest -> strengthReduction rest
+    Push (DFloat 0.0) : Add : rest -> strengthReduction rest
+    Push (DDouble 0.0) : Add : rest -> strengthReduction rest
+    Push (DInt 0) : Sub : rest -> strengthReduction rest
+    Push (DFloat 0.0) : Sub : rest -> strengthReduction rest
+    Push (DDouble 0.0) : Sub : rest -> strengthReduction rest
+    Push (DInt a) : Push (DInt b) : Add : rest -> strengthReduction (Push (DInt (a + b)) : rest)
+    Push (DInt a) : Push (DInt b) : Sub : rest -> strengthReduction (Push (DInt (a - b)) : rest)
+    Push (DInt a) : Push (DInt b) : Mul : rest -> strengthReduction (Push (DInt (a * b)) : rest)
+    Push (DFloat a) : Push (DFloat b) : Add : rest -> strengthReduction (Push (DFloat (a + b)) : rest)
+    Push (DFloat a) : Push (DFloat b) : Sub : rest -> strengthReduction (Push (DFloat (a - b)) : rest)
+    Push (DFloat a) : Push (DFloat b) : Mul : rest -> strengthReduction (Push (DFloat (a * b)) : rest)
+    x : xs -> x : strengthReduction xs
+    [] -> []
+
 optimize :: [Instruction] -> [Instruction]
-optimize = eliminateSideStack . treeShake
+optimize = strengthReduction . eliminateSideStack . treeShake
