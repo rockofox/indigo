@@ -183,7 +183,7 @@ main = do
                 Nothing -> inputs
             Nothing -> inputs
 
-    program <-
+    rawProgram <-
         if not runBytecode
             then do
                 if length finalInputs == 1
@@ -241,6 +241,7 @@ main = do
                 let input = head finalInputs
                 bytecode <- inputFileBinary (Just input)
                 return $ VM.fromBytecode bytecode
+    let program = if noOptimize || runBytecode then rawProgram else Optimizer.optimize rawProgram
     when emitBytecode $ do
         case output of
             Just "-" -> B.putStr $ VM.toBytecode $ V.fromList program
