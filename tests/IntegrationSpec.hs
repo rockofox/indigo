@@ -76,6 +76,20 @@ compileAndRunForced prog = do
     _ <- evaluate (length out)
     pure out
 
+compileShouldFail :: String -> String -> IO ()
+compileShouldFail prog expectedMsg = do
+    let p = parseProgram (Data.Text.pack prog) Parser.initCompilerFlags
+    case p of
+        Left err -> error $ renderErrors (parseErrorBundleToSourceErrors err (Data.Text.pack prog)) prog
+        Right program -> do
+            result <- evalStateT (compileProgram program) (initCompilerState program)
+            case result of
+                Left _ -> error "Expected compilation error, but compilation succeeded"
+                Right errs ->
+                    if any (\case CompilerError msg _ _ -> expectedMsg `isInfixOf` msg; _ -> False) errs
+                        then return ()
+                        else error $ "Expected error containing '" ++ expectedMsg ++ "', but got: " ++ renderCompilerErrors errs (Map.singleton "<input>" prog)
+
 compileAndRunModules :: [(String, String)] -> IO String
 compileAndRunModules modules = do
     withSystemTempDirectory "indigo-test" $ \tmpDir -> do
@@ -291,6 +305,20 @@ spec = do
             compileAndRun [r|let main : IO<Unit> = println ^2 + "test"|] `shouldReturn` "2test\n"
         it "Can cast from string to int" $ do
             compileAndRun [r|let main : IO<Unit> = println ^"2" + 4|] `shouldReturn` "6\n"
+        it "Requires ^ for mixed binary operations" $ do
+            compileShouldFail "let main : IO<Unit> = println (2 + 4.0)" "Cannot apply operator `+` to incompatible types Int and Float (use ^ to cast)"
+            compileShouldFail "let main : IO<Unit> = println (4.0 + 2)" "Cannot apply operator `+` to incompatible types Float and Int (use ^ to cast)"
+        it "Disallows double cast in binary operations" $ do
+            compileShouldFail "let main : IO<Unit> = println (^2 + ^4.0)" "Double cast"
+        it "Requires ^ in let binding explicit type" $ do
+            compileShouldFail "let main : IO<Unit> = do\n    let x: Float = 2\n    println x\nend" "Type mismatch in let binding `x`: expected Float, got Int (use ^ to cast)"
+            compileAndRun "let main : IO<Unit> = do\n    let x: Float = ^2\n    println x\nend" `shouldReturn` "2.0\n"
+        it "Requires ^ in function call arguments" $ do
+            compileShouldFail "f :: Float -> Float\nf x = x\nlet main : IO<Unit> = println (f 2)" "Function f called with incompatible types: Int != Float (use ^ to cast)"
+            compileAndRun "f :: Float -> Float\nf x = x\nlet main : IO<Unit> = println (f ^2)" `shouldReturn` "2.0\n"
+        it "Requires ^ in function return type" $ do
+            compileShouldFail "f :: Int -> Float\nf x = x\nlet main : IO<Unit> = println (f 42)" "Return type mismatch in function `f`: expected Float, got Int (use ^ to cast)"
+            compileAndRun "f :: Int -> Float\nf x = ^x\nlet main : IO<Unit> = println (f 42)" `shouldReturn` "42.0\n"
     describe "Explicit casting" $ do
         it "Can cast from int to float" $ do
             compileAndRun [r|let main : IO<Unit> = println (2 as Float) + 4.0|] `shouldReturn` "6.0\n"
@@ -301,6 +329,18 @@ spec = do
                             f x = x + 1
                             let main : IO<Unit> = println ((f 2) as Float) + 4.0|]
                 `shouldReturn` "7.0\n"
+        it "Can cast char to int and int to char" $ do
+            compileAndRun "let main : IO<Unit> = println ('a' as Int)" `shouldReturn` "97\n"
+            compileAndRun "let main : IO<Unit> = println (97 as Char)" `shouldReturn` "'a'\n"
+        it "Can cast int to double" $ do
+            compileAndRun "let main : IO<Unit> = println (42 as Double)" `shouldReturn` "42.0\n"
+        it "Disallows incompatible primitive casts" $ do
+            compileShouldFail "let main : IO<Unit> = println (True as Char)" "Cannot cast Bool to Char: incompatible types"
+            compileShouldFail "let main : IO<Unit> = println ([1, 2] as Float)" "Cannot cast [Int] to Float: incompatible types"
+            compileShouldFail "let main : IO<Unit> = println ((1, 2) as Int)" "Cannot cast (Int, Int) to Int: incompatible types"
+        it "Disallows incompatible user struct casts" $ do
+            compileShouldFail "type Person = (name: String)\nlet main : IO<Unit> = do\n    let p = Person{name: \"A\"}\n    println (p as Int)\nend" "Cannot cast Person to Int: incompatible types"
+            compileShouldFail "type Person = (name: String)\ntype Car = (make: String)\nlet main : IO<Unit> = do\n    let p = Person{name: \"A\"}\n    println (p as Car)\nend" "Cannot cast Person to Car: incompatible types"
     describe "Overloading" $ do
         xit "Can find function based on type" $ do
             compileAndRun

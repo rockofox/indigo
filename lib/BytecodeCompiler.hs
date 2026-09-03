@@ -59,33 +59,72 @@ compileBinOpSeq
     -> [Instruction]
     -> Compiler [Instruction]
 compileBinOpSeq compileExpr' opName x y expectedType ops = do
-    errorCountBefore <- getErrorCount
-    let pos = getBinOpPosition x y
-    _ <- compileExpr' (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
-    errorCountAfter <- getErrorCount
-    if errorCountAfter > errorCountBefore
-        then return []
-        else do
-            case (x, y) of
-                (Parser.Flexible{}, _) -> doFlexibleCast
-                (_, Parser.Flexible{}) -> doFlexibleCast
-                _ -> do
-                    x' <- compileExpr' x expectedType
-                    y' <- compileExpr' y expectedType
-                    return (x' ++ y' ++ ops)
+    case (x, y) of
+        (Parser.Flexible{}, Parser.Flexible{}) -> do
+            cerror "Double cast" (getBinOpPosition x y)
+            return []
+        (Parser.Flexible{}, _) -> doBinOpSeq compileExpr' opName x y expectedType ops
+        (_, Parser.Flexible{}) -> doBinOpSeq compileExpr' opName x y expectedType ops
+        _ -> do
+            xType <- typeOf x
+            yType <- typeOf y
+            let isPrimitiveType (Parser.StructT name _) =
+                    name `elem` ["Int", "Float", "Double", "Bool", "Boolean", "Char", "String", "Number", "Any", "Unit"]
+                        || length name == 1
+                isPrimitiveType Parser.Any = True
+                isPrimitiveType Parser.Unknown = True
+                isPrimitiveType (Parser.List _) = True
+                isPrimitiveType _ = False
+            let isPrimitiveOp = isPrimitiveType xType && isPrimitiveType yType
+            let isTypeMismatch =
+                    xType /= Parser.Any
+                        && yType /= Parser.Any
+                        && xType /= Parser.Unknown
+                        && yType /= Parser.Unknown
+                        && not (Parser.compareTypes xType yType)
+            if isTypeMismatch
+                then do
+                    cerror ("Cannot apply operator `" ++ opName ++ "` to incompatible types " ++ show xType ++ " and " ++ show yType ++ " (use ^ to cast)") (getBinOpPosition x y)
+                    return []
+                else
+                    if isPrimitiveOp || Parser.compareTypes xType yType
+                        then doBinOpSeq compileExpr' opName x y expectedType ops
+                        else do
+                            errorCountBefore <- getErrorCount
+                            let pos = getBinOpPosition x y
+                            _ <- compileExpr' (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
+                            errorCountAfter <- getErrorCount
+                            if errorCountAfter > errorCountBefore
+                                then return []
+                                else doBinOpSeq compileExpr' opName x y expectedType ops
   where
-    doFlexibleCast = do
+    doBinOpSeq compileExpr'' _ x' y' expectedType' ops' = do
         id' <- allocId
-        let aName = "__op_a_" ++ show id'
-        let bName = "__op_b_" ++ show id'
-        x' <- compileExpr' x expectedType
-        y' <- compileExpr' y expectedType
-        let cast = case (x, y) of
-                (Parser.Flexible{}, Parser.Flexible{}) -> error "Double cast"
-                (Parser.Flexible{}, _) -> Cast : y'
-                (_, Parser.Flexible{}) -> [Swp, Cast] ++ x'
-                _ -> []
-        return (x' ++ LStore aName : y' ++ [LStore bName, LLoad aName, LLoad bName] ++ cast ++ ops)
+        xType <- typeOf x'
+        yType <- typeOf y'
+        let hasFlexible = case (x', y') of
+                (Parser.Flexible{}, _) -> True
+                (_, Parser.Flexible{}) -> True
+                _ -> False
+        compiledX <- compileExpr'' x' Parser.Any
+        compiledY <- compileExpr'' y' Parser.Any
+        if not hasFlexible
+            then return (compiledX ++ compiledY ++ ops')
+            else do
+                let aName = "__op_a_" ++ show id'
+                let bName = "__op_b_" ++ show id'
+                castInstrs <- case (x', y') of
+                    (Parser.Flexible{}, Parser.Flexible{}) -> do
+                        cerror "Double cast" (getBinOpPosition x' y')
+                        return []
+                    (Parser.Flexible{}, _) -> do
+                        let targetType = compileTypeFromType yType
+                        return ([LLoad aName] ++ targetType ++ [Cast, LLoad bName])
+                    (_, Parser.Flexible{}) -> do
+                        let targetType = compileTypeFromType xType
+                        return ([LLoad bName] ++ targetType ++ [Cast, LLoad aName, Swp])
+                    _ -> return [LLoad aName, LLoad bName]
+                return (compiledX ++ LStore aName : compiledY ++ [LStore bName] ++ castInstrs ++ ops')
 
 compileExpr :: Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileExpr expr typ = do
@@ -115,7 +154,15 @@ dispatch (Parser.UnaryMinus{unaryMinusExpr = x}) t = compileExpr x t >>= \x' -> 
 -- Simple pass-throughs
 dispatch (Parser.Placeholder _) _ = return []
 dispatch (Parser.StrictEval{strictEvalExpr = e}) t = compileExpr e t
-dispatch (Parser.Flexible{flexibleExpr = a}) t = compileExpr a t >>= \a' -> return $ Meta "flex" : a'
+dispatch (Parser.Flexible{flexibleExpr = a}) t = do
+    aType <- typeOf a
+    if t /= Parser.Any && t /= Parser.Unknown && not (Parser.compareTypes aType t)
+        then do
+            a' <- compileExpr a aType
+            return $ a' ++ compileTypeFromType t ++ [Cast]
+        else do
+            a' <- compileExpr a t
+            return $ Meta "flex" : a'
 -- Control flow
 dispatch (Parser.DoBlock{doBlockExprs = exprs}) t = compileDoBlock compileExpr exprs t
 dispatch (Parser.If{ifCond, ifThen, ifElse}) t = compileIf compileExpr ifCond ifThen ifElse t

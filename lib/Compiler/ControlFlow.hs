@@ -147,10 +147,16 @@ compileDoBlock compileExpr' exprs expectedType = do
     let shadowedVars = filter (`elem` existingVars) $ map (\case Parser.Let{letName} -> letName; _ -> "") $ filter (\case Parser.Let{} -> True; _ -> False) exprs
     let grouped = groupBy' (\a b -> isFuncCall a && isFuncCall b) exprs
     let nestedSequence = concatMap (\case [] -> []; [x] -> if isFuncCall x then [Parser.FuncCall{funcName = "sequence", funcArgs = [x, Parser.FuncCall{funcName = "nop", funcArgs = [], funcPos = anyPosition}], funcPos = anyPosition}] else [x]; xs -> if all isFuncCall xs then [foldl1 (\a b -> Parser.FuncCall{funcName = "sequence", funcArgs = [a, b], funcPos = anyPosition}) xs] else xs) grouped
+    let compileList [] = return []
+        compileList [lastExpr] = compileExpr' lastExpr expectedType
+        compileList (firstExpr : rest) = do
+            c1 <- compileExpr' firstExpr Parser.Any
+            cRest <- compileList rest
+            return $ c1 ++ cRest
     withShadowedVars shadowedVars $
         if length (filter isFuncCall exprs) == 1
-            then concatMapM (`compileExpr'` expectedType) exprs
-            else concatMapM (`compileExpr'` expectedType) nestedSequence
+            then compileList exprs
+            else compileList nestedSequence
   where
     isFuncCall :: Parser.Expr -> Bool
     isFuncCall (Parser.FuncCall{funcName}) = funcName `notElem` internalFunctions
@@ -165,7 +171,7 @@ compileDoBlock compileExpr' exprs expectedType = do
 
 compileWhen :: CompileExpr -> Parser.Expr -> [(Parser.Expr, Parser.Expr)] -> Maybe Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileWhen compileExpr' expr branches else_ expectedType = do
-    expr' <- compileExpr' expr expectedType
+    expr' <- compileExpr' expr Parser.Any
     endLabel <- allocId >>= \x -> return $ "when_end" ++ show x
     branchLabels <- mapM (\_ -> allocId >>= \x -> return $ "when_next" ++ show x) branches
     let allPatternVars = nub $ concatMap (extractPatternVars . fst) branches
@@ -204,7 +210,7 @@ compileWhen compileExpr' expr branches else_ expectedType = do
 
 compileIf :: CompileExpr -> Parser.Expr -> Parser.Expr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileIf compileExpr' ifCond ifThen ifElse expectedType = do
-    cond' <- compileExpr' ifCond expectedType
+    cond' <- compileExpr' ifCond (Parser.StructT "Bool" [])
     then' <- compileExpr' ifThen expectedType
     else' <- compileExpr' ifElse expectedType
     elseLabel <- allocId >>= \x -> return $ "else" ++ show x
@@ -224,6 +230,6 @@ compilePipeline compileExpr' a rhs expectedType = case rhs of
 
 compileThen :: CompileExpr -> Parser.Expr -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileThen compileExpr' a b expectedType = do
-    a' <- compileExpr' a expectedType
+    a' <- compileExpr' a Parser.Any
     b' <- compileExpr' b expectedType
     return $ a' ++ b'

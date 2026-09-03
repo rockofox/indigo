@@ -18,7 +18,14 @@ import Compiler.State qualified as CS
     , structDecs
     , traits
     )
-import Compiler.Types (substituteGenerics, typeCompatible, typeOf, typeToString)
+import Compiler.Types
+    ( isExprCompatible
+    , isValidCast
+    , substituteGenerics
+    , typeCompatible
+    , typeOf
+    , typeToString
+    )
 import Control.Monad (forM_, unless, when)
 import Control.Monad.State (gets, modify)
 import Data.Bifunctor (second)
@@ -127,9 +134,9 @@ compileStructLit compileExpr' compileProgram' sl@(Parser.StructLit{structLitName
                     case Map.lookup fieldName substitutedFieldMap of
                         Just declaredType -> do
                             actualType <- typeOf fieldValue
-                            compatible <- typeCompatible actualType declaredType
+                            compatible <- isExprCompatible fieldValue declaredType
                             unless compatible $ do
-                                cerror ("Type mismatch for field '" ++ fieldName ++ "': expected " ++ show declaredType ++ ", got " ++ show actualType) structLitPos
+                                cerror ("Type mismatch for field '" ++ fieldName ++ "': expected " ++ show declaredType ++ ", got " ++ show actualType ++ " (use ^ to cast)") structLitPos
                         Nothing -> do
                             cerror ("Unknown field '" ++ fieldName ++ "' in type " ++ structLitName) structLitPos
                 unless skipCheck $ do
@@ -169,7 +176,8 @@ compileStructLit compileExpr' compileProgram' sl@(Parser.StructLit{structLitName
                             cerror "value struct must have exactly one field" structLitPos
                             return []
                     else do
-                        fields' <- mapM ((`compileExpr'` Parser.Any) . snd) structLitFields
+                        let getFieldExpectedType fieldName = fromMaybe Parser.Any (Map.lookup fieldName substitutedFieldMap)
+                        fields' <- mapM (\(fieldName, val) -> compileExpr' val (getFieldExpectedType fieldName)) structLitFields
                         let names = map (DString . fst) structLitFields
                         let instructions = zip names fields' >>= \(name', field) -> field ++ [Push name']
                         implsForStruct <- implsFor structLitName
@@ -210,25 +218,33 @@ compileStructAccess compileExpr' (Parser.StructAccess{structAccessStruct, struct
                     return $ struct' ++ fieldExpr' ++ [AAccess]
 compileStructAccess _ expr _ = internalError $ "compileStructAccess: unexpected " ++ show expr
 
+resolveCastType :: Parser.Expr -> Parser.Type
+resolveCastType (Parser.Var{varName}) = Parser.StructT varName []
+resolveCastType (Parser.TypeLit t _) = t
+resolveCastType (Parser.ListLit [x] _) = Parser.List (resolveCastType x)
+resolveCastType (Parser.TupleLit xs _) = Parser.Tuple (map resolveCastType xs)
+resolveCastType x = Parser.typeOf x
+
 compileCast :: CompileExpr -> CompileProgram -> Parser.Expr -> Parser.Type -> Compiler [Instruction]
 compileCast compileExpr' compileProgram' (Parser.Cast{castExpr, castType, castPos}) expectedType = do
-    structDecs' <- gets CS.structDecs
-    let targetStructName = case castType of
-            Parser.Var{varName} -> Just varName
-            _ -> Nothing
-    let targetStruct = case targetStructName of
-            Just name -> find (\case Parser.Struct{name = name'} -> name' == name; _ -> False) structDecs'
-            Nothing -> Nothing
-    case targetStruct of
-        Just (Parser.Struct{isValueStruct = True, fields, refinement, refinementSrc}) -> case fields of
-            [(fieldName, fieldType)] -> do
-                fromType <- typeOf castExpr
-                compatible <- typeCompatible fromType fieldType
-                if not compatible
-                    then do
-                        cerror ("Type mismatch: cannot cast " ++ show fromType ++ " to value struct field type " ++ show fieldType) castPos
-                        return []
-                    else do
+    fromType <- typeOf castExpr
+    let targetType = resolveCastType castType
+    valid <- isValidCast fromType targetType
+    if not valid
+        then do
+            cerror ("Cannot cast " ++ show fromType ++ " to " ++ show targetType ++ ": incompatible types") castPos
+            return []
+        else do
+            structDecs' <- gets CS.structDecs
+            let targetStructName = case castType of
+                    Parser.Var{varName} -> Just varName
+                    _ -> Nothing
+            let targetStruct = case targetStructName of
+                    Just name -> find (\case Parser.Struct{name = name'} -> name' == name; _ -> False) structDecs'
+                    Nothing -> Nothing
+            case targetStruct of
+                Just (Parser.Struct{isValueStruct = True, fields, refinement, refinementSrc}) -> case fields of
+                    [(fieldName, _)] -> do
                         let structLit = Parser.StructLit{structLitName = fromMaybe "" targetStructName, structLitFields = [(fieldName, castExpr)], structLitTypeArgs = [], structLitPos = castPos}
                         skipCheck <- gets CS.skipRefinementCheck
                         unless skipCheck $ do
@@ -241,13 +257,13 @@ compileCast compileExpr' compileProgram' (Parser.Cast{castExpr, castType, castPo
                                         Nothing -> cerror ("Cannot verify refinement (" ++ refinementSrc ++ ") at compile time - value contains variables without refinement guarantees") castPos
                                 Nothing -> return ()
                         compileExpr' castExpr expectedType
-            _ -> do
-                cerror "value struct must have exactly one field" castPos
-                return []
-        _ -> do
-            from' <- compileExpr' castExpr Parser.Unknown
-            let to' = compileType castType
-            return $ from' ++ to' ++ [Cast]
+                    _ -> do
+                        cerror "value struct must have exactly one field" castPos
+                        return []
+                _ -> do
+                    from' <- compileExpr' castExpr Parser.Unknown
+                    let to' = compileType castType
+                    return $ from' ++ to' ++ [Cast]
   where
     compileType :: Parser.Expr -> [Instruction]
     compileType (Parser.Var{varName = "Int"}) = [Push $ DInt 0]
@@ -259,6 +275,19 @@ compileCast compileExpr' compileProgram' (Parser.Cast{castExpr, castType, castPo
     compileType (Parser.Var{varName = "CPtr"}) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
     compileType (Parser.ListLit{listLitExprs = [x]}) = compileType x ++ [PackList 1]
     compileType (Parser.TupleLit{tupleLitExprs}) = concatMap compileType tupleLitExprs ++ [PackList $ length tupleLitExprs]
+    compileType (Parser.TypeLit t _) = compileTypeFromType' t
     compileType (Parser.Var{}) = [Push DNone]
     compileType x = internalError $ "Cannot cast to type " ++ show x
+
+    compileTypeFromType' :: Parser.Type -> [Instruction]
+    compileTypeFromType' (Parser.StructT "Int" []) = [Push $ DInt 0]
+    compileTypeFromType' (Parser.StructT "Float" []) = [Push $ DFloat 0.0]
+    compileTypeFromType' (Parser.StructT "Double" []) = [Push $ DDouble 0.0]
+    compileTypeFromType' (Parser.StructT "Bool" []) = [Push $ DBool False]
+    compileTypeFromType' (Parser.StructT "Char" []) = [Push $ DChar '\0']
+    compileTypeFromType' (Parser.StructT "String" []) = [Push $ DString ""]
+    compileTypeFromType' (Parser.StructT "CPtr" []) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+    compileTypeFromType' (Parser.List t) = compileTypeFromType' t ++ [PackList 1]
+    compileTypeFromType' (Parser.Tuple ts) = concatMap compileTypeFromType' ts ++ [PackList $ length ts]
+    compileTypeFromType' _ = [Push DNone]
 compileCast _ _ expr _ = internalError $ "compileCast: unexpected " ++ show expr

@@ -9,6 +9,7 @@ import Compiler.State
     , internalError
     )
 import Compiler.State qualified as CS (funcDecs, lets, structDecs)
+import Control.Monad (zipWithM)
 import Control.Monad.State (gets)
 import Data.Functor ((<&>))
 import Data.List (find, intercalate)
@@ -54,13 +55,15 @@ compileTypeFromType (Parser.StructT "Bool" []) = [Push $ DBool False]
 compileTypeFromType (Parser.StructT "Char" []) = [Push $ DChar '\0']
 compileTypeFromType (Parser.StructT "String" []) = [Push $ DString ""]
 compileTypeFromType (Parser.StructT "CPtr" []) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
+compileTypeFromType (Parser.List t) = compileTypeFromType t ++ [PackList 1]
+compileTypeFromType (Parser.Tuple ts) = concatMap compileTypeFromType ts ++ [PackList $ length ts]
 compileTypeFromType _ = [Push DNone]
 
 evaluateFunction :: [Parser.Type] -> Int -> Parser.Type
 evaluateFunction types taken = case drop taken types of
     [] -> Parser.Unknown
     [x] -> x
-    xs -> Parser.Fn xs (last xs)
+    xs -> Parser.Fn (init xs) (last xs)
 
 allTheSame :: [Parser.Type] -> Bool
 allTheSame [] = True
@@ -72,8 +75,22 @@ allTheSame xs = all (compareSame $ head xs) (tail xs)
     compareSame x y = x == y
 
 typeCompatible :: Parser.Type -> Parser.Type -> Compiler Bool
+typeCompatible Parser.Any _ = return True
+typeCompatible _ Parser.Any = return True
+typeCompatible Parser.Unknown _ = return True
+typeCompatible _ Parser.Unknown = return True
 typeCompatible (Parser.List Parser.Any) (Parser.List _) = return True
 typeCompatible (Parser.List _) (Parser.List Parser.Any) = return True
+typeCompatible (Parser.List x) (Parser.List y) = typeCompatible x y
+typeCompatible (Parser.Tuple xs) (Parser.Tuple ys)
+    | length xs == length ys = fmap and (zipWithM typeCompatible xs ys)
+    | otherwise = return False
+typeCompatible (Parser.Fn args1 ret1) (Parser.Fn args2 ret2)
+    | length args1 == length args2 = do
+        argsOk <- fmap and (zipWithM typeCompatible args1 args2)
+        retOk <- typeCompatible ret1 ret2
+        return $ argsOk && retOk
+    | otherwise = return False
 typeCompatible x y = do
     let x' = typeToString x
     let y' = typeToString y
@@ -82,11 +99,9 @@ typeCompatible x y = do
     if equal
         then return True
         else do
-            let numericTypes = ["Int", "Float", "Double"]
-            let bothNumeric = x' `elem` numericTypes && y' `elem` numericTypes
             let boolAliases = ["Bool", "Boolean"]
             let bothBool = x' `elem` boolAliases && y' `elem` boolAliases
-            if bothNumeric || bothBool
+            if bothBool
                 then return True
                 else do
                     structDecs' <- gets CS.structDecs
@@ -99,6 +114,56 @@ typeCompatible x y = do
                         Just (Parser.Struct{fields = [(_, fieldType)]}) -> typeCompatible fieldType y
                         _ -> return False
                     return $ valueStructOk || xValueStructOk || y' `elem` impls
+
+isExprCompatible :: Parser.Expr -> Parser.Type -> Compiler Bool
+isExprCompatible expr expectedType = case expr of
+    Parser.Flexible{flexibleExpr = inner} -> do
+        innerType <- typeOf inner
+        let primitives = ["Int", "Float", "Double", "String", "Bool", "Char", "CPtr"]
+        let fromName = typeToString innerType
+        let toName = typeToString expectedType
+        if fromName `elem` primitives && toName `elem` primitives
+            then return True
+            else typeCompatible innerType expectedType
+    _ -> do
+        actualType <- typeOf expr
+        typeCompatible actualType expectedType
+
+isValidCast :: Parser.Type -> Parser.Type -> Compiler Bool
+isValidCast from to
+    | from == to = return True
+    | from == Parser.Any || to == Parser.Any = return True
+    | from == Parser.Unknown || to == Parser.Unknown = return True
+isValidCast (Parser.List (Parser.StructT "Char" [])) (Parser.StructT "String" []) = return True
+isValidCast (Parser.StructT "String" []) (Parser.List (Parser.StructT "Char" [])) = return True
+isValidCast (Parser.List a) (Parser.List b) = isValidCast a b
+isValidCast (Parser.Tuple as) (Parser.Tuple bs)
+    | length as == length bs = fmap and (zipWithM isValidCast as bs)
+    | otherwise = return False
+isValidCast from to = do
+    structDecs' <- gets CS.structDecs
+    let fromName = typeToString from
+    let toName = typeToString to
+    let fromValueStruct = find (\case Parser.Struct{name, isValueStruct = True} -> name == fromName; _ -> False) structDecs'
+    let toValueStruct = find (\case Parser.Struct{name, isValueStruct = True} -> name == toName; _ -> False) structDecs'
+    case (fromValueStruct, toValueStruct) of
+        (Just (Parser.Struct{fields = [(_, ft)]}), _) -> isValidCast ft to
+        (_, Just (Parser.Struct{fields = [(_, tt)]})) -> typeCompatible from tt
+        _ -> do
+            impls <- implsFor fromName
+            if toName `elem` impls
+                then return True
+                else return $ validPrimitiveCast fromName toName
+  where
+    validPrimitiveCast :: String -> String -> Bool
+    validPrimitiveCast "Int" t = t `elem` ["Int", "Float", "Double", "String", "Bool", "Char", "CPtr"]
+    validPrimitiveCast "Float" t = t `elem` ["Int", "Float", "Double", "String", "Bool", "Char"]
+    validPrimitiveCast "Double" t = t `elem` ["Int", "Float", "Double", "String", "Bool", "Char"]
+    validPrimitiveCast "String" t = t `elem` ["Int", "Float", "Double", "String", "Bool", "Char"]
+    validPrimitiveCast "Char" t = t `elem` ["Int", "Float", "Double", "String", "Bool", "Char"]
+    validPrimitiveCast "Bool" t = t `elem` ["Int", "Float", "Double", "String", "Bool"]
+    validPrimitiveCast "CPtr" t = t `elem` ["Int", "CPtr"]
+    validPrimitiveCast _ _ = False
 
 compareTypes' :: Parser.Type -> Parser.Type -> [Parser.GenericExpr] -> Compiler Bool
 compareTypes' (Parser.List Parser.Any) (Parser.List _) _ = return True
@@ -146,6 +211,24 @@ functionTypesAcceptable use def generics = do
     typesMatch' <- allM (uncurry $ uncurry compareTypes') $ zip (zip use def) [generics]
     return $ typesMatch' && genericsMatch
 
+inferGenericSubstitutions :: [String] -> Parser.Type -> Parser.Type -> [(String, Parser.Type)]
+inferGenericSubstitutions genericNames (Parser.StructT n []) actualT
+    | n `elem` genericNames = [(n, actualT)]
+inferGenericSubstitutions genericNames (Parser.List t1) (Parser.List t2) =
+    inferGenericSubstitutions genericNames t1 t2
+inferGenericSubstitutions genericNames (Parser.Tuple ts1) (Parser.Tuple ts2)
+    | length ts1 == length ts2 = concat $ zipWith (inferGenericSubstitutions genericNames) ts1 ts2
+inferGenericSubstitutions genericNames (Parser.StructT n1 args1) (Parser.StructT n2 args2)
+    | n1 == n2 && length args1 == length args2 = concat $ zipWith (inferGenericSubstitutions genericNames) args1 args2
+inferGenericSubstitutions genericNames (Parser.Fn args1 ret1) (Parser.Fn args2 ret2)
+    | length args1 == length args2 = concat (zipWith (inferGenericSubstitutions genericNames) args1 args2) ++ inferGenericSubstitutions genericNames ret1 ret2
+inferGenericSubstitutions _ _ _ = []
+
+typeOfBinOp :: Parser.Expr -> Parser.Expr -> Compiler Parser.Type
+typeOfBinOp (Parser.Flexible _ _) y = typeOf y
+typeOfBinOp x (Parser.Flexible _ _) = typeOf x
+typeOfBinOp x _ = typeOf x
+
 typeOf :: Parser.Expr -> Compiler Parser.Type
 typeOf Parser.FuncCall{funcName, funcArgs} = do
     funcDecs' <- gets CS.funcDecs
@@ -160,7 +243,7 @@ typeOf Parser.FuncCall{funcName, funcArgs} = do
                     argTypes <- mapM typeOf funcArgs
                     let expectedParamTypes = take (length funcArgs) fnTypes
                     let zipped = zip expectedParamTypes argTypes
-                    let substitutions = concatMap (\case (Parser.StructT n [], actualT) | n `elem` genericNames -> [(n, actualT)]; _ -> []) zipped
+                    let substitutions = concatMap (uncurry (inferGenericSubstitutions genericNames)) zipped
                     return $ substituteGenerics rawRetType substitutions
         Nothing -> return Parser.Unknown
 typeOf Parser.Var{varName = varName} = do
@@ -171,11 +254,11 @@ typeOf (Parser.IntLit _ _) = return $ Parser.StructT "Int" []
 typeOf (Parser.FloatLit _ _) = return $ Parser.StructT "Float" []
 typeOf (Parser.BoolLit _ _) = return $ Parser.StructT "Bool" []
 typeOf (Parser.StringLit _ _) = return $ Parser.StructT "String" []
-typeOf (Parser.Add x _ _) = typeOf x
-typeOf (Parser.Sub x _ _) = typeOf x
-typeOf (Parser.Mul x _ _) = typeOf x
-typeOf (Parser.Div x _ _) = typeOf x
-typeOf (Parser.Power x _ _) = typeOf x
+typeOf (Parser.Add x y _) = typeOfBinOp x y
+typeOf (Parser.Sub x y _) = typeOfBinOp x y
+typeOf (Parser.Mul x y _) = typeOfBinOp x y
+typeOf (Parser.Div x y _) = typeOfBinOp x y
+typeOf (Parser.Power x y _) = typeOfBinOp x y
 typeOf (Parser.UnaryMinus x _) = typeOf x
 typeOf (Parser.Eq{}) = return $ Parser.StructT "Bool" []
 typeOf (Parser.Neq{}) = return $ Parser.StructT "Bool" []
@@ -199,12 +282,15 @@ typeOf (Parser.Import{}) = internalError "Cannot infer type of import"
 typeOf (Parser.Ref _ _) = internalError "Cannot infer type of ref"
 typeOf (Parser.Struct{}) = internalError "Cannot infer type of struct"
 typeOf (Parser.StructLit x _ typeArgs _) = return $ Parser.StructT x typeArgs
-typeOf (Parser.ListLit [Parser.Var{varName}] _) = return $ Parser.List $ Parser.StructT varName []
-typeOf (Parser.ListLit x _) = case x of
-    [] -> return $ Parser.List Parser.Any
-    (y : _) -> typeOf y <&> Parser.List
+typeOf (Parser.ListLit [] _) = return $ Parser.List Parser.Any
+typeOf (Parser.ListLit [Parser.Var{varName}] _) = do
+    lets' <- gets CS.lets
+    case find (\(Let n _ _) -> n == varName) lets' of
+        Just (Let _ vt _) -> return $ Parser.List vt
+        Nothing -> return $ Parser.List $ Parser.StructT varName []
+typeOf (Parser.ListLit (y : _) _) = typeOf y <&> Parser.List
 typeOf (Parser.ArrayAccess{}) = internalError "Cannot infer type of array access"
-typeOf (Parser.Modulo x _ _) = typeOf x
+typeOf (Parser.Modulo x y _) = typeOfBinOp x y
 typeOf (Parser.Target{}) = internalError "Cannot infer type of target"
 typeOf (Parser.ListConcat x _ _) = typeOf x
 typeOf (Parser.ListPattern _ _) = return $ Parser.List Parser.Any

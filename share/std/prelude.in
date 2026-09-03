@@ -114,6 +114,7 @@ trait Number
 
 impl Number for Int
 impl Number for Float
+impl Number for Double
 
 let + (x: Number y: Number) : Number = unsafeAdd x, y
 let - (x: Number y: Number) : Number = unsafeSub x, y

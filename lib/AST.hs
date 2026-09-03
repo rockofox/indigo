@@ -215,11 +215,18 @@ compareTypes (Fn x y) (Fn a b) = do
 compareTypes Self Self = True
 compareTypes Self (StructT _ _) = True
 compareTypes (StructT _ _) Self = True
-compareTypes (StructT x xArgs) (StructT y yArgs) = x == y && length xArgs == length yArgs && all (uncurry compareTypes) (zip xArgs yArgs)
+compareTypes (StructT x xArgs) (StructT y yArgs) =
+    (x == y || (x `elem` ["Bool", "Boolean"] && y `elem` ["Bool", "Boolean"]))
+        && length xArgs == length yArgs
+        && all (uncurry compareTypes) (zip xArgs yArgs)
 compareTypes (List Any) (List _) = True
 compareTypes (List _) (List Any) = True
 compareTypes (List x) (List y) = compareTypes x y
 compareTypes (Tuple xs) (Tuple ys) = length xs == length ys && all (uncurry compareTypes) (zip xs ys)
+compareTypes (Fn args1 ret1) (Fn args2 ret2) =
+    length args1 == length args2
+        && all (\(p1, p2) -> p1 == Any || p2 == Any || compareTypes p1 p2) (zip args1 args2)
+        && (ret1 == Any || ret2 == Any || compareTypes ret1 ret2)
 compareTypes Unknown _ = True
 compareTypes _ Unknown = True
 compareTypes Any Any = True
@@ -227,16 +234,21 @@ compareTypes _ Any = True
 compareTypes Any _ = False
 compareTypes x y = x == y
 
+typeOfBinOp :: Expr -> Expr -> Type
+typeOfBinOp (Flexible _ _) y = typeOf y
+typeOfBinOp x (Flexible _ _) = typeOf x
+typeOfBinOp x _ = typeOf x
+
 typeOf :: Expr -> Type
 typeOf (IntLit _ _) = StructT "Int" []
 typeOf (FloatLit _ _) = StructT "Float" []
 typeOf (BoolLit _ _) = StructT "Bool" []
 typeOf (StringLit _ _) = StructT "String" []
-typeOf (Add x _ _) = typeOf x
-typeOf (Sub x _ _) = typeOf x
-typeOf (Mul x _ _) = typeOf x
-typeOf (Div x _ _) = typeOf x
-typeOf (Power x _ _) = typeOf x
+typeOf (Add x y _) = typeOfBinOp x y
+typeOf (Sub x y _) = typeOfBinOp x y
+typeOf (Mul x y _) = typeOfBinOp x y
+typeOf (Div x y _) = typeOfBinOp x y
+typeOf (Power x y _) = typeOfBinOp x y
 typeOf (UnaryMinus x _) = typeOf x
 typeOf (Eq{}) = StructT "Bool" []
 typeOf (Neq{}) = StructT "Bool" []
@@ -267,16 +279,17 @@ typeOf (ListLit x _) = case x of
     [] -> List Any
     (y : _) -> List $ typeOf y
 typeOf (ArrayAccess{}) = error "Cannot infer type of array access"
-typeOf (Modulo x _ _) = typeOf x
+typeOf (Modulo x y _) = typeOfBinOp x y
 typeOf (Target{}) = error "Cannot infer type of target"
 typeOf (ListConcat x _ _) = typeOf x
 typeOf (ListPattern _ _) = List Any
-typeOf (StructAccess _ s _) = typeOf s
+typeOf (StructAccess{}) = Unknown
 typeOf (Pipeline a (Var b pos) _) = typeOf (FuncCall b [a] pos)
 typeOf (Pipeline a (FuncCall f args pos) _) = typeOf (FuncCall f (a : args) pos)
 typeOf (Pipeline _ (Lambda _ body _) _) = typeOf body
 typeOf (Pipeline _ b _) = typeOf b
 typeOf (Lambda{}) = Fn [] Any
+typeOf (Cast _ (TypeLit t _) _) = t
 typeOf (Cast _ (Var to _) _) = StructT to []
 typeOf (Cast _ b _) = typeOf b
 typeOf (TypeLit x _) = x

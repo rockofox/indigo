@@ -30,12 +30,18 @@ compileLists compileExpr' expr expectedType = case expr of
                 _ -> b'
         return (b'' ++ a'' ++ [ListAdd 2])
     Parser.ListLit{listLitExprs} -> do
-        elems <- concatMapM (`compileExpr'` expectedType) listLitExprs
+        let elemExpectedType = case expectedType of
+                Parser.List t -> t
+                _ -> Parser.Any
+        elems <- concatMapM (`compileExpr'` elemExpectedType) listLitExprs
         return $ elems ++ [PackList $ length listLitExprs]
     Parser.TupleLit{tupleLitExprs} -> do
-        elems <- concatMapM (`compileExpr'` expectedType) tupleLitExprs
+        let elemExpectedTypes = case expectedType of
+                Parser.Tuple ts | length ts == length tupleLitExprs -> ts
+                _ -> repeat Parser.Any
+        elems <- concatMapM (uncurry compileExpr') (zip tupleLitExprs elemExpectedTypes)
         return $ elems ++ [PackList $ length tupleLitExprs]
     Parser.TupleAccess{tupleAccessTuple, tupleAccessIndex} -> do
-        tuple' <- compileExpr' tupleAccessTuple expectedType
+        tuple' <- compileExpr' tupleAccessTuple Parser.Any
         return $ tuple' ++ [Push $ DInt tupleAccessIndex, Index]
     _ -> internalError $ "compileLists: unexpected " ++ show expr

@@ -24,23 +24,25 @@ import Compiler.State
     )
 import Compiler.Structs (validateTypeParameters)
 import Compiler.Types
-    ( evaluateFunction
+    ( compileTypeFromType
+    , evaluateFunction
     , functionTypesAcceptable
     , getStructFields
+    , isExprCompatible
     , safeTypeOf
     , typeCompatible
     , typeOf
     , typeToData
     , typeToString
     )
-import Control.Monad (forM_, unless, when, zipWithM)
+import Control.Monad (forM, forM_, unless, when, zipWithM)
 import Control.Monad.State (gets, modify)
 import Data.Bifunctor (second)
 import Data.List (find, inits, intercalate, isInfixOf)
 import Data.List.Split qualified
 import Data.Map qualified
 import Data.Map qualified as Map
-import Data.Maybe (fromJust, fromMaybe, isJust, isNothing, mapMaybe)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust, isNothing, mapMaybe)
 import Data.String (fromString)
 import Data.Text (isPrefixOf, splitOn)
 import Data.Text qualified
@@ -158,16 +160,43 @@ getBinOpPosition x y =
 compileBinOp :: CompileExpr -> String -> Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> Compiler [Instruction]
 compileBinOp compileExpr' opName x y expectedType op = do
     case (x, y) of
+        (Parser.Flexible{}, Parser.Flexible{}) -> do
+            cerror "Double cast" (getBinOpPosition x y)
+            return []
         (Parser.Flexible{}, _) -> doBinOp compileExpr' opName x y expectedType op
         (_, Parser.Flexible{}) -> doBinOp compileExpr' opName x y expectedType op
         _ -> do
-            errorCountBefore <- getErrorCount
-            let pos = getBinOpPosition x y
-            _ <- compileExpr' (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
-            errorCountAfter <- getErrorCount
-            if errorCountAfter > errorCountBefore
-                then return []
-                else doBinOp compileExpr' opName x y expectedType op
+            xType <- typeOf x
+            yType <- typeOf y
+            let isPrimitiveType (Parser.StructT name _) =
+                    name `elem` ["Int", "Float", "Double", "Bool", "Boolean", "Char", "String", "Number", "Any", "Unit"]
+                        || length name == 1
+                isPrimitiveType Parser.Any = True
+                isPrimitiveType Parser.Unknown = True
+                isPrimitiveType (Parser.List _) = True
+                isPrimitiveType _ = False
+            let isPrimitiveOp = isPrimitiveType xType && isPrimitiveType yType
+            let isTypeMismatch =
+                    xType /= Parser.Any
+                        && yType /= Parser.Any
+                        && xType /= Parser.Unknown
+                        && yType /= Parser.Unknown
+                        && not (Parser.compareTypes xType yType)
+            if isTypeMismatch
+                then do
+                    cerror ("Cannot apply operator `" ++ opName ++ "` to incompatible types " ++ show xType ++ " and " ++ show yType ++ " (use ^ to cast)") (getBinOpPosition x y)
+                    return []
+                else
+                    if isPrimitiveOp || Parser.compareTypes xType yType
+                        then doBinOp compileExpr' opName x y expectedType op
+                        else do
+                            errorCountBefore <- getErrorCount
+                            let pos = getBinOpPosition x y
+                            _ <- compileExpr' (Parser.FuncCall{funcName = opName, funcArgs = [x, y], funcPos = pos}) expectedType
+                            errorCountAfter <- getErrorCount
+                            if errorCountAfter > errorCountBefore
+                                then return []
+                                else doBinOp compileExpr' opName x y expectedType op
 
 doBinOp :: CompileExpr -> String -> Parser.Expr -> Parser.Expr -> Parser.Type -> Instruction -> Compiler [Instruction]
 doBinOp compileExpr' opName x y expectedType op = do
@@ -181,7 +210,8 @@ doBinOp compileExpr' opName x y expectedType op = do
     let foundFunc = findFunction opName functions' argTypes
     let hasFuncDec = isJust $ find (\case Parser.FuncDec{name} -> name == opName; _ -> False) funcDecs'
     let isPrimitiveType (Parser.StructT name _) =
-            name `elem` ["Int", "Float", "Double", "Bool", "Char", "String", "Number", "Any", "Unit", "T", "a", "b"]
+            name `elem` ["Int", "Float", "Double", "Bool", "Boolean", "Char", "String", "Number", "Any", "Unit"]
+                || length name == 1
         isPrimitiveType Parser.Any = True
         isPrimitiveType Parser.Unknown = True
         isPrimitiveType (Parser.List _) = True
@@ -198,8 +228,8 @@ doBinOp compileExpr' opName x y expectedType op = do
             (Nothing, True, False) | not isPrimitiveOp -> Call opName
             _ -> op
 
-    x' <- compileExpr' x expectedType
-    y' <- compileExpr' y expectedType
+    x' <- compileExpr' x Parser.Any
+    y' <- compileExpr' y Parser.Any
 
     case (x, y) of
         (Parser.Placeholder _, Parser.Placeholder _) -> pushPartialOp f 0 []
@@ -210,7 +240,9 @@ doBinOp compileExpr' opName x y expectedType op = do
             let aName = "__op_a_" ++ show id'
             let bName = "__op_b_" ++ show id'
             castInstrs <- case (x, y) of
-                (Parser.Flexible{}, Parser.Flexible{}) -> internalError "Double cast"
+                (Parser.Flexible{}, Parser.Flexible{}) -> do
+                    cerror "Double cast" (getBinOpPosition x y)
+                    return []
                 (Parser.Flexible{}, _) -> do
                     let targetType = compileTypeFromType yType
                     return ([LLoad aName] ++ targetType ++ [Cast, LLoad bName])
@@ -223,15 +255,6 @@ doBinOp compileExpr' opName x y expectedType op = do
     pushPartialOp :: Maybe Function -> Int -> [Instruction] -> Compiler [Instruction]
     pushPartialOp (Just fun) n pre = return $ pre ++ [PushPf (funame fun) n]
     pushPartialOp Nothing _ _ = cerror ("Operator function " ++ opName ++ " not found") (extractPosition x) >> return []
-    compileTypeFromType :: Parser.Type -> [Instruction]
-    compileTypeFromType (Parser.StructT "Int" []) = [Push $ DInt 0]
-    compileTypeFromType (Parser.StructT "Float" []) = [Push $ DFloat 0.0]
-    compileTypeFromType (Parser.StructT "Double" []) = [Push $ DDouble 0.0]
-    compileTypeFromType (Parser.StructT "Bool" []) = [Push $ DBool False]
-    compileTypeFromType (Parser.StructT "Char" []) = [Push $ DChar '\0']
-    compileTypeFromType (Parser.StructT "String" []) = [Push $ DString ""]
-    compileTypeFromType (Parser.StructT "CPtr" []) = [Push $ DCPtr $ ptrToWordPtr nullPtr]
-    compileTypeFromType _ = [Push DNone]
 
 {- | Map from builtin name to the instruction(s) emitted after compiling
 its two arguments in order.  Only covers the simple binary cases.
@@ -479,11 +502,17 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
                     if isTraitMethodForExpectedType && length argTypes == 1 && length expectedArgTypes == 1
                         then return (True, [])
                         else do
-                            let zippedArgs = zip argTypes expectedArgTypes
-                            wrongArgsBools <- mapM (uncurry typeCompatible) zippedArgs
-                            let wrongArgs = [show t1 ++ " != " ++ show t2 | ((t1, t2), ok) <- zip zippedArgs wrongArgsBools, not ok]
+                            let zippedArgs = zip funcArgs expectedArgTypes
+                            wrongArgsBools <- mapM (uncurry isExprCompatible) zippedArgs
+                            wrongArgs <- forM (zip zippedArgs wrongArgsBools) $ \((arg, expected), ok) ->
+                                if ok
+                                    then return Nothing
+                                    else do
+                                        actual <- typeOf arg
+                                        return $ Just (show actual ++ " != " ++ show expected ++ " (use ^ to cast)")
+                            let wrongArgsMsgs = catMaybes wrongArgs
                             let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
-                            return (null (wrongArgs ++ tooManyArgs), wrongArgs ++ tooManyArgs)
+                            return (null (wrongArgsMsgs ++ tooManyArgs), wrongArgsMsgs ++ tooManyArgs)
                 else do
                     let tooManyArgs = ["Too many arguments provided." | length argTypes > length expectedArgTypes]
                     if (isExpectedTypeTraitMethod || isTraitMethodForExpectedType) && length argTypes == 1 && length expectedArgTypes == 1 && not (null generics)
@@ -511,13 +540,21 @@ compileFuncCallMain compileExpr' funcName funcArgs funcPos expectedType = do
         $ cerror ("Function " ++ funcName ++ " not found.") funcPos
 
     case external of
-        Just (External _ ereturnType _ from) -> do
+        Just (External _ ereturnType eargs from) -> do
             retT <- case typeToData ereturnType of
                 DMap _ -> do
                     fields <- getStructFields from
                     return $ DMap $ Data.Map.fromList $ map (second typeToData) fields
                 _ -> return $ typeToData ereturnType
-            args' <- concatMapM (`compileExpr'` Parser.Any) (reverse funcArgs)
+            let zippedArgs = zip funcArgs eargs
+            wrongArgsBools <- mapM (uncurry isExprCompatible) zippedArgs
+            forM_ (zip zippedArgs wrongArgsBools) $ \((arg, expected), ok) ->
+                unless ok $ do
+                    actual <- typeOf arg
+                    cerror ("Function " ++ funcName ++ " called with incompatible types: " ++ show actual ++ " != " ++ show expected ++ " (use ^ to cast)") funcPos
+            let paddedEargs = eargs ++ repeat Parser.Any
+            structDecs' <- gets structDecs
+            args' <- concatMapM (uncurry (compileArgWithCoerce compileExpr' structDecs' funcPos)) (reverse (zip funcArgs (take (length funcArgs) paddedEargs)))
             return $ [Push retT] ++ args' ++ [CallFFI funcName from (length funcArgs)]
         Nothing ->
             case funcDec of
@@ -658,8 +695,6 @@ compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) exp
 
     let funcDec = fromJust $ find (\case Parser.FuncDec{name = name'} -> name' == name; _ -> False) funcDecs''
 
-    body' <- compileExpr' body (last $ Parser.types funcDec)
-
     let expectedReturnType = last $ Parser.types funcDec
     let argTypes = init $ Parser.types funcDec
     let argsWithTypes = zip args argTypes
@@ -669,8 +704,8 @@ compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) exp
             extractParamBindings _ = []
     letsBefore <- gets lets
     modify (\s -> s{lets = paramBindings ++ lets s})
+    body' <- compileExpr' body expectedReturnType
     bodyType <- safeTypeOf body
-    modify (\s -> s{lets = letsBefore})
     let generics = Parser.generics funcDec
     let genericNames = map (\(Parser.GenericExpr n _) -> n) generics
     let genericReturnInfo = case expectedReturnType of
@@ -694,9 +729,10 @@ compileFuncDef compileExpr' fd@(Parser.FuncDef{name = origName, args, body}) exp
                 cerror ("Return type mismatch in function `" ++ origName ++ "`: " ++ show bodyType ++ " does not implement " ++ constraintName) (extractPosition body)
         Just (Parser.GenericExpr _ Nothing) -> return ()
         Nothing -> do
-            compatible <- typeCompatible bodyType expectedReturnType
+            compatible <- isExprCompatible body expectedReturnType
             unless compatible $
-                cerror ("Return type mismatch in function `" ++ origName ++ "`: expected " ++ show expectedReturnType ++ ", got " ++ show bodyType) (extractPosition body)
+                cerror ("Return type mismatch in function `" ++ origName ++ "`: expected " ++ show expectedReturnType ++ ", got " ++ show bodyType ++ " (use ^ to cast)") (extractPosition body)
+    modify (\s -> s{lets = letsBefore})
 
     args' <- concatMapM (`compileParameter` (name, funame', nextFunName)) (reverse (filter (\case Parser.Placeholder _ -> False; _ -> True) args))
     let rawFunction = Label funame' : [StoreSideStack | isFirst] ++ [LoadSideStack | not isFirst] ++ args' ++ body' ++ [ClearSideStack] ++ [Ret | name /= "main"]
@@ -791,13 +827,14 @@ compileLet compileExpr' (Parser.Let{letName, letType, letValue}) _ = do
                             _ -> ""
                     implsForExplicit <- if null explicitStructName then return [] else implsFor explicitStructName
                     fbt <- gets functionsByTrait
-                    let isTraitMethodForExplicit = not (null implsForExplicit) && case letValue of
-                            Parser.FuncCall{funcName} -> any (\(for, n, _, _) -> for == explicitStructName && n == funcName) fbt
-                            _ -> False
+                    let isTraitMethodForExplicit =
+                            not (null implsForExplicit) && case letValue of
+                                Parser.FuncCall{funcName} -> any (\(for, n, _, _) -> for == explicitStructName && n == funcName) fbt
+                                _ -> False
                     valType <- if isTraitMethodForExplicit then return explicitType else typeOf letValue
-                    compatible <- typeCompatible valType explicitType
+                    compatible <- if isTraitMethodForExplicit then return True else isExprCompatible letValue explicitType
                     unless compatible $
-                        cerror ("Type mismatch in let binding `" ++ letName ++ "`: expected " ++ show explicitType ++ ", got " ++ show valType) (extractPosition letValue)
+                        cerror ("Type mismatch in let binding `" ++ letName ++ "`: expected " ++ show explicitType ++ ", got " ++ show valType ++ " (use ^ to cast)") (extractPosition letValue)
                     modify (\s -> s{lets = Let{name = letName, vtype = explicitType, context = curCon} : lets s})
                     value' <- compileExpr' letValue explicitType
                     return $ value' ++ [LStore letName]
