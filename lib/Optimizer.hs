@@ -2,7 +2,47 @@
 
 module Optimizer where
 
+import Data.List (isInfixOf, isPrefixOf)
+import Data.Set qualified as Set
 import VM
+
+splitLast :: (Eq a) => a -> [a] -> Either [a] ([a], [a])
+splitLast c' = foldr go (Left [])
+  where
+    go c (Right (f, b)) = Right (c : f, b)
+    go c (Left s)
+        | c' == c = Right ([], s)
+        | otherwise = Left (c : s)
+
+labelBaseName :: String -> String
+labelBaseName x = do
+    let x' = takeWhile (/= '#') x
+    let x'' = case splitLast ':' x' of
+            Right (_, b) -> b
+            Left _ -> x'
+    x''
+
+groupByLabel :: [Instruction] -> [[Instruction]]
+groupByLabel (x : xs) = case x of
+    Label _ ->
+        let (group, rest) =
+                span
+                    ( \case
+                        Label _ -> False
+                        _ -> True
+                    )
+                    xs
+         in (x : group) : groupByLabel rest
+    _ ->
+        let (group, rest) =
+                span
+                    ( \case
+                        Label _ -> False
+                        _ -> True
+                    )
+                    (x : xs)
+         in group : groupByLabel rest
+groupByLabel [] = []
 
 treeShake :: [Instruction] -> [Instruction]
 treeShake prog = do
@@ -46,43 +86,33 @@ treeShake prog = do
         match x = (x == ln) || (labelBaseName x == labelBaseName ln)
     hasUsage _ = const True
 
-    splitLast :: (Eq a) => a -> [a] -> Either [a] ([a], [a])
-    splitLast c' = foldr go (Left [])
-      where
-        go c (Right (f, b)) = Right (c : f, b)
-        go c (Left s)
-            | c' == c = Right ([], s)
-            | otherwise = Left (c : s)
+eliminateSideStack :: [Instruction] -> [Instruction]
+eliminateSideStack prog =
+    let groups = groupByLabel prog
+        annotated = assignFunc "" groups
+        funcsWithLoad =
+            Set.fromList
+                [ fn
+                | (fn, instrs) <- annotated
+                , LoadSideStack `elem` instrs
+                ]
+        removeSideStack = filter (\case StoreSideStack -> False; ClearSideStack -> False; _ -> True)
+        transform (fn, instrs)
+            | not (null fn) && fn `Set.notMember` funcsWithLoad = removeSideStack instrs
+            | otherwise = instrs
+     in concatMap transform annotated
+  where
+    assignFunc _ [] = []
+    assignFunc current (group@(Label l : _) : rest)
+        | isInternalLabel l = (current, group) : assignFunc current rest
+        | otherwise =
+            let fn = labelBaseName l
+             in (fn, group) : assignFunc fn rest
+    assignFunc current (group : rest) = (current, group) : assignFunc current rest
 
-    groupByLabel :: [Instruction] -> [[Instruction]]
-    groupByLabel (x : xs) = case x of
-        Label _ ->
-            let (group, rest) =
-                    span
-                        ( \case
-                            Label _ -> False
-                            _ -> True
-                        )
-                        xs
-             in (x : group) : groupByLabel rest
-        _ ->
-            let (group, rest) =
-                    span
-                        ( \case
-                            Label _ -> False
-                            _ -> True
-                        )
-                        (x : xs)
-             in group : groupByLabel rest
-    groupByLabel [] = []
-
-    labelBaseName :: String -> String
-    labelBaseName x = do
-        let x' = takeWhile (/= '#') x
-        let x'' = case splitLast ':' x' of
-                Right (_, b) -> b
-                Left _ -> x'
-        x''
+    isInternalLabel l =
+        any (`isPrefixOf` l) ["else", "end", "when_end", "when_next", "__tuple_"]
+            || "_nested_" `isInfixOf` l
 
 optimize :: [Instruction] -> [Instruction]
-optimize = treeShake
+optimize = eliminateSideStack . treeShake
