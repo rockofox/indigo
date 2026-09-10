@@ -607,6 +607,30 @@ spec = do
             case result of
                 Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
                 Right _ -> return ()
+        it "Should compile Haskell-style generic function signature and equation" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                myId :: a -> a
+                myId x = x
+                let main : IO<Unit> = unsafePrint (myId 42)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
+        it "Should compile Haskell-style constrained generic function signature" $ do
+            result <-
+                compileWithErrors
+                    [r|
+                trait Number
+                impl Number for Int
+                myAdd :: Number a => a -> a -> a
+                myAdd x y = x + y
+                let main : IO<Unit> = unsafePrint (myAdd 1, 2)
+                |]
+            case result of
+                Left errors -> expectationFailure $ "Expected successful compilation, got errors: " ++ show errors
+                Right _ -> return ()
         it "Should error when function is not found" $ do
             result <-
                 compileWithErrors

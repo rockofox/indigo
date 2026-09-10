@@ -26,7 +26,7 @@ import Control.Monad.State
     , runState
     )
 import Data.Bifunctor (bimap, second)
-import Data.Char (isUpper)
+import Data.Char (isLower, isUpper)
 import Data.List
 import Data.Maybe (fromMaybe)
 import Data.Text (Text, unpack)
@@ -402,6 +402,12 @@ validType =
                     return args
                 return $ StructT structName (fromMaybe [] typeArgs)
             )
+        <|> try
+            ( do
+                lookAhead $ satisfy isLower
+                varName <- extra
+                return $ StructT varName []
+            )
         <?> "type"
 
 stringLit :: Parser String
@@ -410,15 +416,54 @@ stringLit = lexeme $ char '"' *> manyTill L.charLiteral (char '"')
 charLit :: Parser Char
 charLit = lexeme (char '\'' *> L.charLiteral <* char '\'') <|> lexeme (L.decimal <* char 'c' >>= \x -> if x > 255 then fail "Char literal must be between 0 and 255" else return (chr x))
 
+collectFreeTypeVars :: Type -> [String]
+collectFreeTypeVars (StructT name typeArgs) =
+    [name | not (null name) && isLower (head name)]
+        ++ concatMap collectFreeTypeVars typeArgs
+collectFreeTypeVars (Fn args ret) = concatMap collectFreeTypeVars args ++ collectFreeTypeVars ret
+collectFreeTypeVars (List t) = collectFreeTypeVars t
+collectFreeTypeVars (Tuple ts) = concatMap collectFreeTypeVars ts
+collectFreeTypeVars _ = []
+
+haskellSingleConstraint :: Parser (String, Type)
+haskellSingleConstraint = do
+    lookAhead $ satisfy isUpper
+    cName <- identifier
+    cArgs <- optional $ do
+        symbol "<"
+        args <- sepBy1 validType (symbol ",") <?> "type arguments"
+        symbol ">"
+        return args
+    lookAhead $ satisfy isLower
+    varName <- extra
+    return (varName, StructT cName (fromMaybe [] cArgs))
+
+haskellConstraints :: Parser [(String, Type)]
+haskellConstraints = try $ do
+    constraints <-
+        try (parens (sepBy1 haskellSingleConstraint (symbol ",")))
+            <|> ((: []) <$> haskellSingleConstraint)
+    symbol "=>"
+    return constraints
+
 funcDec :: Parser Expr
 funcDec = do
     start <- getOffset
     name <- (identifier <|> gravis) <?> "function name"
-    generics <- fromMaybe [] <$> optional generic <?> "function generics"
+    explicitGenerics <- fromMaybe [] <$> optional generic <?> "function generics"
     symbol "::"
+    haskellContext <- fromMaybe [] <$> optional haskellConstraints
     argTypes <- sepBy1 validType (symbol "->") <?> "function arguments"
     end <- getOffset
-    return $ FuncDec name argTypes generics (Position (start, end))
+    let freeVars = nub $ concatMap collectFreeTypeVars argTypes
+    let explicitNames = map (\(GenericExpr n _) -> n) explicitGenerics
+    let implicitGenerics =
+            [ GenericExpr v (lookup v haskellContext)
+            | v <- freeVars
+            , v `notElem` explicitNames
+            ]
+    let mergedGenerics = explicitGenerics ++ implicitGenerics
+    return $ FuncDec name argTypes mergedGenerics (Position (start, end))
 
 defArg :: Parser Expr
 defArg =

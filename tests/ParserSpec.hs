@@ -282,6 +282,55 @@ spec = do
                 parserCompilerFlags
                 `shouldBe` Right
                     (Program [FuncDec{name = "add", types = [StructT "N" [], StructT "N" [], StructT "N" []], generics = [GenericExpr "N" (Just $ StructT "Number" [])], funcDecPos = anyPosition}] Nothing)
+        it "Should parse Haskell-style lowercase type variables" $ do
+            parseProgram
+                [r|
+                id :: a -> a
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "id", types = [StructT "a" [], StructT "a" []], generics = [GenericExpr "a" Nothing], funcDecPos = anyPosition}] Nothing)
+        it "Should parse Haskell-style higher-order functions with lowercase type variables" $ do
+            parseProgram
+                [r|
+                map :: (a -> b) -> [a] -> [b]
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "map", types = [AST.Fn [StructT "a" []] (StructT "b" []), List (StructT "a" []), List (StructT "b" [])], generics = [GenericExpr "a" Nothing, GenericExpr "b" Nothing], funcDecPos = anyPosition}] Nothing)
+        it "Should parse Haskell-style single constraint" $ do
+            parseProgram
+                [r|
+                add :: Number a => a -> a -> a
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "add", types = [StructT "a" [], StructT "a" [], StructT "a" []], generics = [GenericExpr "a" (Just $ StructT "Number" [])], funcDecPos = anyPosition}] Nothing)
+        it "Should parse Haskell-style multiple constraints" $ do
+            parseProgram
+                [r|
+                process :: (Show a, Number b) => a -> b -> String
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "process", types = [StructT "a" [], StructT "b" [], StructT "String" []], generics = [GenericExpr "a" (Just $ StructT "Show" []), GenericExpr "b" (Just $ StructT "Number" [])], funcDecPos = anyPosition}] Nothing)
+        it "Should parse top-level function equation without let" $ do
+            parseProgram
+                [r|
+                add x y = x + y
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDef{name = "add", args = [Var{varName = "x", varPos = anyPosition}, Var{varName = "y", varPos = anyPosition}], body = Add{addLhs = Var{varName = "x", varPos = anyPosition}, addRhs = Var{varName = "y", varPos = anyPosition}, addPos = anyPosition}, funcDefPos = anyPosition}] Nothing)
+        it "Should parse Haskell-style signature with top-level equation" $ do
+            parseProgram
+                [r|
+                id :: a -> a
+                id x = x
+            |]
+                parserCompilerFlags
+                `shouldBe` Right
+                    (Program [FuncDec{name = "id", types = [StructT "a" [], StructT "a" []], generics = [GenericExpr "a" Nothing], funcDecPos = anyPosition}, FuncDef{name = "id", args = [Var{varName = "x", varPos = anyPosition}], body = Var{varName = "x", varPos = anyPosition}, funcDefPos = anyPosition}] Nothing)
     describe "Binary Operators" $ do
         it "Should parse addition" $
             parseProgram "1 + 2" parserCompilerFlags

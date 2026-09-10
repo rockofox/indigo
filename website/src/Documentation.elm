@@ -593,9 +593,9 @@ let main = do
     println (inc 10)
 end""" onLoadCode True "indigo"
         , h3 [] [ text "Type signatures" ]
-        , p [] [ text "You can declare a signature with :: and implement the body with one or more let / name clauses." ]
+        , p [] [ text "You can declare a signature with :: and implement the body with top-level function equations or let bindings." ]
         , viewCodeBlock """add :: Int -> Int -> Int
-let add x y = x + y
+add x y = x + y
 
 let main = println (add 2, 3)""" onLoadCode True "indigo"
         , h3 [] [ text "Multiple clauses" ]
@@ -1018,20 +1018,23 @@ viewGenerics : (String -> msg) -> Html msg
 viewGenerics onLoadCode =
     section [ id "generics" ]
         [ h2 [] [ text "Generics" ]
-        , p [] [ text "Type parameters make functions, types, and traits reusable across concrete types." ]
         , h3 [] [ text "Generic functions" ]
+        , p [] [ text "Functions can use Haskell-style type signatures with lowercase type variables and optional class constraints using =>, or explicit angle bracket syntax." ]
         , viewCodeBlock """trait Number
 impl Number for Int
 impl Number for Float
 
-let add<N: Number> (a: N b: N): N = do
-  a + b
-end
+add :: Number a => a -> a -> a
+add x y = x + y
+
+id :: a -> a
+id x = x
 
 let main: IO<Unit> = do
-  println add 1, 2
+  println (add 1, 2)
+  println (id "hello")
 end""" onLoadCode True "indigo"
-        , p [] [ text "Here add is generic over N constrained to Number. Calls succeed only when both arguments share a Number instance; the result is erased to Number at the call site in simple cases." ]
+        , p [] [ text "Here add is generic over a constrained to Number. Lowercase identifiers in signatures are treated as type variables. You can also specify type parameters with angle brackets like let add<N: Number> (a: N b: N): N = a + b." ]
         , h3 [] [ text "Generic types" ]
         , viewCodeBlock """trait Number
 impl Number for Int
